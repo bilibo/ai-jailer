@@ -1,0 +1,150 @@
+# NixOS module: builds the root-owned managed Claude Code configuration and
+# links it at /etc/claude-code, so every Claude Code session on the host is
+# bound by it. One deployment shape for NixOS-WSL at work and native NixOS
+# at home; what differs is configuration:
+#
+#   - enforcementRoots: on a personal machine, list the directories that
+#     hold customer repos. The project rules (git history, cloud writes,
+#     project config files) then apply only there, through the hook, and
+#     the repo template's .claude/settings.json; the universal rules
+#     (credentials, system changes, plugin loading, the user's own config)
+#     apply everywhere. Empty means everything applies everywhere.
+#   - sandboxStrictAllowlist: refuse unknown hosts (work) or prompt (home).
+#   - platform: "wsl" adds the Windows-interop mitigations.
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+let
+  cfg = config.harness;
+  package = import ../lib/managed-tree.nix {
+    inherit pkgs lib;
+    inherit (cfg)
+      platform
+      allowLocalCommits
+      allowMemoryEdits
+      enforcementRoots
+      extraDeny
+      extraAllowedDomains
+      allowManagedHooksOnly
+      direnvPackage
+      ;
+    strictAllowlist = cfg.sandboxStrictAllowlist;
+    inherit (cfg) extraKnownMarketplaces;
+  };
+in
+{
+  options.harness = {
+    enable = lib.mkEnableOption "the guard-railed Claude Code managed configuration";
+
+    platform = lib.mkOption {
+      type = lib.types.enum [
+        "linux"
+        "wsl"
+      ];
+      default = if lib.attrByPath [ "wsl" "enable" ] false config then "wsl" else "linux";
+      defaultText = lib.literalExpression ''if config.wsl.enable then "wsl" else "linux"'';
+      description = "Host kind. `wsl` adds the Windows-interop mitigations to the sandbox.";
+    };
+
+    enforcementRoots = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "~/code/git" ];
+      description = ''
+        Directories under which the project rules apply. `~` is the session
+        user's home. Empty: project rules apply everywhere (a dedicated work
+        host). Non-empty: a personal machine whose other sessions keep
+        `git commit` and friends.
+      '';
+    };
+
+    sandboxStrictAllowlist = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Refuse network access to hosts outside the allowlist (true) or prompt for them (false).";
+    };
+
+    extraKnownMarketplaces = lib.mkOption {
+      type = lib.types.listOf lib.types.attrs;
+      default = [ ];
+      example = lib.literalExpression ''[ { source = "github"; repo = "anthropics/claude-plugins-official"; } ]'';
+      description = ''
+        Plugin marketplaces allowed besides the managed one. Required on a
+        machine where the user keeps their own plugins; `strictKnownMarketplaces`
+        refuses every source not listed.
+      '';
+    };
+
+    allowLocalCommits = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Let agents commit on their worktree branch. Push stays impossible either way (brief decision 7.5).";
+    };
+
+    allowMemoryEdits = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Let agents write their auto-memory under ~/.claude/projects/<slug>/memory/.
+        Everything else under ~/.claude stays read-only. Off on a work host:
+        memory is a persistent channel into every later session on the
+        machine. On for a personal machine where the user wants Claude Code
+        to remember things.
+      '';
+    };
+
+    allowManagedHooksOnly = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Only managed and built-in hooks run; user, project and plugin hooks are ignored. Set false where the user relies on plugin hooks.";
+    };
+
+    extraDeny = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "Bash(az devops *)" ];
+      description = "Additional permission deny rules appended to the managed set.";
+    };
+
+    extraAllowedDomains = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "dev.azure.com" ];
+      description = "Additional sandbox network allowlist entries.";
+    };
+
+    direnvPackage = lib.mkOption {
+      type = lib.types.package;
+      default =
+        if lib.versionOlder pkgs.direnv.version "2.38" then
+          import ../pkgs/direnv.nix { inherit pkgs; }
+        else
+          pkgs.direnv;
+      defaultText = lib.literalExpression "pkgs.direnv (>= 2.38, overridden while nixpkgs is older)";
+      description = "direnv used by the env hook. Must match the user's direnv so `direnv allow` state is shared.";
+    };
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = package;
+      description = "The generated managed tree (managed-settings.json, hooks/, plugins/).";
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = config.security.allowUserNamespaces;
+        message = "harness: the Claude Code sandbox (bubblewrap) needs security.allowUserNamespaces = true.";
+      }
+    ];
+
+    # The path Claude Code reads on Linux and WSL. A symlink into the store:
+    # root-owned, read-only, replaced atomically on rebuild.
+    environment.etc."claude-code".source = package;
+  };
+}
