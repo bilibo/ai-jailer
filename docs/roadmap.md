@@ -75,6 +75,7 @@ parentheses refer to sections of the original build brief.
   user-level podman socket when launched from `vscode-fhs`.
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook (7.6).
-- Split `harness/` into its own repo: `git subtree split --prefix=harness`,
-  add a `flake.nix` exporting `nixosModules.default`, `homeModules.default`,
-  and the devenv module path.
+- Done 2026-10-17: own repo with a `flake.nix` exporting
+  `nixosModules.harness`, `homeModules.harness`, `lib`, the managed trees
+  as packages and the tests as `checks`. Next in this line: a `wsl/` or
+  nix-darwin module alongside `nixos/`, consuming the same `lib/`.

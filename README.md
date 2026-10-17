@@ -60,23 +60,33 @@ config and env files, the SSH agent and key files.
 ## Usage
 
 ```nix
+# flake.nix of your NixOS configuration
+inputs.harness = {
+  url = "github:raul-korhonen/claude-harness";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
 # NixOS
-imports = [ ./harness/nixos ];
+imports = [ inputs.harness.nixosModules.harness ];
 harness.enable = true;                       # platform auto-detects wsl vs linux
 harness.enforcementRoots = [ "~/code/git" ]; # omit on a dedicated work host
 harness.sandboxStrictAllowlist = false;      # omit on a dedicated work host
 harness.allowMemoryEdits = true;             # personal machine only: Claude keeps its auto-memory
 
 # home-manager
-imports = [ ./harness/home ];
+imports = [ inputs.harness.homeModules.harness ];
 harness.enable = true;
 ```
+
+While changing the harness itself, build the host from a checkout instead
+of the locked revision:
+`nixos-rebuild switch --override-input harness path:/path/to/claude-harness`.
 
 ```yaml
 # a repo's devenv.yaml
 inputs:
   harness:
-    url: path:/path/to/harness   # or a git URL; flake: false
+    url: github:raul-korhonen/claude-harness   # or path:/path/to/claude-harness while developing
     flake: false
 imports:
   - harness/devenv
@@ -162,9 +172,12 @@ hardware key's handle. The repo's `.claude/settings.json` carries the rule
 enforces everywhere. A session that runs `git push` there gets
 `Permission denied (publickey)`; sessions clone over HTTPS.
 
-Test the hook without Claude Code:
+## Tests
 
 ```
-nix build .#harness-managed
-nix shell nixpkgs#jq -c harness/tests/hook-test.sh result/hooks/env-guard.sh
+nix flake check            # hook unit tests (both managed trees) and ccode resolver tests
+nix build .#managed-scoped # a managed tree to inspect: result/managed-settings.json
 ```
+
+Hook tests run without Claude Code: they feed hook JSON on stdin and check
+the exit code. Add a case per hard limit you rely on.

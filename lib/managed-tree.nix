@@ -77,6 +77,9 @@ pkgs.runCommand "claude-harness-managed" { } ''
   cp ${envGuard} $out/hooks/env-guard.sh
   cp ${tmuxNotify} $out/hooks/tmux-notify.sh
   chmod 0555 $out/hooks/*
+  # `#!/usr/bin/env bash` -> the store bash: the installed hook then depends
+  # on nothing outside the store, and the tests run inside the Nix sandbox.
+  patchShebangs $out/hooks
   # Empty managed marketplace; the broker mod is added here later (brief 5.7).
   cat > $out/plugins/.claude-plugin/marketplace.json <<'JSON'
   { "name": "harness", "owner": { "name": "claude-harness" }, "plugins": [] }
