@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Tests for the ccode wrapper's project resolution. Uses `ccode -n` (dry run), which
-# prints what it would do instead of touching tmux.
-#
 #   ccode-test.sh <path-to-ccode>
 #
-# Builds a fake code root under a temp dir: <root>/acme/infra with a worktree
-# and a subdirectory, plus a directory outside the root.
+# `ccode -n` prints the resolution instead of touching tmux, so this runs
+# anywhere.
 set -uo pipefail
 ccode="${1:?usage: ccode-test.sh <ccode>}"
 pass=0; fail=0

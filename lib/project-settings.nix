@@ -1,8 +1,7 @@
-# Project-scope .claude/settings.json for a repo under the harness: the full
-# deny set (managed settings carry only the universal subset when the host
-# scopes enforcement by directory), the SSH sandbox rule (same split) and
-# the worktree setting. The agent cannot edit this file (Edit deny rule +
-# hook), so it holds as a belt to the hook's braces inside the repo.
+# Carries the full deny set and the SSH rule because managed settings carry
+# only the universal subset when the host scopes enforcement by directory.
+# The agent cannot edit the file (Edit deny rule + hook), so inside the repo
+# it holds as a belt to the hook's braces.
 { lib }:
 {
   allowLocalCommits ? false,

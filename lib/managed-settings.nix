@@ -1,25 +1,18 @@
-# Builds the attrset that becomes /etc/claude-code/managed-settings.json.
-#
-# Managed settings are the top layer: nothing in ~/.claude or in a repo can
-# override a key set here. Every hook lives here (not in user or project
-# scope) so a user-tier mod can never override its block and so
+# Nothing in ~/.claude or in a repo can override a key set here. Every hook
+# lives here so a user-tier mod can never override its block and so
 # `allowManagedHooksOnly` costs nothing.
 #
 # Key names checked against the Claude Code settings reference on
 # 2026-10-17 for version 2.1.296. Re-check after upgrades.
 { lib }:
 {
-  # "linux" or "wsl". WSL adds the interop mitigations (see sandbox block).
+  # "linux" or "wsl"
   platform,
-  # Directory holding env-guard.sh and tmux-notify.sh; a stable path, not a
-  # store path, so the JSON does not change on every rebuild.
+  # A stable path, not a store path, so the JSON does not change on every rebuild.
   hookDir,
-  # Root-owned marketplace directory for the (future) managed broker mod.
   marketplaceDir,
   allowLocalCommits ? false,
-  # Let the agent write its auto-memory (see deny-rules.nix).
   allowMemoryEdits ? false,
-  # Directories under which the project rules apply (see deny-rules.nix).
   # Non-empty: managed deny rules carry only the universal subset, the hook
   # applies project rules by cwd, the repo template carries the full set.
   enforcementRoots ? [ ],
@@ -27,16 +20,14 @@
   extraAllowedDomains ? [ ],
   allowManagedHooksOnly ? true,
   # true: unknown hosts are refused inside the sandbox; false: prompted.
-  # Strict on a work host, prompt on a personal machine.
   strictAllowlist ? true,
-  # Marketplaces allowed besides the managed one, e.g. the user's own plugin
-  # sources on a personal machine. Same shape as strictKnownMarketplaces.
+  # Same shape as strictKnownMarketplaces.
   extraKnownMarketplaces ? [ ],
 }:
 let
   denyRules = import ./deny-rules.nix { inherit lib; };
-  # The SSH rule is a project rule: here only when the host enforces
-  # everywhere, else from the repo template (see ssh-sandbox.nix).
+  # A project rule: here only when the host enforces everywhere, else from
+  # the repo template (see ssh-sandbox.nix).
   sshSandbox = import ./ssh-sandbox.nix;
   everywhere = enforcementRoots == [ ];
   envGuard = "${hookDir}/env-guard.sh";
@@ -98,7 +89,6 @@ in
         ];
       }
     ];
-    # "Session waits on me" signal for tmux: colour the window, no server.
     Notification = [
       {
         matcher = "permission_prompt|idle_prompt|elicitation_dialog";
@@ -128,9 +118,7 @@ in
 
   sandbox = {
     enabled = true;
-    # Never let a blocked command re-run outside the sandbox.
     allowUnsandboxedCommands = false;
-    # No bubblewrap, no session (not a silent fallback).
     failIfUnavailable = true;
     filesystem = {
       # devenv re-fetches the `path:` harness input on every `direnv export`;
@@ -208,9 +196,9 @@ in
     ];
   };
 
-  # Mod policy. The built-in guard only loads when managed settings exist and
-  # reads `allowManagedModsOnly` from here only. Until the broker mod exists
-  # no marketplace entries are added: the guard then refuses every mod.
+  # The built-in guard only loads when managed settings exist and reads
+  # `allowManagedModsOnly` from here only. The managed marketplace is empty
+  # until the broker mod exists, so the guard refuses every mod.
   pluginConfigs."cc-plugin-sec-default@builtin".options.allowManagedModsOnly = true;
   disableSideloadFlags = true;
   strictKnownMarketplaces = [

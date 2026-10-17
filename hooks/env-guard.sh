@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # env-guard: the one managed hook. Registered in managed settings for
-# SessionStart, CwdChanged, FileChanged, Setup, ConfigChange and PreToolUse.
+# SessionStart, CwdChanged, FileChanged, ConfigChange and PreToolUse; the
+# Setup branch below is ready but not registered.
 #
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
 # ConfigChange (together with onFailure = "block" in the hook registration).
-# Needs Claude Code >= 2.1.295 and jq + direnv on PATH; the NixOS module
-# substitutes the PATH placeholder below with store paths, so this never
-# depends on the user's PATH.
+# Needs Claude Code >= 2.1.295. managed-tree.nix puts jq, direnv and
+# coreutils from the store first on PATH, so the guard never runs the
+# user's copies of them.
 #
 # Every regex lives in a variable: bash word-splits an inline `=~` pattern
 # on spaces, so `[[ x =~ a b ]]` is a syntax error.
@@ -14,16 +15,10 @@ set -uo pipefail
 PATH="@path@:${PATH:-}"
 trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 
-# Set by the NixOS module from harness.allowLocalCommits (0 or 1).
+# Substituted by managed-tree.nix from the harness.* options: 0 or 1, and a
+# colon-separated list where `~` means $HOME and empty means everywhere.
 ALLOW_LOCAL_COMMITS="@allowLocalCommits@"
-# Set from harness.allowMemoryEdits (0 or 1): let the agent write its own
-# auto-memory under ~/.claude/projects/<slug>/memory/. Off on a work host,
-# where nothing under ~/.claude is writable.
 ALLOW_MEMORY_EDITS="@allowMemoryEdits@"
-# Colon-separated directories under which the project rules (git history,
-# cloud writes, project config files) apply; `~` means $HOME. Empty means
-# everywhere. The universal rules (credentials, system, plugins, the user's
-# own config) apply regardless. Set from harness.enforcementRoots.
 ENFORCEMENT_ROOTS="@enforcementRoots@"
 
 input=$(cat)
@@ -33,10 +28,10 @@ cwd=$(jq -r '.cwd // empty' <<<"$input")
 
 deny() { printf 'env-guard: %s\n' "$1" >&2; exit 2; }
 
-# in_scope: do the project rules apply to this call? Yes when there are no
-# roots, when cwd is unknown (fail closed), when cwd is under a root, or when
-# the call names a path under a root (a session started elsewhere running
-# `git -C ~/code/git/x push` or editing ~/code/git/x/devenv.nix).
+# Project rules apply when there are no roots, when cwd is unknown (fail
+# closed), when cwd is under a root, or when the call names a path under a
+# root (`git -C ~/code/git/x push` from a session started elsewhere). The
+# universal rules apply regardless.
 in_scope=1
 roots=()
 if [ -n "$ENFORCEMENT_ROOTS" ] && [ -n "$cwd" ]; then
@@ -97,9 +92,9 @@ ENV
       Edit|Write|NotebookEdit|MultiEdit)
         f=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"$input")
         [ "$in_scope" = 1 ] || { under_root "$f" && in_scope=1; }
-        # Universal: the user's own Claude, shell and Nix configuration. The
-        # one carve-out is auto-memory, when the host allows it; the path must
-        # be literal (no `..`) so a memory path cannot reach a sibling.
+        # The one carve-out under ~/.claude is auto-memory, when the host
+        # allows it; the path must be literal (no `..`) so it cannot reach a
+        # sibling directory.
         if [ "$ALLOW_MEMORY_EDITS" = 1 ] && [[ "$f" != *"/../"* && "$f" != *"/.." ]]; then
           case "$f" in
             "$HOME"/.claude/projects/*/memory/*) exit 0 ;;
@@ -109,7 +104,6 @@ ENV
           "$HOME"/.claude/*|"$HOME"/.claude.json|"$HOME"/.bashrc|"$HOME"/.profile|"$HOME"/.config/nix/*|"$HOME"/.config/direnv/*)
             deny "edit of $f is forbidden (user config)" ;;
         esac
-        # Project: env, devenv, project Claude config, credentials, git internals.
         if [ "$in_scope" = 1 ]; then
           case "$f" in
             */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude-plugin/*|\
@@ -126,7 +120,6 @@ ENV
         # `bash -c '...'`, `env X=1 git push`, `git 'push'`, `git -C . push`.
         n=$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | tr -d "'\"")
         [ "$in_scope" = 1 ] || { mentions_root "$n" && in_scope=1; }
-        # Word boundary helpers for readability.
         b='(^|[ ;&|(])'       # start of a (sub)command
         e='( |$)'             # end of a word
 
@@ -168,8 +161,7 @@ ENV
         [[ "$n" =~ $re ]] && deny "system change blocked"
         re="$b(powershell|pwsh|cmd)(\.exe)?( |$)|$b[^ ]*\.exe( |$)|/mnt/c/"
         [[ "$n" =~ $re ]] && deny "Windows executable blocked"
-        # Shell-side writes to project config files the Edit tool is not
-        # allowed to touch (project rule).
+        # Shell-side writes to the files the Edit tool may not touch (project rule).
         if [ "$in_scope" = 1 ]; then
         config_files='(devenv\.(nix|yaml|lock|local)|\.envrc|\.claude/|\.claude-plugin|\.git/hooks|\.git/config|\.config/nix|\.config/direnv)'
         writers="((^|[^0-9&<])>|$b(tee|mv|cp|rm|ln|install|truncate|chmod|chattr|patch|dd)$e|sed +-[a-z]*i|perl +-[a-z]*i)"

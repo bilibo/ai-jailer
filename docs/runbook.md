@@ -114,18 +114,18 @@ tmux rules, `ccode`, `programs.claude-code`. It never carries deny rules.
 
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
-Unit tests, no Claude Code needed:
+Unit tests, no Claude Code needed, from a checkout of this repo:
 ```
-nix build .#harness-managed
-nix shell nixpkgs#jq -c harness/tests/hook-test.sh result/hooks/env-guard.sh
-harness/tests/ccode-test.sh "$(command -v ccode)"      # after home-manager switch
+nix flake check                                     # both managed trees + ccode, in the Nix sandbox
+nix shell nixpkgs#jq -c tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh   # the installed hook
+tests/ccode-test.sh "$(command -v ccode)"           # after home-manager switch
 ```
 Run these from your own terminal. Inside a Claude Code session in this repo
-the sandbox masks shell startup files in the working directory with device
-nodes and keeps `~/.cache/nix` read-only, so `nix build` of the flake fails
-there. An agent can still test the installed hook directly:
-`harness/tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh` with jq on
-PATH.
+the sandbox masks shell startup files and `.gitmodules` in the working
+directory with device nodes, so Nix cannot read the repo as a git flake and
+`nix flake check` fails there. An agent can still test the installed hook
+directly: `tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh` with jq
+on PATH.
 
 Live checks, in a repo under an enforcement root (the test repo):
 
@@ -155,7 +155,8 @@ which is the dangerous direction.
   `onFailure: block`.
 - direnv: `pkgs/direnv.nix` overrides to 2.38.2 while nixpkgs is older.
   When `nix eval nixpkgs#direnv.version` reports 2.38 or newer, delete the
-  file; both modules fall back to `pkgs.direnv` automatically.
+  file and change the `direnvPackage` default in `lib/managed-tree.nix` to
+  `pkgs.direnv`; both modules already fall back to `pkgs.direnv` on their own.
 - devenv from nixpkgs (2.4.0 at the time of writing). Each repo pins its own
   devenv inputs in `devenv.lock`; `devenv update harness` bumps the harness
   input in one repo.

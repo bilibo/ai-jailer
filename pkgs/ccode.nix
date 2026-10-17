@@ -1,17 +1,8 @@
-# ccode [<customer>/<repo> | <path>] [claude args...]
+# ccode [-n] [<customer>/<repo> | <path>] [claude args...]
 # Starts or attaches the project's tmux session and runs claude in a window.
-#
-# The project is, in order: the first argument when it names <customer>/<repo>
-# under the code root or a directory under it; else $HARNESS_PROJECT, which
-# the harness devenv shell exports on entry; else the repo containing the
-# current directory. So inside a repo (or its worktree, or a subdirectory) a
-# bare `ccode` or `ccode --worktree` does the right thing.
-#
-# Root: $HARNESS_CODE_ROOT (the home module exports it from harness.codeRoot),
-# default below. Used identically on an enforced host and in a container
-# where the root is /work.
-#
-# `ccode -n ...` prints the resolution and exits; tests/ccode-test.sh uses it.
+# HARNESS_PROJECT is exported by the harness devenv shell, so inside a repo
+# (or its worktree) the project argument is optional. `-n` prints the
+# resolution and exits, for tests/ccode-test.sh.
 {
   pkgs,
   codeRoot ? "$HOME/code/git",
@@ -24,7 +15,7 @@ pkgs.writeShellApplication {
     usage() { echo "usage: ccode [<customer>/<repo> | <path>] [claude args]  (inside a repo under $root, the project is optional)" >&2; exit 64; }
     die() { echo "ccode: $*" >&2; exit 66; }
 
-    # resolve <dir>: print <customer>/<repo> for a directory under the root.
+    # resolve <dir>: the <customer>/<repo> containing <dir>, or die.
     resolve() {
       local p rel a b
       p=$(cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"

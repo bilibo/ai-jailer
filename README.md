@@ -26,7 +26,7 @@ nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccode`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json, checks the host, optional image
 pkgs/       ccode launcher, direnv >= 2.38 override
-tests/      hook-test.sh: unit tests for env-guard.sh
+tests/      hook-test.sh (env-guard.sh unit tests), ccode-test.sh (project resolution)
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), roadmap
 ```
 
@@ -92,8 +92,8 @@ imports:
   - harness/devenv
 ```
 
-The devenv module writes the repo's `.claude/settings.json` (full deny set,
-read-only symlink into the store) at every shell entry and warns if the host
+The devenv module writes the repo's `.claude/settings.json` (full deny set
+and SSH sandbox rule, read-only symlink into the store) at every shell entry and warns if the host
 has no managed settings. Personal repos outside the enforcement roots simply
 do not import it.
 

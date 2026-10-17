@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# Unit tests for env-guard.sh. No Claude Code needed: feeds hook JSON on
-# stdin and checks the exit code (0 = allow, 2 = block).
-#
 #   hook-test.sh <path-to-env-guard.sh>
 #
+# Feeds hook JSON on stdin, no Claude Code needed (0 = allow, 2 = block).
 # Add a case per hard limit you rely on; a case that stops passing after a
 # regex change is the point of this file.
 set -uo pipefail
 hook="${1:?usage: hook-test.sh <env-guard.sh>}"
-# A cwd inside the enforcement roots the hook was built with (project rules
-# apply) and one outside (only universal rules apply). The roots are read
-# from the built hook; with none, everything is in scope and the
-# out-of-scope section is skipped.
+# The roots come from the built hook; with none, everything is in scope and
+# the out-of-scope section is skipped.
 ROOTS=$(sed -n 's/^ENFORCEMENT_ROOTS="\(.*\)"$/\1/p' "$hook")
 IN="${HOOK_TEST_IN:-${ROOTS%%:*}/acme/infra}"; IN="${IN/#\~/$HOME}"
 OUT="${HOOK_TEST_OUT:-/tmp/p}"

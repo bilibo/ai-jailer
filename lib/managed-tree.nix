@@ -1,9 +1,3 @@
-# Packages the root-owned managed tree:
-#   managed-settings.json   (from managed-settings.nix)
-#   hooks/env-guard.sh      (PATH and options substituted in)
-#   hooks/tmux-notify.sh
-#   plugins/.claude-plugin/marketplace.json   (empty managed marketplace)
-#
 # One store path: linked at /etc/claude-code on the host, or copied into a
 # devenv-built container image.
 {
@@ -19,8 +13,7 @@
   strictAllowlist ? true,
   extraKnownMarketplaces ? [ ],
   direnvPackage ? import ../pkgs/direnv.nix { inherit pkgs; },
-  # Where the tree will be visible at runtime; the JSON refers to its own
-  # hooks by this stable path rather than by store path.
+  # The JSON refers to its own hooks by this stable path, not by store path.
   managedDir ? "/etc/claude-code",
 }:
 let
@@ -80,7 +73,7 @@ pkgs.runCommand "claude-harness-managed" { } ''
   # `#!/usr/bin/env bash` -> the store bash: the installed hook then depends
   # on nothing outside the store, and the tests run inside the Nix sandbox.
   patchShebangs $out/hooks
-  # Empty managed marketplace; the broker mod is added here later (brief 5.7).
+  # The broker mod lands here later (brief 5.7).
   cat > $out/plugins/.claude-plugin/marketplace.json <<'JSON'
   { "name": "harness", "owner": { "name": "claude-harness" }, "plugins": [] }
   JSON

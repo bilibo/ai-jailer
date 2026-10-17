@@ -1,5 +1,4 @@
-# devenv module: the project side of the harness. Every repo under the
-# harness imports it from devenv.yaml, with this directory as an input:
+# Every repo under the harness imports this from devenv.yaml:
 #
 #   inputs:
 #     harness:
@@ -7,24 +6,10 @@
 #   imports:
 #     - harness/devenv
 #
-# What it does at shell entry (direnv -> `devenv direnv-export` runs the
-# enterShell tasks, so this happens for humans and for every Claude Code
-# Bash command alike):
-#   - writes .claude/settings.json as a read-only symlink into the Nix store
-#     (devenv `files`, copyMode symlink): the full deny set from
-#     lib/deny-rules.nix plus the worktree setting. Generated, never hand
-#     edited, and the agent cannot edit it anyway.
-#   - checks that /etc/claude-code/managed-settings.json exists and warns
-#     loudly if not: without it the hook, the sandbox and the mod policy are
-#     all absent, and only this file's deny rules remain.
-#   - optional (`harness.container.enable`): a per-project container image
-#     via `devenv container build harness`, with the managed tree baked in
-#     root-owned at /etc/claude-code, for a toolchain that must not touch the
-#     host at all. Run it with `devenv container run harness` or podman with
-#     the repo bind-mounted at /env.
-#
-# Project-specific tools (az, terraform, ...) belong in the project's own
-# devenv.nix or in devenv-base, not here.
+# direnv runs `devenv direnv-export` for humans and for every Claude Code
+# Bash command alike, so everything in enterShell happens on both paths.
+# Project tools (az, terraform, ...) belong in the project's own devenv.nix
+# or in devenv-base, not here.
 {
   pkgs,
   lib,

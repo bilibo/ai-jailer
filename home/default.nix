@@ -1,14 +1,6 @@
-# home-manager module: the user side of the harness. Platform-neutral.
-#
-# - programs.claude-code with the worktree setting (deny rules and hooks
-#   come from managed settings, never from here)
-# - direnv with nix-direnv and a strict direnv.toml, no whitelist entries
-# - tmux: never let panes inherit another project's direnv variables, and
-#   pass Claude Code's key chords through
-# - `ccode <customer>/<repo> [claude args]`: tmux session per project
-#
-# Nothing here for SSH on purpose: a passphrase key must never sit in an
-# agent, so there is no agent to configure (README, "Git over SSH").
+# The user side. Deny rules and hooks come from managed settings, never
+# from here. Nothing here for SSH on purpose: a passphrase key must never
+# sit in an agent, so there is no agent to configure (README, "Git over SSH").
 {
   config,
   lib,
@@ -41,7 +33,7 @@ in
           import ../pkgs/direnv.nix { inherit pkgs; }
         else
           pkgs.direnv;
-      defaultText = lib.literalExpression "pkgs.direnv (>= 2.38)";
+      defaultText = lib.literalExpression "pkgs.direnv (>= 2.38, overridden while nixpkgs is older)";
       description = "direnv >= 2.38 for `require_allowed` in .envrc files.";
     };
   };
@@ -57,11 +49,10 @@ in
       package = cfg.direnvPackage;
       nix-direnv.enable = true;
       config.global = {
-        # Start every .envrc from a clean, predictable environment.
         strict_env = true;
         # devenv evaluations are slow; the default 5s warning is noise.
         warn_timeout = "2m";
-        # Never read .env files implicitly (credentials).
+        # .env files hold credentials.
         load_dotenv = false;
         # No whitelist.prefix entries, ever: path-only, never re-prompts.
       };
@@ -89,7 +80,7 @@ in
     };
 
     home.packages = [
-      # .envrc runs `devenv direnvrc`; the hook runs `direnv export` per command.
+      # Every repo's .envrc runs `devenv direnvrc`.
       pkgs.devenv
       pkgs.jq
       ccode

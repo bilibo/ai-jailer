@@ -1,16 +1,6 @@
-# NixOS module: builds the root-owned managed Claude Code configuration and
-# links it at /etc/claude-code, so every Claude Code session on the host is
-# bound by it. One deployment shape for NixOS-WSL at work and native NixOS
-# at home; what differs is configuration:
-#
-#   - enforcementRoots: on a personal machine, list the directories that
-#     hold customer repos. The project rules (git history, cloud writes,
-#     project config files) then apply only there, through the hook, and
-#     the repo template's .claude/settings.json; the universal rules
-#     (credentials, system changes, plugin loading, the user's own config)
-#     apply everywhere. Empty means everything applies everywhere.
-#   - sandboxStrictAllowlist: refuse unknown hosts (work) or prompt (home).
-#   - platform: "wsl" adds the Windows-interop mitigations.
+# Links the managed tree at /etc/claude-code, root-owned, so every Claude
+# Code session on the host is bound by it. The same module serves NixOS-WSL
+# at work and native NixOS at home; the options decide how far it reaches.
 {
   config,
   lib,
@@ -143,8 +133,7 @@ in
       }
     ];
 
-    # The path Claude Code reads on Linux and WSL. A symlink into the store:
-    # root-owned, read-only, replaced atomically on rebuild.
+    # A symlink into the store: root-owned, read-only, replaced atomically on rebuild.
     environment.etc."claude-code".source = package;
   };
 }

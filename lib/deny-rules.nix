@@ -1,29 +1,18 @@
-# Claude Code permission deny rules: the hard limits from the build brief.
+# Deny rules are prefix/glob matches that hold in every permission mode and
+# against user-tier mods, but `git -C . push`, `bash -c '...'` and scripts
+# that open files themselves get past them; the hook and the sandbox exist
+# for that.
 #
-# Deny rules are prefix/glob matches on the Bash command string and on file
-# paths for Read/Edit. They apply in every permission mode, including
-# bypassPermissions, and survive user-tier mods because the managed settings
-# make the built-in `sec-default` guard load. They are not a security
-# boundary on their own (documented gaps: `git -C . push`, `bash -c '...'`,
-# scripts that open files themselves); the PreToolUse hook and the sandbox
-# cover those.
-#
-# Two sets, because deny rules cannot be scoped by directory:
-#   universal  always apply, on every host and in every directory:
-#              credentials, privilege/system changes, plugin loading,
-#              the user's own Claude/Nix/shell config.
-#   project    git history, cloud writes, project config files. Managed
-#              settings include them only when the host enforces everywhere
-#              (no enforcementRoots); otherwise they come from the repo
-#              template's .claude/settings.json and from the hook, which
-#              can see `cwd`.
+# Two sets because deny rules cannot be scoped by directory: with
+# enforcementRoots set, managed settings carry only `universal`, and
+# `project` comes from the repo's .claude/settings.json and from the hook,
+# which can see `cwd`.
 #
 # Path rules use `**/` or `~/`: in user-scope settings a leading `/` anchors
 # at ~/.claude, not at the project root.
 { lib }:
 {
   allowLocalCommits ? false,
-  # Let the agent write its auto-memory under ~/.claude/projects/*/memory/.
   # Globs cannot express "everything but", so this swaps the blanket
   # ~/.claude rule for an enumerated list; the hook keeps the rest of
   # ~/.claude/projects (transcripts) closed.
@@ -103,8 +92,8 @@ let
     "Bash(claude * --plugin-url *)"
   ];
 
-  # The user's own configuration. `Read` deny on a path also blocks
-  # Edit/Write on it (Claude Code 2.1.228+), but keep Edit rules explicit.
+  # A `Read` deny also blocks Edit/Write (2.1.228+); the Edit rules stay
+  # explicit anyway.
   claudeHome =
     if allowMemoryEdits then
       [
@@ -192,7 +181,6 @@ let
       "bicep publish"
     ]
     ++ [
-      # Verb anywhere after `az <service>`.
       "Bash(az * create *)"
       "Bash(az * delete *)"
       "Bash(az * update *)"
@@ -207,8 +195,7 @@ let
       "Bash(az * import *)"
     ];
 
-  # Project config and environment files: the agent proposes changes to
-  # these as a diff in its reply, never writes them.
+  # The agent proposes changes to these as a diff in its reply, never writes them.
   projectConfig = [
     "Edit(**/devenv.nix)"
     "Edit(**/devenv.yaml)"

@@ -14,24 +14,21 @@
       managedTree = pkgs: args: import ./lib/managed-tree.nix ({ inherit pkgs; inherit (pkgs) lib; } // args);
     in
     {
-      # NixOS side: harness.* -> /etc/claude-code (managed settings, hooks, mod policy).
       nixosModules.harness = ./nixos;
       nixosModules.default = self.nixosModules.harness;
 
-      # home-manager side: devenv, direnv, tmux, programs.claude-code, `ccode`.
       homeModules.harness = ./home;
       homeModules.default = self.homeModules.harness;
+      # Older name for the same outputs.
       homeManagerModules = self.homeModules;
 
-      # Pure helpers (deny rules, managed and project settings) for other
-      # module systems, e.g. a future nix-darwin module.
+      # For other module systems, e.g. a future nix-darwin module.
       lib = import ./lib { inherit (nixpkgs) lib; };
 
       packages = forAll (pkgs: {
-        # The managed tree with the defaults: a dedicated work host, every
-        # rule everywhere.  nix build .#managed && cat result/managed-settings.json
+        # A dedicated work host: every rule everywhere.
         managed = managedTree pkgs { };
-        # As a personal machine builds it: project rules only under the roots.
+        # A personal machine: project rules only under the roots.
         managed-scoped = managedTree pkgs {
           enforcementRoots = [ "~/code/git" ];
           strictAllowlist = false;
@@ -40,9 +37,7 @@
         default = self.packages.${pkgs.stdenv.hostPlatform.system}.managed;
       });
 
-      # `nix flake check`: the hook's unit tests against both managed trees
-      # (the out-of-root section only runs with roots set) and the ccode
-      # resolver tests.
+      # The hook's out-of-root cases only run with roots set, hence both trees.
       checks = forAll (
         pkgs:
         let

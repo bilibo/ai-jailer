@@ -9,7 +9,11 @@ parentheses refer to sections of the original build brief.
   scoping, per-host options (5.2)
 - home-manager module: direnv, tmux, `ccode` (5.1, without the broker signal)
 - devenv module: generated project settings, host check, optional image (new)
-- Hook unit tests, 149 cases (part of 5.6)
+- Hook unit tests (133 cases, 157 with enforcement roots) and ccode
+  resolver tests, run by `nix flake check` (part of 5.6)
+- Own repo with a `flake.nix` exporting `nixosModules.harness`,
+  `homeModules.harness`, `lib`, the managed trees as packages and the tests
+  as `checks` (2026-10-17)
 - Test repo: azfn-rust-handler, verified through the Functions host
 - Framework laptop config cleanup, trusted-users, direnv 2.38
 
@@ -75,7 +79,5 @@ parentheses refer to sections of the original build brief.
   user-level podman socket when launched from `vscode-fhs`.
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook (7.6).
-- Done 2026-10-17: own repo with a `flake.nix` exporting
-  `nixosModules.harness`, `homeModules.harness`, `lib`, the managed trees
-  as packages and the tests as `checks`. Next in this line: a `wsl/` or
-  nix-darwin module alongside `nixos/`, consuming the same `lib/`.
+- A `wsl/` or nix-darwin module alongside `nixos/`, consuming the same
+  `lib/`.
