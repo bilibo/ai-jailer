@@ -6,7 +6,7 @@ plans. Written 2026-10-18 from an inventory of this repo, of
 Perplexity plan "nix-ccode-harness and ccmux": that plan assumed one repo,
 a WSL host and a hand-written sandbox wrapper, none of which is the case
 here. Section 1 says what is already done, section 2 what is true on disk,
-section 3 what to build, in phases.
+section 4 what to build, in phases; `docs/roadmap.md` keeps the overall order and points here for the tier work.
 
 Rules for the session: read, propose the file list for a phase, wait for
 approval, implement, stop. Do not activate any NixOS or home-manager
@@ -19,19 +19,7 @@ commit or edit `devenv/devenv.nix`, `devenv.yaml` or `.envrc` under
 
 ## 1. Already done from the nixos-config session (2026-10-18)
 
-In this repo, uncommitted, for Raul to review:
-
-- `pkgs/ccmux.nix` replaces `pkgs/ccode.nix`. Same script, new name;
-  `symlinkJoin` adds `bin/ccode` as the former name. `tests/ccmux-test.sh`
-  replaces `tests/ccode-test.sh`; `flake.nix` runs it against both entry
-  points (`checks.ccmux-test`, `checks.ccode-test`) and keeps
-  `packages.ccode` as an alias of `packages.ccmux`. `home/default.nix`,
-  both `devenv/devenv.nix` files, README, runbook and roadmap updated.
-  The extracted script passes all 18 cases under each name. Raul:
-  `git rm pkgs/ccode.nix tests/ccode-test.sh && git add pkgs/ccmux.nix
-  tests/ccmux-test.sh`, then `nix flake check`.
-- tmux session names never embedded `ccode` (`<customer>-<repo>`), so
-  nothing to rename there.
+In this repo, committed: `ccmux` replaces `ccode` (the old name stays as a second entry point), tested under both names.
 
 In `~/nixos-config`, uncommitted:
 
@@ -82,8 +70,7 @@ hooks, skills and plugin manifests; `denyRead` `~/.azure`, `~/.gnupg`,
 Nix daemon). `bubblewrap` and `socat` come from the host's system packages.
 
 **devenv-base.** Does not exist. There is one devenv module,
-`devenv/devenv.nix` (and the newer `devenv/devenv.nix.new` for Raul to
-`mv`), imported as `harness/devenv`. It exports options `harness.*`
+`devenv/devenv.nix`, imported as `harness/devenv`. It exports options `harness.*`
 (allowLocalCommits, allowMemoryEdits, platform, extraDeny,
 extraAllowedDomains, settings, managedSettingsPath, container), writes the
 settings file, ships `ccmux` in the shell, exports `HARNESS_PROJECT`. No

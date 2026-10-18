@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# env-guard: the one hook. Registered for SessionStart, CwdChanged,
+# env-guard: the guard hook. Registered for SessionStart, CwdChanged,
 # FileChanged, ConfigChange and PreToolUse, from managed settings on a
 # managed host and from the repo's .claude/settings.json (devenv module)
 # everywhere; the Setup branch below is ready but not registered.
