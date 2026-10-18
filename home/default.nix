@@ -61,7 +61,7 @@ in
     programs.tmux = {
       enable = true;
       extraConfig = ''
-        # --- claude-harness ---
+        # --- claude-nix-harness ---
         # The tmux server keeps the first client's environment. Refresh these
         # on attach and never seed them into new panes, so a pane opened from
         # customer A's shell never carries A's direnv state into customer B.

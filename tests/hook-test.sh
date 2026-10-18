@@ -212,7 +212,7 @@ block 'claude --plugin-dir ./evil -p hi'
 block 'cmd.exe /c dir'
 run 2 "$(edit_file "$HOME/.claude/settings.json")"
 run 2 "$(edit_file "$HOME/.bashrc")"
-# Personal sessions keep their launch flags and their settings.local.json.
+# Sessions outside the roots keep their launch flags and settings.local.json.
 allow 'claude --dangerously-skip-permissions -p hi'
 allow 'claude --settings /tmp/mine.json -p hi'
 run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$OUT\"}"

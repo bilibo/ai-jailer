@@ -1,5 +1,5 @@
 {
-  description = "claude-harness: guard-railed, project-scoped Claude Code for NixOS";
+  description = "claude-nix-harness: guard-railed, project-scoped Claude Code for NixOS";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -37,7 +37,7 @@
         {
           # A dedicated work host: every rule everywhere.
           managed = managedTree pkgs { };
-          # A personal machine: project rules only under the roots.
+          # A mixed host: project rules only under the roots.
           managed-scoped = managedTree pkgs {
             enforcementRoots = [ "~/code/git" ];
             strictAllowlist = false;

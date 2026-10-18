@@ -75,7 +75,7 @@ Nix daemon). `bubblewrap` and `socat` come from the host's system packages.
 extraAllowedDomains, settings, managedSettingsPath, container), writes the
 settings file, ships `ccmux` in the shell, exports `HARNESS_PROJECT`. No
 repo sets `AZURE_CONFIG_DIR`. The only repos under `~/code/git` are
-`raul/claude-harness` and `raul/azfn-rust-handler`; the latter's
+`raul/claude-nix-harness` and `raul/azfn-rust-handler`; the latter's
 `devenv.yaml` still points at `git+file:///home/raul/nixos-config?dir=harness`,
 which no longer exists in nixos-config HEAD. Raul edits it (the hook
 forbids a session doing so).

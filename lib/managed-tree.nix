@@ -48,12 +48,12 @@ let
   };
   settingsJson = (pkgs.formats.json { }).generate "managed-settings.json" settings;
 in
-pkgs.runCommand "claude-harness-managed" { } ''
+pkgs.runCommand "claude-nix-harness-managed" { } ''
   mkdir -p $out/plugins/.claude-plugin
   cp ${settingsJson} $out/managed-settings.json
   cp -r ${hooks} $out/hooks
   # The broker mod lands here later (brief 5.7).
   cat > $out/plugins/.claude-plugin/marketplace.json <<'JSON'
-  { "name": "harness", "owner": { "name": "claude-harness" }, "plugins": [] }
+  { "name": "harness", "owner": { "name": "claude-nix-harness" }, "plugins": [] }
   JSON
 ''
