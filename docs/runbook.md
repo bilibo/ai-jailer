@@ -16,8 +16,8 @@ for an agent.
    `.claude/settings.json` (store symlink: deny rules, hooks, sandbox,
    bypass mode off). On a host that carries the harness home module it also
    warns if `/etc/claude-code/managed-settings.json` is missing, which
-   means the NixOS module is not enabled there; fix the host. A personal
-   laptop without the modules runs on the repo file alone and stays quiet.
+   means the NixOS module is not enabled there; fix the host. An unmanaged
+   host runs on the repo file alone and stays quiet.
 2. Start a session in the project's tmux session. Inside the repo (any
    subdirectory or worktree) the project name is optional:
    ```
@@ -66,15 +66,15 @@ Note the scoping: project rules (git history, cloud writes, project config)
 apply when the session's directory, the edited file, or the command text is
 under an enforcement root. Universal rules (credentials, `sudo`, system
 changes, plugin loading, your own `~/.claude` and `~/.config`) apply in
-every session on the host, including personal ones.
+every session on the host, inside a harness repo or not.
 
 ## 3. Onboarding a repo
 
-Copy from the azfn-rust-handler test repo, or by hand:
+By hand, or copy from a repo that already imports the module:
 
 1. `devenv.yaml`: add the `harness` input (`flake: false`) and
-   `imports: - harness/devenv`. For work repos the input should be a git
-   URL pinned by `devenv.lock`; the path form is for this laptop.
+   `imports: - harness/devenv`. Use a git URL pinned by `devenv.lock`; the
+   `path:` form is for developing the harness itself.
 2. `devenv.nix`: project tools, and `harness.settings` for project allow
    rules.
 3. `.envrc`:
@@ -99,19 +99,19 @@ Copy from the azfn-rust-handler test repo, or by hand:
 
 | Host | Set |
 |---|---|
-| Work laptop, NixOS-WSL | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
-| Personal laptop | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; work repos import `harness/devenv` and bring their own rules. Personal sessions keep whatever your own settings allow. |
-| Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, personal sessions elsewhere. |
+| Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
+| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. |
+| Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
 
 See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
 same `harness.allowLocalCommits` and `harness.allowMemoryEdits` as the host
-(the hook is built from the repo's values on a personal laptop), plus
+(the hook is built from the repo's values on an unmanaged host), plus
 `harness.settings` for allow rules, `harness.extraAllowedDomains` and
 `harness.extraDeny`.
 
 `allowMemoryEdits` is off by default on purpose: memory under
 `~/.claude/projects/<slug>/memory/` is text that every later session on the
-machine reads as context, so on a work host it is a persistence channel for
+machine reads as context, so on a managed host it is a persistence channel for
 anything an agent picked up from a repo. With it on, only that directory
 opens; the rest of `~/.claude` stays read-only.
 
@@ -159,7 +159,7 @@ claude --plugin-dir /tmp/x -p hi                            # rejected at startu
 claude --debug -p hi 2>&1 | grep -i allowManagedModsOnly    # guard loaded
 ```
 
-Outside the repo: on a personal laptop everything your own settings allow;
+Outside the repo: on an unmanaged host everything your own settings allow;
 on a mixed host `git commit` allowed, `sudo` still blocked.
 
 After a Claude Code upgrade also re-read the settings reference for the
@@ -192,7 +192,7 @@ which is the dangerous direction.
   session refuses to start. bubblewrap needs user namespaces
   (`security.allowUserNamespaces`, asserted by the module) and works nested
   inside `vscode-fhs`. Inside a container it needs `/proc` unmasked.
-- **Repo hooks do not fire on a personal laptop.** Interactive sessions
+- **Repo hooks do not fire on an unmanaged host.** Interactive sessions
   hold back every hook from settings files until you accept the workspace
   trust dialog for the folder; `-p` sessions treat it as trusted. Check
   with `claude --debug -p hi 2>&1 | grep env-guard`. A dangling
@@ -202,7 +202,7 @@ which is the dangerous direction.
   the managed directory plus `extraKnownMarketplaces`. Add the source on
   that host, or accept that the plugin does not load there.
 - **Plugin hooks silent.** `allowManagedHooksOnly` is on. Expected on a
-  work host.
+  managed host.
 - **`.claude/settings.json` is a dangling symlink.** The store path was
   garbage collected; enter the shell again (`direnv reload`) and devenv
   rewrites it.
@@ -226,9 +226,9 @@ which is the dangerous direction.
   `env` prefixes are covered by normalisation; a script that opens files
   itself is not. The sandbox and Azure RBAC are the layers for that.
 - On a managed host the sandbox is host-wide and cannot be scoped by
-  directory. What is hidden from agents in work repos is hidden in personal
-  ones too. On a personal laptop it comes from the repo file and applies
-  inside harness repos only.
+  directory. What is hidden from agents in harness repos is hidden in every
+  other repo too. On an unmanaged host it comes from the repo file and
+  applies inside harness repos only.
 - Settings files reload live, so a repo converted while a session is open
   picks up the deny rules; hooks from a file that did not exist at start
   are the uncertain part. Restart the session.
@@ -238,7 +238,7 @@ which is the dangerous direction.
   for a project belong in `devenv.nix` (`harness.settings`).
 - Hooks run outside the sandbox with your full permissions. Keep
   `env-guard.sh` small; it is the one script that must be right.
-- Without managed settings (personal laptop) the repo file is the top
+- Without managed settings (unmanaged host) the repo file is the top
   layer. What it cannot do is listed in the README ("What a repo cannot
   enforce on its own"): mod policy, launch flags of the outer `claude`,
   sessions started above the repo, the folder trust dialog.
@@ -265,7 +265,7 @@ other layers are meant to catch; revisit when tightening:
   `git config --global`): the Edit tool is blocked, the shell path is left
   to the sandbox write allowlist.
 - Outbound transfer (`curl -T`, `scp`, `ngrok`, `ssh -R`): the network
-  allowlist is the layer; open by choice on a personal machine.
+  allowlist is the layer; open by choice on an unmanaged host.
 - The nested `claude` launch-flag rule matches the flag word anywhere in
   the command, quotes stripped, so `claude -p "why is --bare refused"` is
   denied too. Rephrase the prompt.

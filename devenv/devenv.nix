@@ -8,8 +8,8 @@
 #
 # It writes the repo's .claude/settings.json with everything a repo can
 # enforce on its own: the full deny set, every hook (store paths), the
-# sandbox and the SSH rule. On a host without managed settings (a personal
-# laptop) that file is the whole harness; on a managed host the root-owned
+# sandbox and the SSH rule. On a host without managed settings (an unmanaged
+# host) that file is the whole harness; on a managed host the root-owned
 # copy adds what only it can (mod policy, immunity to user settings) and
 # `allowManagedHooksOnly` keeps the repo's hooks from running twice.
 #
@@ -109,8 +109,8 @@ in
       enable = lib.mkEnableOption "a per-project container image with the managed tree baked in";
       name = lib.mkOption {
         type = lib.types.str;
-        default = "claude-harness-${projectName}";
-        defaultText = lib.literalExpression ''"claude-harness-''${config.name}"'';
+        default = "claude-nix-harness-${projectName}";
+        defaultText = lib.literalExpression ''"claude-nix-harness-''${config.name}"'';
         description = "Image name for `devenv container build harness`.";
       };
     };
@@ -135,7 +135,7 @@ in
 
       enterShell = ''
         # The harness home module exports HARNESS_EXPECT_MANAGED on hosts that
-        # are meant to carry managed settings; a personal laptop without the
+        # are meant to carry managed settings; an unmanaged host without the
         # module runs on the repo file alone and stays quiet.
         if [ -n "''${HARNESS_EXPECT_MANAGED:-}" ] && [ ! -r "${cfg.managedSettingsPath}" ]; then
           echo "harness: ${cfg.managedSettingsPath} is missing: repo rules only, no mod policy on this host" >&2
@@ -163,7 +163,7 @@ in
       ];
       containers.harness = {
         name = cfg.container.name;
-        copyToRoot = pkgs.runCommand "claude-harness-root" { } ''
+        copyToRoot = pkgs.runCommand "claude-nix-harness-root" { } ''
           mkdir -p $out/etc
           ln -s ${
             import ../lib/managed-tree.nix {

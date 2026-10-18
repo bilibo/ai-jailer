@@ -46,7 +46,7 @@ in
       description = ''
         Directories under which the project rules apply. `~` is the session
         user's home. Empty: project rules apply everywhere (a dedicated work
-        host). Non-empty: a personal machine whose other sessions keep
+        host). Non-empty: a mixed host whose other sessions keep
         `git commit` and friends.
       '';
     };
@@ -81,7 +81,7 @@ in
         Let agents write their auto-memory under ~/.claude/projects/<slug>/memory/.
         Everything else under ~/.claude stays read-only. Off on a work host:
         memory is a persistent channel into every later session on the
-        machine. On for a personal machine where the user wants Claude Code
+        machine. On for a mixed host where the user wants Claude Code
         to remember things.
       '';
     };

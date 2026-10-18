@@ -15,23 +15,23 @@ parentheses refer to sections of the original build brief.
 - Own repo with a `flake.nix` exporting `nixosModules.harness`,
   `homeModules.harness`, `lib`, the managed trees as packages and the tests
   as `checks` (2026-10-17)
-- Test repo: azfn-rust-handler, verified through the Functions host
-- Framework laptop config cleanup, trusted-users, direnv 2.38
+- Verified against a real project repo (Azure Functions, Rust)
+- Host prerequisites settled: trusted-users, direnv 2.38
 - Repo-only shape (2026-10-18): one settings body for the managed and the
   repo copy, the devenv module writes hooks and sandbox too, the hook
   blocks `settings.local.json` changes and nested `claude` launch flags,
-  `project-settings-test` in `nix flake check`. The personal laptop drops
-  the host modules; the managed layer is the work-host shape.
+  `project-settings-test` in `nix flake check`. An unmanaged host needs no
+  host modules; the managed layer is the managed-host shape.
 
 ## Next, in order
 
 The tier, read-fence, customer-module and `ccmux` subcommand work is
 phased in `docs/handoff-tiers.md`; this list keeps the overall order.
 
-1. **Verify the repo-only shape on this laptop.** After nixos-config drops
-   the harness modules: `direnv reload` in the test repo, accept the trust
-   dialog once, run the live checks in the runbook. First time a real
-   session runs on the repo file alone.
+1. **Verify the repo-only shape live.** On an unmanaged host: `direnv
+   reload` in a harness repo, accept the trust dialog once, run the live
+   checks in the runbook. First time a real session runs on the repo file
+   alone.
 2. **devenv-base repo with the `azure` module** (5.3): `az` pin, Terraform
    with azurerm/azuread/alz providers, tflint, trivy, and the
    `AZURE_CONFIG_DIR` task under `.git/devenv-base/azure` shared by
@@ -48,11 +48,11 @@ phased in `docs/handoff-tiers.md`; this list keeps the overall order.
 5. **Live verification suite** (5.6): the runbook's manual checks as a
    script, run against a throwaway repo, one case per hard limit. Include
    the `.devenv/shell-*.sh` litter count over 50 commands.
-6. **Work host base config**: a NixOS-WSL base configuration (and later a
-   generalised Linux laptop one) shipped with the harness, `harness.enable`
+6. **Managed host base config**: a NixOS-WSL base configuration (and later
+   a native NixOS one) shipped with the harness, `harness.enable`
    on both modules and nothing else, with the WSL-specific checks
    (`/run/WSL` and `/mnt/c` empty inside the sandbox, `cmd.exe` fails).
-   This is the first time the managed layer runs live.
+   First time the managed layer runs live.
 7. **Broker mod** (5.7): observe-only, `/fleet` table from a file under
    `$XDG_RUNTIME_DIR`, deployed through the managed marketplace directory,
    `claude plugin validate` output as the contract. Only after everything
@@ -80,7 +80,7 @@ phased in `docs/handoff-tiers.md`; this list keeps the overall order.
 - Remote Control (`claude remote-control`): the driven session is the local
   process, so managed settings, hook and sandbox apply unchanged; what
   changes is that anyone holding the claude.ai account can prompt a machine
-  with work credentials nearby. Per-host opt-in, off on the work host until
+  with work credentials nearby. Per-host opt-in, off on a managed host until
   the broker and the verification suite exist; check whether managed
   settings can disable it outright.
 - nix-darwin module: same `lib/`, managed settings under

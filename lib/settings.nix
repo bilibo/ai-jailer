@@ -3,7 +3,7 @@
 # can override a key set there. `managed = false` is the repo's
 # .claude/settings.json the devenv module writes: the same rules, minus the
 # keys Claude Code reads from managed settings only, so a host without
-# managed settings (a personal laptop) still gets deny rules, every hook and
+# managed settings (an unmanaged host) still gets deny rules, every hook and
 # the sandbox from the repo alone. On a managed host the two agree;
 # `allowManagedHooksOnly` (the work-host default) keeps the repo copy of the
 # hooks from running as well. A mixed host that sets it false runs both
