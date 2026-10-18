@@ -9,7 +9,7 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
 - NixOS module: managed settings, hook, sandbox, mod policy, directory
   scoping, per-host options.
 - home-manager module: direnv, tmux, `ccmux` (without the broker signal).
-- devenv module: generated project settings, host check, optional image.
+- devenv module: generated project settings, host check.
 - One settings body for the managed and the repo copy; the repo file
   carries deny rules, every hook and the sandbox, so an unmanaged host runs
   on it alone. The hook blocks `settings.local.json` changes and nested
@@ -154,10 +154,9 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
 - nix-darwin module: same `lib/`, managed settings under
   `/Library/Application Support/ClaudeCode/`, seatbelt sandbox keys; the
   glob `denyWrite` entries apply there.
-- Running the `harness.container.enable` image (it builds today) for a
-  project that must not touch the host at all: podman needs
-  `--security-opt unmask=/proc/*` so bubblewrap works inside, and
-  `--userns=keep-id` plus the user-level podman socket when launched from
-  `vscode-fhs`.
+- Container route: built and set aside in the claude-nix-harness-container
+  repo (same `lib/`, root-owned store behind a nix-daemon, devcontainer
+  files per engine; never run under podman or VS Code). The WSL tier does
+  not use it; NixOS-WSL builds its distro tarball from the NixOS module.
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook.
