@@ -2,7 +2,10 @@
 { lib }:
 {
   denyRules = import ./deny-rules.nix { inherit lib; };
-  managedSettings = import ./managed-settings.nix { inherit lib; };
+  # settings { managed = true; } is the managed body, { managed = false; }
+  # the repo body; projectSettings is the latter with its parameters fixed.
+  settings = import ./settings.nix { inherit lib; };
   projectSettings = import ./project-settings.nix { inherit lib; };
-  # managed-tree.nix needs pkgs; import it directly where a derivation is wanted.
+  # hooks.nix and managed-tree.nix need pkgs; import them directly where a
+  # derivation is wanted.
 }

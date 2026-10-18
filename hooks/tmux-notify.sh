@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tmux-notify <waiting|clear>: colour the tmux window a Claude Code session
-# runs in when it waits for input, and clear it on the next prompt. Managed
-# Notification and UserPromptSubmit hooks call this. No tmux: no-op.
+# runs in when it waits for input, and clear it on the next prompt. The
+# Notification and UserPromptSubmit hooks (managed or repo settings) call
+# this. No tmux: no-op.
 set -uo pipefail
 PATH="@path@:${PATH:-}"
 [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || exit 0

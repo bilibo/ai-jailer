@@ -13,25 +13,27 @@ for an agent.
    direnv allow
    ```
    The harness devenv module runs at that moment: it writes
-   `.claude/settings.json` (store symlink, full deny set) and prints a
-   warning if the host has no `/etc/claude-code/managed-settings.json`.
-   That warning means nothing is enforced except the deny rules; stop and
-   fix the host first.
+   `.claude/settings.json` (store symlink: deny rules, hooks, sandbox,
+   bypass mode off). On a host that carries the harness home module it also
+   warns if `/etc/claude-code/managed-settings.json` is missing, which
+   means the NixOS module is not enabled there; fix the host. A personal
+   laptop without the modules runs on the repo file alone and stays quiet.
 2. Start a session in the project's tmux session. Inside the repo (any
    subdirectory or worktree) the project name is optional:
    ```
-   ccode                                # first window
-   ccode --worktree                     # a session that will edit files
-   ccode -p "explain the module layout"
-   ccode <customer>/<repo> --worktree   # from anywhere else; a path works too
+   ccmux                                # first window
+   ccmux --worktree                     # a session that will edit files
+   ccmux -p "explain the module layout"
+   ccmux <customer>/<repo> --worktree   # from anywhere else; a path works too
    ```
-   `ccode` creates or attaches the tmux session named `<customer>-<repo>` and
+   `ccmux` creates or attaches the tmux session named `<customer>-<repo>` and
    opens one window per call. From inside tmux it switches to it; from the
    VS Code terminal it attaches. It resolves the project from the argument,
    else from `HARNESS_PROJECT` (exported by the devenv shell at entry), else
-   from the current directory under the code root. `ccode -n ...` prints the
-   resolution without starting anything.
-3. Several objectives at once: one `ccode` call each. Sessions that edit files
+   from the current directory under the code root. `ccmux -n ...` prints the
+   resolution without starting anything. `ccode` is the former name and
+   still works.
+3. Several objectives at once: one `ccmux` call each. Sessions that edit files
    get `--worktree`; the worktree lives under `.claude/worktrees/<name>`,
    has its own `.devenv/`, and its `.envrc` is auto-allowed only if it is
    byte-identical to the main checkout's (the env hook checks).
@@ -47,7 +49,8 @@ for an agent.
 The agent sees one of these, in this order of precedence:
 
 - `env-guard: git history/index write blocked` (or another `env-guard:`
-  line): the managed hook denied it. Final, including against mods.
+  line): the hook denied it. Final, including against mods on a managed
+  host.
 - A permission denial naming a rule such as `Bash(git push *)`: the deny
   list. Also final.
 - A sandbox error (`Operation not permitted`, a refused host): bubblewrap.
@@ -83,21 +86,28 @@ Copy from the azfn-rust-handler test repo, or by hand:
    Never `source_env`, `source_up`, or a `whitelist.prefix` in direnv.toml.
 4. `.gitignore`: `.devenv/`, `.direnv/`, `.claude/settings.json`,
    `.claude/settings.local.json`, `.claude/worktrees/`.
+   `.worktreeinclude`: `.claude/settings.json`, so a `--worktree` session
+   starts with the repo's rules before devenv regenerates them there.
 5. `CLAUDE.md`: the environment contract (copy the block from the test repo)
    plus project notes.
 6. No `.claude/skills/<x>/.claude-plugin/plugin.json` anywhere. A directory
    with that manifest is a plugin.
-7. `direnv allow`, then `ccode <customer>/<repo> -p "list the tools on PATH"`
+7. `direnv allow`, then `ccmux <customer>/<repo> -p "list the tools on PATH"`
    as a smoke test.
 
 ## 4. Host configuration
 
-All in the NixOS module, see `nixos/default.nix` for every option.
-
 | Host | Set |
 |---|---|
-| Work (NixOS-WSL) | `harness.enable = true;` nothing else; everything strict, everywhere |
-| Personal laptop | `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. |
+| Work laptop, NixOS-WSL | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
+| Personal laptop | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; work repos import `harness/devenv` and bring their own rules. Personal sessions keep whatever your own settings allow. |
+| Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, personal sessions elsewhere. |
+
+See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
+same `harness.allowLocalCommits` and `harness.allowMemoryEdits` as the host
+(the hook is built from the repo's values on a personal laptop), plus
+`harness.settings` for allow rules, `harness.extraAllowedDomains` and
+`harness.extraDeny`.
 
 `allowMemoryEdits` is off by default on purpose: memory under
 `~/.claude/projects/<slug>/memory/` is text that every later session on the
@@ -106,19 +116,21 @@ anything an agent picked up from a repo. With it on, only that directory
 opens; the rest of `~/.claude` stays read-only.
 
 Changing any of it is a rebuild: `nh os switch` or `boot` and reboot.
-Managed settings are read at Claude Code start, so running sessions keep
-the old rules until restarted.
+Claude Code reloads settings files live, but a running session is not the
+place to confirm a change: restart it.
 
-The home-manager side (`home/`) is the same on every host: direnv config,
-tmux rules, `ccode`, `programs.claude-code`. It never carries deny rules.
+The home-manager side (`home/`) is the same on every managed host: direnv
+config, tmux rules, `ccmux`, `programs.claude-code`. It never carries deny
+rules.
 
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
 Unit tests, no Claude Code needed, from a checkout of this repo:
 ```
-nix flake check                                     # both managed trees + ccode, in the Nix sandbox
-nix shell nixpkgs#jq -c tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh   # the installed hook
-tests/ccode-test.sh "$(command -v ccode)"           # after home-manager switch
+nix flake check                                     # both managed trees, the repo settings file, ccmux; in the Nix sandbox
+nix shell nixpkgs#jq -c tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh   # the installed hook, managed host
+nix shell nixpkgs#jq -c tests/hook-test.sh "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' <repo>/.claude/settings.json)"   # the repo's hook
+tests/ccmux-test.sh "$(command -v ccmux)"           # inside a repo shell, or after home-manager switch
 ```
 Run these from your own terminal. Inside a Claude Code session in this repo
 the sandbox masks shell startup files and `.gitmodules` in the working
@@ -127,7 +139,7 @@ directory with device nodes, so Nix cannot read the repo as a git flake and
 directly: `tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh` with jq
 on PATH.
 
-Live checks, in a repo under an enforcement root (the test repo):
+Live checks, inside a harness repo (the test repo), on any host:
 
 ```
 claude -p 'run: grep -i nonewprivs /proc/self/status'      # NoNewPrivs: 1 => sandboxed
@@ -135,17 +147,24 @@ claude -p 'run: git commit -m x'                            # env-guard block
 claude -p 'run: cat ~/.azure/msal_token_cache.json'         # blocked
 claude -p 'run: echo x > devenv.nix'                        # blocked
 claude -p 'edit .envrc and add a comment'                   # blocked
+claude -p 'run: claude --dangerously-skip-permissions -p hi' # blocked (nested session)
 claude -p 'run: which cargo'                                # the devenv one, not system
+claude --debug -p hi 2>&1 | grep -c env-guard               # repo hooks registered
+```
+
+Managed hosts only:
+
+```
 claude --plugin-dir /tmp/x -p hi                            # rejected at startup
 claude --debug -p hi 2>&1 | grep -i allowManagedModsOnly    # guard loaded
 ```
 
-Outside the roots (your home directory): `git commit` allowed, `sudo`
-still blocked.
+Outside the repo: on a personal laptop everything your own settings allow;
+on a mixed host `git commit` allowed, `sudo` still blocked.
 
 After a Claude Code upgrade also re-read the settings reference for the
-keys in `lib/managed-settings.nix`; the file header records the version
-they were checked against. Keys that stop existing are silently ignored,
+keys in `lib/settings.nix`; the file header records the version they were
+checked against. Keys that stop existing are silently ignored,
 which is the dangerous direction.
 
 ## 6. Upgrades and pins
@@ -155,8 +174,9 @@ which is the dangerous direction.
   `onFailure: block`.
 - direnv: `pkgs/direnv.nix` overrides to 2.38.2 while nixpkgs is older.
   When `nix eval nixpkgs#direnv.version` reports 2.38 or newer, delete the
-  file and change the `direnvPackage` default in `lib/managed-tree.nix` to
-  `pkgs.direnv`; both modules already fall back to `pkgs.direnv` on their own.
+  file and point the remaining imports (`lib/managed-tree.nix` default,
+  `flake.nix` packages) at `pkgs.direnv`; the NixOS, home and devenv
+  modules already fall back to `pkgs.direnv` on their own.
 - devenv from nixpkgs (2.4.0 at the time of writing). Each repo pins its own
   devenv inputs in `devenv.lock`; `devenv update harness` bumps the harness
   input in one repo.
@@ -172,6 +192,12 @@ which is the dangerous direction.
   session refuses to start. bubblewrap needs user namespaces
   (`security.allowUserNamespaces`, asserted by the module) and works nested
   inside `vscode-fhs`. Inside a container it needs `/proc` unmasked.
+- **Repo hooks do not fire on a personal laptop.** Interactive sessions
+  hold back every hook from settings files until you accept the workspace
+  trust dialog for the folder; `-p` sessions treat it as trusted. Check
+  with `claude --debug -p hi 2>&1 | grep env-guard`. A dangling
+  `.claude/settings.json` symlink (store path collected) has the same
+  effect; `direnv reload` rewrites it.
 - **Plugin or marketplace refused.** `strictKnownMarketplaces` lists only
   the managed directory plus `extraKnownMarketplaces`. Add the source on
   that host, or accept that the plugin does not load there.
@@ -199,12 +225,23 @@ which is the dangerous direction.
 - Deny rules and the hook match text. `git -C`, `bash -c`, quoting and
   `env` prefixes are covered by normalisation; a script that opens files
   itself is not. The sandbox and Azure RBAC are the layers for that.
-- The sandbox is host-wide and cannot be scoped by directory. What is
-  hidden from agents in work repos is hidden in personal ones too.
-- A session's deny rules are loaded at start. A repo converted while a
-  session is open is not covered until restart.
-- Managed hooks run outside the sandbox with your full permissions. Keep
+- On a managed host the sandbox is host-wide and cannot be scoped by
+  directory. What is hidden from agents in work repos is hidden in personal
+  ones too. On a personal laptop it comes from the repo file and applies
+  inside harness repos only.
+- Settings files reload live, so a repo converted while a session is open
+  picks up the deny rules; hooks from a file that did not exist at start
+  are the uncertain part. Restart the session.
+- The hook refuses `.claude/settings.local.json` changes inside a repo,
+  which is also where "Yes, and don't ask again" writes. The file is still
+  written; the new allow rule applies from the next session. Allow rules
+  for a project belong in `devenv.nix` (`harness.settings`).
+- Hooks run outside the sandbox with your full permissions. Keep
   `env-guard.sh` small; it is the one script that must be right.
+- Without managed settings (personal laptop) the repo file is the top
+  layer. What it cannot do is listed in the README ("What a repo cannot
+  enforce on its own"): mod policy, launch flags of the outer `claude`,
+  sessions started above the repo, the folder trust dialog.
 
 Accepted for now (2026-10-17), after comparing with Hermes Agent, Codex,
 destructive_command_guard and codex-protect. Each is a text-matching gap the

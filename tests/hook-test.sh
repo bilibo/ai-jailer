@@ -134,6 +134,27 @@ block 'claude --plugin-url https://x -p hi'
 block 'claude --mcp-config ./m.json -p hi'
 block 'claude --agents ./a.json -p hi'
 block 'CLAUDE_CODE_PLUGIN_DIRS=/tmp/x claude -p hi'
+# A nested session launched with these flags would load none of the repo's
+# rules (project rule; on a host without managed settings the repo is all
+# there is).
+block 'claude -p hi --setting-sources user'
+block 'claude --setting-sources=user,local -p hi'
+block 'claude --settings /tmp/loose.json -p hi'
+block 'claude --settings=/tmp/loose.json -p hi'
+block 'claude --permission-mode bypassPermissions -p hi'
+block 'claude --permission-mode=acceptEdits -p hi'
+block 'claude --dangerously-skip-permissions -p hi'
+block 'claude --allow-dangerously-skip-permissions -p hi'
+block 'cd sub && claude -p hi --settings x.json'
+block 'bash -c "claude --dangerously-skip-permissions -p hi"'
+block 'claude --bare -p hi'
+allow 'claude -p "summarise the settings reference"'
+allow 'code --settings-file x'
+allow 'claude --version; echo --settings'
+# Backslashes: an in-word escape and a line continuation both normalise away.
+block 'git pu\sh origin main'
+block $'git \\\npush origin main'
+block 'claude --dangerously-skip-permis\sions -p hi'
 
 # --- Edit / Write tool ----------------------------------------------------
 run 0 "$(edit_file $IN/main.tf)"
@@ -191,6 +212,11 @@ block 'claude --plugin-dir ./evil -p hi'
 block 'cmd.exe /c dir'
 run 2 "$(edit_file "$HOME/.claude/settings.json")"
 run 2 "$(edit_file "$HOME/.bashrc")"
+# Personal sessions keep their launch flags and their settings.local.json.
+allow 'claude --dangerously-skip-permissions -p hi'
+allow 'claude --settings /tmp/mine.json -p hi'
+run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$OUT\"}"
+run 2 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"user_settings\",\"cwd\":\"$OUT\"}"
 # A session outside the roots that reaches into a repo under them.
 block "git -C $IN push"
 block "cd $IN && terraform apply"
@@ -206,6 +232,12 @@ fi
 run 2 '{"hook_event_name":"ConfigChange","source":"user_settings"}'
 run 2 '{"hook_event_name":"ConfigChange","source":"policy_settings"}'
 run 0 '{"hook_event_name":"ConfigChange","source":"project_settings"}'
+# settings.local.json outranks the repo file for scalar keys and hot-reloads;
+# under the roots it is blocked, with no cwd it fails closed.
+run 2 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$IN\"}"
+run 2 '{"hook_event_name":"ConfigChange","source":"local_settings"}'
+run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"project_settings\",\"cwd\":\"$IN\"}"
+run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"skills\",\"cwd\":\"$IN\"}"
 
 # --- Session hooks: writes the env preamble -------------------------------
 envfile=$(mktemp)

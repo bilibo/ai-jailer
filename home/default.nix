@@ -10,7 +10,7 @@
 let
   cfg = config.harness;
 
-  ccode = import ../pkgs/ccode.nix {
+  ccmux = import ../pkgs/ccmux.nix {
     inherit pkgs;
     codeRoot = cfg.codeRoot;
   };
@@ -23,7 +23,7 @@ in
       type = lib.types.str;
       default = "${config.home.homeDirectory}/code/git";
       defaultText = lib.literalExpression ''"''${config.home.homeDirectory}/code/git"'';
-      description = "Directory holding <customer>/<repo> checkouts; `ccode` resolves project names under it. Usually one of the NixOS module's enforcementRoots.";
+      description = "Directory holding <customer>/<repo> checkouts; `ccmux` resolves project names under it. Usually one of the NixOS module's enforcementRoots.";
     };
 
     direnvPackage = lib.mkOption {
@@ -83,10 +83,15 @@ in
       # Every repo's .envrc runs `devenv direnvrc`.
       pkgs.devenv
       pkgs.jq
-      ccode
+      ccmux
     ];
 
-    # `ccode` and the devenv module's HARNESS_PROJECT export agree on the root.
-    home.sessionVariables.HARNESS_CODE_ROOT = cfg.codeRoot;
+    home.sessionVariables = {
+      # `ccmux` and the devenv module's HARNESS_PROJECT export agree on the root.
+      HARNESS_CODE_ROOT = cfg.codeRoot;
+      # This module goes with the NixOS module; the devenv module warns at
+      # shell entry when it sees this but no /etc/claude-code.
+      HARNESS_EXPECT_MANAGED = "1";
+    };
   };
 }
