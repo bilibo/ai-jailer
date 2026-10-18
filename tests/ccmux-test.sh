@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-#   ccode-test.sh <path-to-ccode>
+#   ccmux-test.sh <path-to-ccmux-or-ccode>
 #
-# `ccode -n` prints the resolution instead of touching tmux, so this runs
-# anywhere.
+# `ccmux -n` prints the resolution instead of touching tmux, so this runs
+# anywhere. flake.nix runs it once per entry point (ccmux and the ccode alias).
 set -uo pipefail
-ccode="${1:?usage: ccode-test.sh <ccode>}"
+ccmux="${1:?usage: ccmux-test.sh <ccmux>}"
 pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 root="$tmp/code/git"
@@ -16,9 +16,9 @@ unset HARNESS_PROJECT
 check() {
   local want="$1" re="$2" dir="$3"; shift 3
   local out got
-  out=$(cd "$dir" && "$ccode" -n "$@" 2>&1); got=$?
+  out=$(cd "$dir" && "$ccmux" -n "$@" 2>&1); got=$?
   if [ "$got" = "$want" ] && [[ "$out" =~ $re ]]; then pass=$((pass+1)); else
-    fail=$((fail+1)); echo "FAIL (want $want /$re/, got $got): cd $dir && ccode -n $*"; echo "  $out"; fi
+    fail=$((fail+1)); echo "FAIL (want $want /$re/, got $got): cd $dir && ccmux -n $*"; echo "  $out"; fi
 }
 ok() { check 0 "$@"; }
 
@@ -47,5 +47,5 @@ check 66 "no such repo" "$tmp/elsewhere" infra
 check 66 "not under" "$tmp" elsewhere
 check 66 "not under" "$root" acme
 
-echo "ccode-test: $pass passed, $fail failed"
+echo "ccmux-test ($(basename "$ccmux")): $pass passed, $fail failed"
 [ "$fail" = 0 ]
