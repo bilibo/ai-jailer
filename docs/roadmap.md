@@ -7,21 +7,28 @@ parentheses refer to sections of the original build brief.
 
 - NixOS module: managed settings, hook, sandbox, mod policy, directory
   scoping, per-host options (5.2)
-- home-manager module: direnv, tmux, `ccode` (5.1, without the broker signal)
+- home-manager module: direnv, tmux, `ccmux` (5.1, without the broker signal)
 - devenv module: generated project settings, host check, optional image (new)
-- Hook unit tests (133 cases, 157 with enforcement roots) and ccode
-  resolver tests, run by `nix flake check` (part of 5.6)
+- Hook unit tests (154 cases, 180 with enforcement roots), the generated
+  repo settings file and ccmux resolver tests, run by `nix flake check`
+  (part of 5.6)
 - Own repo with a `flake.nix` exporting `nixosModules.harness`,
   `homeModules.harness`, `lib`, the managed trees as packages and the tests
   as `checks` (2026-10-17)
 - Test repo: azfn-rust-handler, verified through the Functions host
 - Framework laptop config cleanup, trusted-users, direnv 2.38
+- Repo-only shape (2026-10-18): one settings body for the managed and the
+  repo copy, the devenv module writes hooks and sandbox too, the hook
+  blocks `settings.local.json` changes and nested `claude` launch flags,
+  `project-settings-test` in `nix flake check`. The personal laptop drops
+  the host modules; the managed layer is the work-host shape.
 
 ## Next, in order
 
-1. **Activate on this laptop.** `nh os boot`, reboot, run the live checks in
-   the runbook against the test repo. This is the first time a real
-   session runs under the managed settings.
+1. **Verify the repo-only shape on this laptop.** After nixos-config drops
+   the harness modules: `direnv reload` in the test repo, accept the trust
+   dialog once, run the live checks in the runbook. First time a real
+   session runs on the repo file alone.
 2. **devenv-base repo with the `azure` module** (5.3): `az` pin, Terraform
    with azurerm/azuread/alz providers, tflint, trivy, and the
    `AZURE_CONFIG_DIR` task under `.git/devenv-base/azure` shared by
@@ -38,9 +45,11 @@ parentheses refer to sections of the original build brief.
 5. **Live verification suite** (5.6): the runbook's manual checks as a
    script, run against a throwaway repo, one case per hard limit. Include
    the `.devenv/shell-*.sh` litter count over 50 commands.
-6. **WSL host**: a second host in this flake with nixos-wsl, `harness.enable`
-   only, and the WSL-specific checks (`/run/WSL` and `/mnt/c` empty inside
-   the sandbox, `cmd.exe` fails).
+6. **Work host base config**: a NixOS-WSL base configuration (and later a
+   generalised Linux laptop one) shipped with the harness, `harness.enable`
+   on both modules and nothing else, with the WSL-specific checks
+   (`/run/WSL` and `/mnt/c` empty inside the sandbox, `cmd.exe` fails).
+   This is the first time the managed layer runs live.
 7. **Broker mod** (5.7): observe-only, `/fleet` table from a file under
    `$XDG_RUNTIME_DIR`, deployed through the managed marketplace directory,
    `claude plugin validate` output as the contract. Only after everything
@@ -73,10 +82,11 @@ parentheses refer to sections of the original build brief.
   settings can disable it outright.
 - nix-darwin module: same `lib/`, managed settings under
   `/Library/Application Support/ClaudeCode/`, seatbelt sandbox keys.
-- `harness.container.enable` for a project that must not touch the host at
-  all: devenv builds it, podman runs it with `--security-opt unmask=/proc/*`
-  so bubblewrap works inside. Known to need `--userns=keep-id` and the
-  user-level podman socket when launched from `vscode-fhs`.
+- Running the `harness.container.enable` image (it builds today) for a
+  project that must not touch the host at all: podman needs
+  `--security-opt unmask=/proc/*` so bubblewrap works inside, and
+  `--userns=keep-id` plus the user-level podman socket when launched from
+  `vscode-fhs`.
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook (7.6).
 - A `wsl/` or nix-darwin module alongside `nixos/`, consuming the same

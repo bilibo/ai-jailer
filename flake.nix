@@ -25,17 +25,33 @@
       # For other module systems, e.g. a future nix-darwin module.
       lib = import ./lib { inherit (nixpkgs) lib; };
 
-      packages = forAll (pkgs: {
-        # A dedicated work host: every rule everywhere.
-        managed = managedTree pkgs { };
-        # A personal machine: project rules only under the roots.
-        managed-scoped = managedTree pkgs {
-          enforcementRoots = [ "~/code/git" ];
-          strictAllowlist = false;
-        };
-        ccode = import ./pkgs/ccode.nix { inherit pkgs; };
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.managed;
-      });
+      packages = forAll (
+        pkgs:
+        let
+          hooks = import ./lib/hooks.nix {
+            inherit pkgs;
+            inherit (pkgs) lib;
+            direnvPackage = import ./pkgs/direnv.nix { inherit pkgs; };
+          };
+        in
+        {
+          # A dedicated work host: every rule everywhere.
+          managed = managedTree pkgs { };
+          # A personal machine: project rules only under the roots.
+          managed-scoped = managedTree pkgs {
+            enforcementRoots = [ "~/code/git" ];
+            strictAllowlist = false;
+          };
+          # What the devenv module writes into a repo, with default options.
+          project-settings = (pkgs.formats.json { }).generate "claude-settings.json" (
+            (import ./lib { inherit (pkgs) lib; }).projectSettings { hookDir = "${hooks}"; }
+          );
+          # bin/ccmux and bin/ccode (the former name).
+          ccmux = import ./pkgs/ccmux.nix { inherit pkgs; };
+          ccode = self.packages.${pkgs.stdenv.hostPlatform.system}.ccmux;
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.managed;
+        }
+      );
 
       # The hook's out-of-root cases only run with roots set, hence both trees.
       checks = forAll (
@@ -49,18 +65,20 @@
               {
                 nativeBuildInputs = [
                   pkgs.bash
-                  pkgs.jq # hook-test.sh builds its JSON cases with jq
+                  pkgs.jq # the tests build and inspect JSON with jq
                 ];
               }
               ''
-              export HOME=$TMPDIR
-              bash ${script} ${args} | tee $out
-            '';
+                export HOME=$TMPDIR
+                bash ${script} ${args} | tee $out
+              '';
         in
         {
           hook-test = test "hook-test" ./tests/hook-test.sh "${p.managed}/hooks/env-guard.sh";
           hook-test-scoped = test "hook-test-scoped" ./tests/hook-test.sh "${p.managed-scoped}/hooks/env-guard.sh";
-          ccode-test = test "ccode-test" ./tests/ccode-test.sh "${p.ccode}/bin/ccode";
+          project-settings-test = test "project-settings-test" ./tests/project-settings-test.sh "${p.project-settings}";
+          ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
+          ccode-test = test "ccode-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccode";
         }
       );
     };

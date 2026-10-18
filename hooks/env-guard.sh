@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# env-guard: the one managed hook. Registered in managed settings for
-# SessionStart, CwdChanged, FileChanged, ConfigChange and PreToolUse; the
-# Setup branch below is ready but not registered.
+# env-guard: the one hook. Registered for SessionStart, CwdChanged,
+# FileChanged, ConfigChange and PreToolUse, from managed settings on a
+# managed host and from the repo's .claude/settings.json (devenv module)
+# everywhere; the Setup branch below is ready but not registered.
 #
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
 # ConfigChange (together with onFailure = "block" in the hook registration).
-# Needs Claude Code >= 2.1.295. managed-tree.nix puts jq, direnv and
+# Needs Claude Code >= 2.1.295. lib/hooks.nix puts jq, direnv and
 # coreutils from the store first on PATH, so the guard never runs the
 # user's copies of them.
 #
@@ -15,7 +16,7 @@ set -uo pipefail
 PATH="@path@:${PATH:-}"
 trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 
-# Substituted by managed-tree.nix from the harness.* options: 0 or 1, and a
+# Substituted by lib/hooks.nix from the harness.* options: 0 or 1, and a
 # colon-separated list where `~` means $HOME and empty means everywhere.
 ALLOW_LOCAL_COMMITS="@allowLocalCommits@"
 ALLOW_MEMORY_EDITS="@allowMemoryEdits@"
@@ -83,6 +84,10 @@ ENV
     src=$(jq -r '.source // empty' <<<"$input")
     case "$src" in
       user_settings|policy_settings) deny "config change to $src blocked" ;;
+      # .claude/settings.local.json outranks the repo's settings.json for
+      # scalar keys (sandbox.enabled, defaultMode) and is applied live, so
+      # under the roots a change to it is refused (project rule).
+      local_settings) [ "$in_scope" = 1 ] && deny "config change to $src blocked" ;;
     esac
     exit 0 ;;
 
@@ -116,9 +121,10 @@ ENV
 
       Bash)
         cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
-        # Normalise: lowercase, collapse whitespace, strip quotes. Catches
-        # `bash -c '...'`, `env X=1 git push`, `git 'push'`, `git -C . push`.
-        n=$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | tr -d "'\"")
+        # Normalise: lowercase, strip backslashes, collapse whitespace, strip
+        # quotes. Catches `bash -c '...'`, `env X=1 git push`, `git 'push'`,
+        # `git -C . push`, `git pu\sh` and a backslash-newline continuation.
+        n=$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
         [ "$in_scope" = 1 ] || { mentions_root "$n" && in_scope=1; }
         b='(^|[ ;&|(])'       # start of a (sub)command
         e='( |$)'             # end of a word
@@ -175,6 +181,17 @@ ENV
         [[ "$n" =~ $re ]] && deny "plugin install blocked"
         re='--plugin-(dir|url)|claude_code_plugin_dirs=|--mcp-config|--agents( |=)'
         [[ "$n" =~ $re ]] && deny "plugin sideload blocked"
+
+        # 6. nested sessions that would skip the repo's rules (project rule).
+        # Without managed settings the repo file is the only rule source, and
+        # these flags replace or bypass it for the child session (`--bare`
+        # skips every hook). Arguments stop at a command separator so a flag
+        # mentioned in a later command does not count. A renamed copy of the
+        # binary gets past this; the sandbox is the layer for that.
+        if [ "$in_scope" = 1 ]; then
+        re="(^|[^a-z])claude( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions)( |=|$)"
+        [[ "$n" =~ $re ]] && deny "claude launch flag blocked"
+        fi
         exit 0 ;;
     esac
     exit 0 ;;

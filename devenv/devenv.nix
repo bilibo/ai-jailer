@@ -79,8 +79,8 @@ in
         if [ ! -r "${cfg.managedSettingsPath}" ]; then
           echo "harness: ${cfg.managedSettingsPath} is missing: no hook, no sandbox, no mod policy on this host" >&2
         fi
-        # Name this project for `ccode`: <customer>/<repo> relative to the code
-        # root, from the main checkout or any worktree under it. A bare `ccode`
+        # Name this project for `ccmux`: <customer>/<repo> relative to the code
+        # root, from the main checkout or any worktree under it. A bare `ccmux`
         # in this shell then opens the right tmux session.
         _harness_root="''${HARNESS_CODE_ROOT:-$HOME/code/git}"; _harness_root="''${_harness_root%/}"
         if [[ "$DEVENV_ROOT" == "$_harness_root/"*/* ]]; then

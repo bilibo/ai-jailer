@@ -1,24 +1,27 @@
-# Carries the full deny set and the SSH rule because managed settings carry
-# only the universal subset when the host scopes enforcement by directory.
-# The agent cannot edit the file (Edit deny rule + hook), so inside the repo
-# it holds as a belt to the hook's braces.
+# The repo's .claude/settings.json, written by the devenv module. The full
+# settings body without the managed-only keys (settings.nix): on a host
+# without managed settings this file alone carries the deny rules, the hooks
+# and the sandbox. The agent cannot edit it (Edit deny rule, hook, sandbox
+# denyWrite, and it is a read-only store symlink), so inside the repo it
+# holds as a belt to the hook's braces.
 { lib }:
 {
+  # Store path of lib/hooks.nix, built with empty enforcement roots.
+  hookDir,
+  platform ? "linux",
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
+  extraDeny ? [ ],
+  extraAllowedDomains ? [ ],
 }:
-let
-  denyRules = import ./deny-rules.nix { inherit lib; };
-in
-{
-  "$schema" = "https://json.schemastore.org/claude-code-settings.json";
-  permissions = {
-    defaultMode = "default";
-    deny = denyRules { inherit allowLocalCommits allowMemoryEdits; };
-  };
-  # Sandbox deny entries merge across scopes and cannot be removed by a lower
-  # one, so this holds from the repo even though the sandbox itself is
-  # configured in managed settings.
-  sandbox = import ./ssh-sandbox.nix;
-  worktree.baseRef = "head";
+import ./settings.nix { inherit lib; } {
+  managed = false;
+  inherit
+    hookDir
+    platform
+    allowLocalCommits
+    allowMemoryEdits
+    extraDeny
+    extraAllowedDomains
+    ;
 }
