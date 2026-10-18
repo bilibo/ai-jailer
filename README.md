@@ -25,7 +25,7 @@ Operating it: `docs/runbook.md`. What is next: `docs/roadmap.md`.
 
 ```
 lib/        pure Nix: deny rules (universal + project), settings.nix (one body for the managed and the repo copy), hooks packaging, managed-tree packaging
-hooks/      env-guard.sh (the one hook), tmux-notify.sh
+hooks/      env-guard.sh (the guard hook), tmux-notify.sh
 nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json with deny rules, hooks and sandbox; `ccmux`; optional image

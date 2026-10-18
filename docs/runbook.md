@@ -266,3 +266,6 @@ other layers are meant to catch; revisit when tightening:
   to the sandbox write allowlist.
 - Outbound transfer (`curl -T`, `scp`, `ngrok`, `ssh -R`): the network
   allowlist is the layer; open by choice on a personal machine.
+- The nested `claude` launch-flag rule matches the flag word anywhere in
+  the command, quotes stripped, so `claude -p "why is --bare refused"` is
+  denied too. Rephrase the prompt.

@@ -25,6 +25,9 @@ parentheses refer to sections of the original build brief.
 
 ## Next, in order
 
+The tier, read-fence, customer-module and `ccmux` subcommand work is
+phased in `docs/handoff-tiers.md`; this list keeps the overall order.
+
 1. **Verify the repo-only shape on this laptop.** After nixos-config drops
    the harness modules: `direnv reload` in the test repo, accept the trust
    dialog once, run the live checks in the runbook. First time a real
