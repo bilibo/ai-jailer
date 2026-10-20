@@ -24,6 +24,10 @@
   marketplaceDir ? null,
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
+  # Let the claude.ai account's connectors (Gmail, Drive, Notion, ...) load.
+  # They are MCP servers that run outside the Bash sandbox, so a session with
+  # them can move data out of the repo without any command the hook sees.
+  allowConnectors ? false,
   # Managed only. Non-empty: managed deny rules carry only the universal
   # subset, the hook applies project rules by cwd, the repo carries the
   # full set.
@@ -73,6 +77,12 @@ assert managed -> marketplaceDir != null;
   };
 
   worktree.baseRef = "head";
+
+  # Honoured from any scope, the repo file included; a `true` in user or
+  # managed settings cannot be undone here. Account-synced skills and plugins
+  # (`syncClaudeAiSkills`, `syncClaudeAiPlugins`) are user-or-managed scope
+  # and still load: README, "What a repo cannot enforce on its own".
+  disableClaudeAiConnectors = !allowConnectors;
 
   hooks = {
     # One env hook only: all matching hooks run in parallel and would race on
@@ -151,6 +161,11 @@ assert managed -> marketplaceDir != null;
       # Deny entries merge across scopes; no lower scope removes one.
       # .claude/worktrees must stay writable, so the settings files are
       # listed one by one instead of the whole directory.
+      # On Linux and WSL the `**/` entries have no effect: the sandboxing
+      # docs say write entries containing `*`, `?` or `[` are skipped there
+      # (confirmed live 2026-10-20). They stay for macOS; under the working
+      # directory Claude Code's own protections cover the same files, and the
+      # hook refuses shell writes to them. Literal paths are a roadmap item.
       denyWrite = [
         "~/.claude"
         "~/.config"

@@ -11,6 +11,7 @@
   platform ? "linux",
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
+  allowConnectors ? false,
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
 }:
@@ -21,6 +22,7 @@ import ./settings.nix { inherit lib; } {
     platform
     allowLocalCommits
     allowMemoryEdits
+    allowConnectors
     extraDeny
     extraAllowedDomains
     ;

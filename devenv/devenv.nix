@@ -58,6 +58,12 @@ in
       description = "Let agents write their auto-memory under ~/.claude/projects. Match the host's harness.allowMemoryEdits where there is one.";
     };
 
+    allowConnectors = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Let the claude.ai account's connectors (Gmail, Drive, Notion, ...) load in sessions in this repo. They are MCP servers outside the Bash sandbox. A user or managed `false` wins over a `true` here.";
+    };
+
     platform = lib.mkOption {
       type = lib.types.enum [
         "linux"
@@ -124,6 +130,7 @@ in
           platform
           allowLocalCommits
           allowMemoryEdits
+          allowConnectors
           extraDeny
           extraAllowedDomains
           ;
