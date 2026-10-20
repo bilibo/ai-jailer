@@ -3,6 +3,57 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-21
+
+- Sandbox hardening, items 1, 2 and 4 of the roadmap's list: the bootstrap
+  writes `sandbox.network.strictAllowlist = true` into the user-scope
+  `~/.claude/settings.json` (merged with jq, reported by the host check,
+  removed by the reset; `--no-account-sync` also turns `syncClaudeAiSkills`
+  and `syncClaudeAiPlugins` off, default unchanged). The repo file carries
+  its own protected paths as literal `denyWrite` entries under
+  `config.devenv.root` (`repoRoot` in `lib/settings.nix`), since Linux
+  skips the `**/` globs; confirmed regenerating the test repo's file. The
+  settings body sets `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1"` (docs:
+  strips credential-shaped variables from Bash commands, hooks and stdio
+  MCP servers, keeps filesystem isolation on, PID namespace on Linux) and
+  denies `GITHUB_TOKEN`, `GH_TOKEN` and the enterprise variants, which the
+  scrub keeps on purpose. `project-settings-test` 18 checks; `live-check`
+  cases 11 and 12 added, to be run from a terminal.
+- One CLI: `scripts/bootstrap-fedora.sh`, `init-repo.sh` and `live-check.sh`
+  became `harness bootstrap|upgrade|doctor|reset`, `harness init` and
+  `harness check` (`nix run .#harness -- <command>`; `bootstrap` adds
+  `harness` to the profile). `--check` is `doctor`, now also running
+  `claude doctor` and, inside a repo, checking the settings symlink, the
+  direnv approval and the hooks; every command takes `--dry-run` (never
+  sudo), `--yes`, `--verbose`. `scripts/install.sh` (curl-able, under 100
+  lines) does the root steps before Nix exists. `bootstrap` writes a
+  receipt; `reset` and `upgrade` read it and fall back to the built-in
+  lists without one. New checks `harness-doctor-test` and
+  `harness-init-dry-run-test`. Built by an Opus worker from the roadmap's
+  design; `reset` with a receipt also removes the dnf packages the
+  bootstrap added (tmux, git-core, ...), the plan says so before asking.
+- Read fence prototype, `harness.readFence` (off by default): live in the
+  test repo through a temporary `devenv.local.nix`. First run: the home
+  directory was hidden as intended but `DEVENV_ROOT` was unset, because
+  `~/.nix-profile` is a symlink and allowed paths are mounted by their real
+  path, so direnv fell off PATH. Fixed in the hook's preamble (direnv and
+  devenv by store path, `lib/hooks.nix`); second run: devenv shell loaded,
+  `~/.bashrc` and `~/.config/Code` unreadable, `~/.claude/shell-snapshots`
+  readable so the Bash tool works. The hook refused the first probe for
+  naming the credentials file, as it should.
+- Nix hygiene after the CLI landed: `pkgs/harness.nix` took the whole
+  flake source as an input (`src = self`, for a store-path fallback ref),
+  so every edit in the checkout rebuilt it and the fallback pointed at a
+  path garbage collection removes; it now takes `./tests` only and falls
+  back to `github:bilibo/claude-nix-harness`. New `formatter` output
+  (`nixfmt-tree`), `nix fmt` clean; `statix` and `deadnix` leave two
+  pre-existing style notes in `home/default.nix` and `pkgs/direnv.nix`.
+- Verified against the Claude Code docs (env-vars, sandboxing, settings
+  reference): the scrub variable and what it keeps, `credentials.envVars`
+  `deny` from any scope with no built-in list, `strictAllowlist` ignored
+  from project and local scope, only a `false` honoured for the two sync
+  keys, `env` from the repo file after trust.
+
 ## 2026-10-20
 
 - Unmanaged Fedora host: `scripts/bootstrap-fedora.sh` (Fedora 44's own

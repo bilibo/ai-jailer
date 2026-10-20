@@ -5,6 +5,8 @@
   pkgs,
   lib,
   direnvPackage,
+  # What the env preamble puts on PATH inside the sandbox, next to direnv.
+  devenvPackage ? pkgs.devenv,
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
   # Empty: project rules everywhere. The repo settings always build with an
@@ -37,6 +39,10 @@ let
         allowLocalCommits = if allowLocalCommits then "1" else "0";
         allowMemoryEdits = if allowMemoryEdits then "1" else "0";
         enforcementRoots = lib.concatStringsSep ":" enforcementRoots;
+        toolPath = lib.makeBinPath [
+          direnvPackage
+          devenvPackage
+        ];
       };
   tmuxNotify = mkHook "tmux-notify.sh" [ pkgs.tmux ] { };
 in

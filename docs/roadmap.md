@@ -30,91 +30,83 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   the root-owned `nix.conf` instead; `--trusted-user` opts in).
 - Account connectors off in harness repos (`disableClaudeAiConnectors`
   from the repo file, `harness.allowConnectors` per repo), 2026-10-20.
+- Sandbox hardening, the first three items of the 2026-10-20 audit
+  (2026-10-21): the bootstrap writes `sandbox.network.strictAllowlist =
+  true` into the user-scope `~/.claude/settings.json` (`--no-account-sync`
+  adds `syncClaudeAiSkills` and `syncClaudeAiPlugins = false`); the repo
+  file lists its own settings, hooks, skills, plugin manifest and `.git`
+  hooks and config as literal `denyWrite` paths under `config.devenv.root`,
+  which Linux honours; `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1"` strips
+  credential-shaped variables from every subprocess and the GitHub tokens
+  the scrub keeps are `deny` entries. `project-settings-test` 18 checks;
+  `live-check` cases 11 (repo write) and 12 (env scrub) written, not yet
+  run.
+- One CLI instead of three scripts (2026-10-21): `harness` (`pkgs/harness.nix`)
+  with `bootstrap`, `upgrade`, `doctor`, `init`, `check`, `reset` and shared
+  `--dry-run`, `--yes`, `--verbose`; the script bodies under `pkgs/harness/`,
+  shellchecked at build time; `scripts/install.sh` does the pre-Nix root
+  steps and hands over to `harness bootstrap --no-root`; a receipt at
+  `~/.local/state/claude-nix-harness/receipt.json` drives `reset` and
+  `upgrade`; `harness doctor` and `harness init --dry-run` run in
+  `nix flake check`.
+- Read fence prototype (2026-10-21): `harness.readFence` (off by default)
+  hides the rest of `$HOME` from sandboxed commands; the hook's env preamble
+  puts direnv and devenv on PATH by store path because `~/.nix-profile`, a
+  symlink, is not mounted back into a fenced sandbox. Live in the test repo:
+  devenv shell loads, `~/.bashrc` and the VS Code settings unreadable,
+  `~/.claude` present for the shell snapshot. `project-settings-fenced-test`
+  (21 checks).
 
 ## Next, in order
 
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
-   (live-check 10/10). Left: a `ccmux` session in the test repo, the trust
-   dialog accepted once, hooks seen firing and the tmux window turning
-   orange. The Notification matcher names are verified against the hooks
-   reference; whether the event fires in tmux is not.
-2. **Sandbox hardening**, from the 2026-10-20 audit (runbook section 8,
-   "Sandbox limits"), cheapest and safest first. Each item is a
+   (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
+   Left: a `ccmux` session in the test repo, the trust dialog accepted
+   once, hooks seen firing and the tmux window turning orange. The
+   Notification matcher names are verified against the hooks reference;
+   whether the event fires in tmux is not.
+2. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
+   section 8, "Sandbox limits"); the strict allowlist, the literal
+   `denyWrite` paths and the environment scrub are done. Each item is a
    `lib/settings.nix` change with a `project-settings-test` check, or a
-   bootstrap change, plus a `live-check.sh` case where the behaviour is
-   only visible live:
-   1. `sandbox.network.strictAllowlist = true` in the user-scope
-      `~/.claude/settings.json`, written by `bootstrap-fedora.sh` (the key
-      is user-or-managed scope; the repo file cannot carry it). Same place
-      for `syncClaudeAiSkills` and `syncClaudeAiPlugins` if the work host
-      should not load account-synced skills; decision for Raul.
-   2. Literal `denyWrite` paths in place of the `**/` globs Linux skips:
-      the test repo's own `.claude/settings.json`, `.git/hooks`,
-      `.git/config` via `config.devenv.root` at devenv eval time. Keep the
-      globs for macOS.
-   3. Read fence: `denyRead ["~/"]` plus `allowRead` for the repo,
-      `~/.nix-profile`, `~/.local/state/nix`, `~/.cache/nix`,
-      `~/.cache/devenv`, `~/.local/share/direnv` ("the narrower path wins").
-      Prototype in the test repo first: if the hook's `direnv export`
-      preamble stops working inside the sandbox, every command runs without
-      the devenv shell. Live cases: a sibling-repo read, a credential read
-      through a reader the hook does not list.
-   4. Environment scrub: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, or a longer
-      `credentials.envVars` deny list.
-   5. `permissions.blockReadsOutsideWorkingDirectories = true` last. Any
+   bootstrap change, plus a `live-check` case where the behaviour is only
+   visible live:
+   1. Read fence, prototyped live in the test repo on 2026-10-21 and kept
+      opt-in: `harness.readFence = true` gives `denyRead ["~/"]` plus
+      `allowRead` for the repo and the shell-entry paths (`lib/settings.nix`),
+      `harness.extraAllowRead` for what the project reads under `$HOME`.
+      Left: turn it on in a real repo and watch what breaks (a `path:`
+      devenv input and `~/.cargo` are the known cases), then decide the
+      default; `harness check` runs case 13 in a fenced repo.
+   2. `permissions.blockReadsOutsideWorkingDirectories = true` last. Any
       scope, `true` wins; it stops the Read tool outside the working
       directories, which also stops a session in the test repo reading the
       harness checkout. Decide per tier (handoff phase 2).
-   6. Accepted, not closable from a repo: every unix socket reachable
+   3. Accepted, not closable from a repo: every unix socket reachable
       (`allowAllUnixSockets` is all-or-none on Linux).
-3. **One CLI instead of three scripts.** The installer survey (2026-10-20:
-   azd `install-azd.sh`, Determinate `nix-installer`, `rustup-init.sh`, uv
-   `install.sh`) gives the shape: a shim that only gets the real tool
-   running, then a versioned tool with subcommands, a plan or dry-run, a
-   receipt that drives uninstall, and a self-test. Here the tool is
-   installable by Nix, so no compiled installer is needed:
-   - `scripts/install.sh`, curl-able, under 100 lines: the pre-Nix root
-     steps only (`dnf install nix nix-daemon ...`, the `nix.conf` block, the
-     SELinux label, the socket), then
-     `exec nix run <harness>#harness -- bootstrap "$@"`.
-   - `pkgs/harness.nix`: one `writeShellApplication` named `harness` with
-     `bootstrap`, `doctor` (today's `--check`, plus `claude doctor` and the
-     repo's symlink and hook state), `init` (today's `init-repo.sh`),
-     `check` (today's `live-check.sh`), `upgrade`, `reset`; shared
-     `--dry-run`, `--yes`, `--verbose`. The script bodies move under
-     `pkgs/harness/` unchanged, so shellcheck keeps covering them.
-   - A receipt, `~/.local/state/claude-nix-harness/receipt.json`: packages
-     added, files written, root steps done, harness revision. `reset` and
-     `upgrade` read it instead of a hard-coded list (what azd's uninstall
-     lacks and the Determinate installer has).
-   - `ccmux` stays the launcher. `harness doctor` is what the handoff
-     called `ccmux doctor`; `harness init` is the first half of `ccmux new`.
-   - Tests: `harness doctor` and `harness init --dry-run` under a temp HOME
-     in `nix flake check`; `harness check` as a `nix run` app, it needs
-     the API.
-4. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
+3. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
    azurerm/azuread/alz providers, tflint, trivy, and the `AZURE_CONFIG_DIR`
    task under `.git/devenv-base/azure` shared by worktrees.
    `imports: - devenv-base/azure` resolves to `azure/devenv.nix`, same rule
    as `harness/devenv`.
-5. **Repo template**: the test repo minus Rust, plus the azure module;
+4. **Repo template**: the test repo minus Rust, plus the azure module;
    `harness init` renders it. Convert one real customer repo; confirm
    `az account show` and `terraform plan` inside the sandbox with the
    network allowlist, and record the exact blob hosts the first
    `terraform init` and `trivy` run need.
-6. **Reader-only service principal per customer.** The one control that
+5. **Reader-only service principal per customer.** The one control that
    holds against every client, including things the hook never sees. Human
    logs it into the repo's `AZURE_CONFIG_DIR`.
-7. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
+6. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
    a throwaway repo (`harness init` into a temporary code root), the cases
    from item 2, the `.devenv/shell-*.sh` litter count over 50 commands,
    `harness doctor --full` running it.
-8. **Managed host base config**: a NixOS-WSL base configuration (and later
+7. **Managed host base config**: a NixOS-WSL base configuration (and later
    a native NixOS one) shipped with the harness, `harness.enable` on both
    modules and nothing else, with the WSL-specific checks (`/run/WSL` and
    `/mnt/c` empty inside the sandbox, `cmd.exe` fails). First time the
    managed layer runs live.
-9. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
+8. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
    before the next: observe (`/fleet` from `$.store`, tier in the status
    line, tier contract in the system prompt), propose (`/propose` and a
    `/proposals` pane with accept and reject in the platform session), gate
@@ -140,9 +132,10 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
 - Per-command env evaluation cost: measure once the azure module is in;
   the SessionStart-only variant is the fallback.
 - Account-synced skills on the work host: off (`syncClaudeAiSkills`,
-  user or managed scope) or on. Today's sessions load the official
-  marketplace plugins and the claude.ai skills, none of which the harness
-  reviews.
+  `syncClaudeAiPlugins`, user or managed scope; the bootstrap's
+  `--no-account-sync` writes the `false`s) or on (the default). Today's
+  sessions load the official marketplace plugins and the claude.ai skills,
+  none of which the harness reviews.
 
 ## Ideas, not planned
 

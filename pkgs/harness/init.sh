@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-#   scripts/init-repo.sh <customer>/<repo> | <path> [--harness <flakeref>] [--force] [--dry-run] [--no-shell]
+#   harness init <customer>/<repo> | <path> [--harness <flakeref>] [--force] [--no-shell]
+#                [--dry-run] [--yes] [--verbose]
 #
-# Section 3 of the runbook as a script. Renders the files a repo needs to
+# Section 3 of the runbook as a subcommand. Renders the files a repo needs to
 # import the harness devenv module (devenv.yaml, devenv.nix, .envrc,
 # .gitignore, .worktreeinclude, CLAUDE.md), then does the first shell entry
 # (direnv allow, approval of the files require_allowed names, which makes
@@ -12,34 +13,47 @@
 # repo given by path. Files that exist are left alone and reported; --force
 # overwrites the harness-owned ones (devenv.yaml, .envrc). .gitignore and
 # .worktreeinclude only gain the lines they lack; CLAUDE.md gains the
-# contract block if it has none.
+# contract block if it has none. --dry-run prints the files it would write
+# and creates nothing; --verbose traces the shell step; --yes is accepted for
+# symmetry (nothing here asks).
 #
-# The harness input defaults to this checkout (`path:`), the form for
-# developing the harness. A repo meant to outlive the checkout pins a git URL
-# instead: --harness github:bilibo/claude-nix-harness. devenv.lock records
-# the revision either way; `devenv update harness` moves it.
+# The harness input is the same ref bootstrap installs from: --harness, else
+# HARNESS_REF, else the receipt's, else the profile's ccmux entry. A `path:`
+# checkout is the form for developing the harness; a repo meant to outlive
+# the checkout pins a git URL instead: --harness
+# github:bilibo/claude-nix-harness, which is also the default when none of
+# them is set. A `path:/nix/store/...` ref makes init warn: garbage
+# collection removes it.
+# devenv.lock records the revision either way; `devenv update harness` moves
+# it.
 # shellcheck disable=SC2016  # single quotes are deliberate where direnv or bash must see the `$`
 set -euo pipefail
 
-HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-HARNESS_REF="path:$HARNESS_DIR"
-FORCE=0; DRY=0; NO_SHELL=0; target=""
+# Run straight from a checkout (bash pkgs/harness/init.sh), the checkout is the ref.
+HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
+HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
+HARNESS_TESTS="${HARNESS_TESTS:-$HARNESS_DIR/tests}"
+FORCE=0; DRY=0; NO_SHELL=0; VERBOSE=0; target=""
+usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --harness) HARNESS_REF="${2:?--harness needs a flake reference}"; shift ;;
+    --harness) HARNESS_REF="${2:?--harness needs a flake reference}"; HARNESS_REF_FROM=--harness; shift ;;
     --force) FORCE=1 ;;
     --dry-run) DRY=1 ;;
     --no-shell) NO_SHELL=1 ;;
-    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    -*) echo "init-repo: unknown argument $1 (see --help)" >&2; exit 64 ;;
-    *) [ -z "$target" ] || { echo "init-repo: one target only" >&2; exit 64; }; target="$1" ;;
+    --verbose) VERBOSE=1 ;;
+    --yes) ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "harness init: unknown argument $1 (see --help)" >&2; exit 64 ;;
+    *) [ -z "$target" ] || { echo "harness init: one target only" >&2; exit 64; }; target="$1" ;;
   esac
   shift
 done
-[ -n "$target" ] || { sed -n '2p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+[ -n "$target" ] || { echo "usage: harness init <customer>/<repo> | <path> (see --help)" >&2; exit 64; }
 
 root="${HARNESS_CODE_ROOT:-$HOME/code/git}"; root="${root%/}"
-die() { echo "init-repo: $1" >&2; exit "${2:-1}"; }
+die() { echo "harness init: $1" >&2; exit "${2:-1}"; }
 note() { printf '%-10s %s\n' "$1" "$2"; }
 
 # The same rule as ccmux: <customer>/<repo> is relative to the code root,
@@ -55,7 +69,7 @@ name="${repo##*/}"
 [ "$DRY" = 1 ] || mkdir -p "$repo"
 
 # For the shell step: the nix profile may not be on this shell's PATH yet, and
-# Nix-built fetchers need the CA bundle named (bootstrap-fedora.sh, CA_BUNDLE).
+# Nix-built fetchers need the CA bundle named (bootstrap.sh, CA_BUNDLE).
 for d in "$HOME/.nix-profile/bin" /nix/var/nix/profiles/default/bin; do [ -d "$d" ] && [[ ":$PATH:" != *":$d:"* ]] && PATH="$d:$PATH"; done
 if [ -z "${NIX_SSL_CERT_FILE:-}" ]; then
   for f in /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt; do
@@ -85,8 +99,11 @@ ensure_lines() { # ensure_lines <relpath> <line>...
   if [ "$added" = 0 ]; then note unchanged "$rel"; elif [ "$DRY" = 0 ]; then note "added to" "$rel"; fi
 }
 
-echo "init-repo: $repo ($(if [ -n "$project" ]; then echo "project $project"; else echo "outside $root: ccmux needs an explicit path"; fi))"
-echo "harness:   $HARNESS_REF"
+echo "harness init: $repo ($(if [ -n "$project" ]; then echo "project $project"; else echo "outside $root: ccmux needs an explicit path"; fi))"
+echo "harness:   $HARNESS_REF ($HARNESS_REF_FROM)"
+if [[ "$HARNESS_REF" == path:/nix/store/* ]]; then
+  note warn "devenv.yaml would pin a store path that garbage collection removes: pass --harness github:bilibo/claude-nix-harness or --harness path:<checkout>"
+fi
 
 put devenv.yaml "# The harness module writes .claude/settings.json (deny rules, hooks,
 # sandbox) at every shell entry. devenv.lock pins the harness revision;
@@ -160,10 +177,11 @@ if [ "$DRY" = 0 ] && ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$repo" init -q -b main; note "git init" "main (commit when ready; agents never do)"
 fi
 
-if [ "$DRY" = 1 ] || [ "$NO_SHELL" = 1 ]; then echo "init-repo: files done; shell step skipped"; exit 0; fi
+if [ "$DRY" = 1 ] || [ "$NO_SHELL" = 1 ]; then echo "harness init: files done; shell step skipped"; exit 0; fi
 
 # ---------------------------------------------------------------- first shell entry
-for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH: run scripts/bootstrap-fedora.sh first (or --no-shell)" 69; done
+for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH: run harness bootstrap first (or --no-shell)" 69; done
+[ "$VERBOSE" = 0 ] || set -x
 v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.38 ] || die "direnv $v is older than 2.38 (require_allowed)" 69
 
 echo
@@ -192,16 +210,17 @@ elif [ -L "$settings" ]; then
 else
   die ".claude/settings.json was not written: the devenv shell did not load (direnv status in $repo)"
 fi
-bash "$HARNESS_DIR/tests/project-settings-test.sh" "$settings" || die "the generated settings file fails the harness checks"
+bash "$HARNESS_TESTS/project-settings-test.sh" "$settings" || die "the generated settings file fails the harness checks"
 hook=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")
-bash "$HARNESS_DIR/tests/hook-test.sh" "$hook" || die "the repo's hook fails the unit tests"
+bash "$HARNESS_TESTS/hook-test.sh" "$hook" || die "the repo's hook fails the unit tests"
 if res=$(direnv exec "$repo" ccmux -n 2>/dev/null); then note ok "ccmux -n: $res"; else note warn "ccmux -n failed (run it in the repo shell to see why)"; fi
+{ set +x; } 2>/dev/null
 
 cat <<NEXT
 
 Ready. From your own terminal:
   cd $repo && ccmux                                  # a session in the project's tmux session
   cd $repo && claude -p 'list the tools on PATH'    # the runbook's smoke test
-  $HARNESS_DIR/scripts/live-check.sh $repo          # the runbook's live checks (API calls)
+  harness check $repo                               # the runbook's live checks (API calls)
 In VS Code, open $repo; mkhl.direnv asks to allow once per devenv.nix/devenv.yaml/devenv.lock change.
 NEXT

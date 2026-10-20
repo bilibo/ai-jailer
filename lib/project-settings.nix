@@ -14,11 +14,18 @@
   allowConnectors ? false,
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
+  # The checkout's absolute path; literal denyWrite entries (settings.nix).
+  repoRoot ? null,
+  readFence ? false,
+  extraAllowRead ? [ ],
 }:
 import ./settings.nix { inherit lib; } {
   managed = false;
   inherit
     hookDir
+    repoRoot
+    readFence
+    extraAllowRead
     platform
     allowLocalCommits
     allowMemoryEdits

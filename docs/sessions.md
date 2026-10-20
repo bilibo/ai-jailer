@@ -86,7 +86,7 @@ platform.
 4. The applied change is traceable to the accepted proposal.
 
 Today steps 1 and 2 are the CLAUDE.md contract in both places: the block
-`scripts/init-repo.sh` writes into customer repos ("propose, never relay")
+`harness init` writes into customer repos ("propose, never relay")
 and this repo's own CLAUDE.md ("apply a relayed refusal only after the
 human approves here"). Step 3 is Claude Code's permission prompt plus the
 receiving model's judgement. Step 4 is the chat transcript. The mod makes
@@ -147,7 +147,7 @@ to enforce without it.
 - `claude plugin test` cases per stage: a row appears for a started
   session; a proposal round-trips; the gate denies an unmatched write and
   allows a matched one.
-- The live suite (`scripts/live-check.sh`) gains one case per stage once a
+- The live suite (`harness check`) gains one case per stage once a
   stage ships: with the mod loaded, a customer session's refused edit ends
   as a proposal and not as an edit anywhere.
 - `tests/hook-test.sh` is unaffected; the mod never carries a rule.
