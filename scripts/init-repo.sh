@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+#   scripts/init-repo.sh <customer>/<repo> | <path> [--harness <flakeref>] [--force] [--dry-run] [--no-shell]
+#
+# Section 3 of the runbook as a script. Renders the files a repo needs to
+# import the harness devenv module (devenv.yaml, devenv.nix, .envrc,
+# .gitignore, .worktreeinclude, CLAUDE.md), then does the first shell entry
+# (direnv allow, approval of the files require_allowed names, which makes
+# devenv write .claude/settings.json) and runs the repo's static checks on
+# the result: project-settings-test.sh on the generated file, hook-test.sh on
+# the hook it names, ccmux's resolution. A new directory under
+# $HARNESS_CODE_ROOT/<customer>/<repo> (default ~/code/git), or an existing
+# repo given by path. Files that exist are left alone and reported; --force
+# overwrites the harness-owned ones (devenv.yaml, .envrc). .gitignore and
+# .worktreeinclude only gain the lines they lack; CLAUDE.md gains the
+# contract block if it has none.
+#
+# The harness input defaults to this checkout (`path:`), the form for
+# developing the harness. A repo meant to outlive the checkout pins a git URL
+# instead: --harness github:bilibo/claude-nix-harness. devenv.lock records
+# the revision either way; `devenv update harness` moves it.
+# shellcheck disable=SC2016  # single quotes are deliberate where direnv or bash must see the `$`
+set -euo pipefail
+
+HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+HARNESS_REF="path:$HARNESS_DIR"
+FORCE=0; DRY=0; NO_SHELL=0; target=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --harness) HARNESS_REF="${2:?--harness needs a flake reference}"; shift ;;
+    --force) FORCE=1 ;;
+    --dry-run) DRY=1 ;;
+    --no-shell) NO_SHELL=1 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "init-repo: unknown argument $1 (see --help)" >&2; exit 64 ;;
+    *) [ -z "$target" ] || { echo "init-repo: one target only" >&2; exit 64; }; target="$1" ;;
+  esac
+  shift
+done
+[ -n "$target" ] || { sed -n '2p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+
+root="${HARNESS_CODE_ROOT:-$HOME/code/git}"; root="${root%/}"
+die() { echo "init-repo: $1" >&2; exit "${2:-1}"; }
+note() { printf '%-10s %s\n' "$1" "$2"; }
+
+# The same rule as ccmux: <customer>/<repo> is relative to the code root,
+# anything else is a path.
+if [[ "$target" == */* && "$target" != /* && "$target" != .* ]]; then
+  repo="$root/$target"; project="$target"
+else
+  repo=$(cd "$target" 2>/dev/null && pwd -P) || die "no such directory: $target (a new repo is <customer>/<repo> under $root)"
+  project=""
+  if [[ "$repo" == "$root/"*/* ]]; then rel="${repo#"$root/"}"; IFS=/ read -r a b _ <<<"$rel"; project="$a/$b"; fi
+fi
+name="${repo##*/}"
+[ "$DRY" = 1 ] || mkdir -p "$repo"
+
+# For the shell step: the nix profile may not be on this shell's PATH yet, and
+# Nix-built fetchers need the CA bundle named (bootstrap-fedora.sh, CA_BUNDLE).
+for d in "$HOME/.nix-profile/bin" /nix/var/nix/profiles/default/bin; do [ -d "$d" ] && [[ ":$PATH:" != *":$d:"* ]] && PATH="$d:$PATH"; done
+if [ -z "${NIX_SSL_CERT_FILE:-}" ]; then
+  for f in /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt; do
+    [ -r "$f" ] && { export NIX_SSL_CERT_FILE="$f"; break; }
+  done
+fi
+
+# put <relpath> <content> [owned]: write a file that does not exist; report
+# one that does. `owned` files are overwritten with --force.
+put() {
+  local f="$repo/$1" content="$2" owned="${3:-}"
+  if [ -e "$f" ]; then
+    if [ "$(cat "$f")" = "$content" ]; then note unchanged "$1"
+    elif [ "$FORCE" = 1 ] && [ -n "$owned" ]; then write "$1" "$content" overwrite
+    else note differs "$1 (left alone${owned:+; --force overwrites})"; fi
+  else write "$1" "$content" write; fi
+}
+write() { # write <relpath> <content> <verb>
+  if [ "$DRY" = 1 ]; then note "would $3" "$1"; else printf '%s\n' "$2" >"$repo/$1"; note "$3" "$1"; fi
+}
+ensure_lines() { # ensure_lines <relpath> <line>...
+  local rel="$1" f="$repo/$1" l added=0; shift
+  for l in "$@"; do
+    grep -q -x -F "$l" "$f" 2>/dev/null && continue
+    if [ "$DRY" = 1 ]; then note "would add" "$rel: $l"; else printf '%s\n' "$l" >>"$f"; fi; added=1
+  done
+  if [ "$added" = 0 ]; then note unchanged "$rel"; elif [ "$DRY" = 0 ]; then note "added to" "$rel"; fi
+}
+
+echo "init-repo: $repo ($(if [ -n "$project" ]; then echo "project $project"; else echo "outside $root: ccmux needs an explicit path"; fi))"
+echo "harness:   $HARNESS_REF"
+
+put devenv.yaml "# The harness module writes .claude/settings.json (deny rules, hooks,
+# sandbox) at every shell entry. devenv.lock pins the harness revision;
+# \`devenv update harness\` moves it.
+inputs:
+  harness:
+    url: $HARNESS_REF
+    flake: false
+imports:
+  - harness/devenv" owned
+
+put devenv.nix "# Project tools and harness options. Allow rules for this project go in
+# harness.settings here, proposed as a diff by an agent and committed by you,
+# never in .claude/settings.local.json (the hook refuses it).
+{ pkgs, ... }:
+{
+  name = \"$name\";
+  packages = [
+    pkgs.git
+    pkgs.jq
+  ];
+  # harness.settings.permissions.allow = [ \"Bash(terraform plan *)\" ];
+  # harness.extraAllowedDomains = [ \"dev.azure.com\" ];   # sandbox allowlist, unmanaged host
+}"
+
+# require_allowed last: on the first load `use devenv` creates devenv.lock,
+# then the three files are reported as pending and the next `direnv allow`
+# approves them (see the shell step below).
+put .envrc 'eval "$(devenv direnvrc)"
+use devenv
+require_allowed devenv.nix devenv.yaml devenv.lock' owned
+
+ensure_lines .gitignore '.devenv/' '.direnv/' '.claude/settings.json' '.claude/settings.local.json' '.claude/worktrees/'
+# A `claude --worktree` session starts in .claude/worktrees/<name> with only
+# these files, so it has the repo's rules before devenv regenerates them.
+ensure_lines .worktreeinclude '.claude/settings.json'
+
+contract="## Environment contract (claude-nix-harness)
+
+This repo is governed by claude-nix-harness. \`.claude/settings.json\` is
+generated by the devenv module at every shell entry and carries the deny
+rules, the hooks and the Bash sandbox; tools come from the devenv shell
+(\`devenv.nix\`), not from the host.
+
+- A refusal (\`env-guard: ...\`, a deny rule naming \`Bash(...)\`, a sandbox
+  error) is expected behaviour. Do not work around it: propose a diff or ask.
+- You do not commit or push. Stage with \`git add\`, diff, branch; the human
+  commits from their own terminal.
+- Never edit \`devenv.nix\`, \`devenv.yaml\`, \`devenv.lock\`, \`.envrc\` or
+  anything under \`.claude/\`. A project allow rule goes in \`devenv.nix\`
+  (\`harness.settings.permissions.allow\`), proposed as a diff.
+- \`~/.ssh\`, \`~/.azure\` and other credential paths are hidden from your
+  commands; clone over HTTPS."
+if [ -e "$repo/CLAUDE.md" ]; then
+  if grep -q -F 'claude-nix-harness' "$repo/CLAUDE.md"; then note unchanged CLAUDE.md
+  elif [ "$DRY" = 1 ]; then note "would add" "CLAUDE.md: the environment contract"
+  else printf '\n%s\n' "$contract" >>"$repo/CLAUDE.md"; note "added to" CLAUDE.md; fi
+else
+  put CLAUDE.md "# $name
+
+$contract"
+fi
+
+# Runbook 3.6: a directory with that manifest is a plugin, and the plugin
+# rules refuse it.
+if find "$repo/.claude" -path '*/.claude-plugin/plugin.json' -print -quit 2>/dev/null | grep -q .; then
+  die "a plugin manifest exists under $repo/.claude (.claude-plugin/plugin.json): remove it, plugins do not load from a repo"
+fi
+
+if [ "$DRY" = 0 ] && ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+  git -C "$repo" init -q -b main; note "git init" "main (commit when ready; agents never do)"
+fi
+
+if [ "$DRY" = 1 ] || [ "$NO_SHELL" = 1 ]; then echo "init-repo: files done; shell step skipped"; exit 0; fi
+
+# ---------------------------------------------------------------- first shell entry
+for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH: run scripts/bootstrap-fedora.sh first (or --no-shell)" 69; done
+v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.38 ] || die "direnv $v is older than 2.38 (require_allowed)" 69
+
+echo
+echo "==> direnv allow (the .envrc), then the first load: devenv fetches its inputs and writes .claude/settings.json"
+direnv allow "$repo"
+# The first load exports DIRENV_REQUIRED with the files require_allowed
+# found unapproved; `direnv allow` in that environment approves them.
+(
+  cd "$repo"
+  eval "$(direnv export bash)"
+  if [ -n "${DIRENV_REQUIRED:-}" ]; then
+    echo "==> direnv allow (${DIRENV_REQUIRED//:/, })"
+    direnv allow
+  fi
+)
+pending=$(direnv exec "$repo" bash -c 'printf %s "${DIRENV_REQUIRED:-}"' 2>/dev/null || true)
+[ -z "$pending" ] || die "files still pending approval after two allows: $pending"
+
+# ---------------------------------------------------------------- checks
+echo
+settings="$repo/.claude/settings.json"
+if [ -L "$settings" ] && [ -r "$settings" ] && [[ "$(readlink -f "$settings")" == /nix/store/* ]]; then
+  note ok ".claude/settings.json -> $(readlink "$settings")"
+elif [ -L "$settings" ]; then
+  die ".claude/settings.json is a dangling symlink (direnv reload rewrites it)"
+else
+  die ".claude/settings.json was not written: the devenv shell did not load (direnv status in $repo)"
+fi
+bash "$HARNESS_DIR/tests/project-settings-test.sh" "$settings" || die "the generated settings file fails the harness checks"
+hook=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")
+bash "$HARNESS_DIR/tests/hook-test.sh" "$hook" || die "the repo's hook fails the unit tests"
+if res=$(direnv exec "$repo" ccmux -n 2>/dev/null); then note ok "ccmux -n: $res"; else note warn "ccmux -n failed (run it in the repo shell to see why)"; fi
+
+cat <<NEXT
+
+Ready. From your own terminal:
+  cd $repo && ccmux                                  # a session in the project's tmux session
+  cd $repo && claude -p 'list the tools on PATH'    # the runbook's smoke test
+  $HARNESS_DIR/scripts/live-check.sh $repo          # the runbook's live checks (API calls)
+In VS Code, open $repo; mkhl.direnv asks to allow once per devenv.nix/devenv.yaml/devenv.lock change.
+NEXT

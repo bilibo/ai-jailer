@@ -15,6 +15,7 @@ let
       platform
       allowLocalCommits
       allowMemoryEdits
+      allowConnectors
       enforcementRoots
       extraDeny
       extraAllowedDomains
@@ -83,6 +84,16 @@ in
         memory is a persistent channel into every later session on the
         machine. On for a mixed host where the user wants Claude Code
         to remember things.
+      '';
+    };
+
+    allowConnectors = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Let the claude.ai account's connectors (Gmail, Drive, Notion, ...)
+        load in sessions. They are MCP servers outside the Bash sandbox, so
+        off by default; a `false` here holds against every repo and user file.
       '';
     };
 

@@ -6,6 +6,7 @@
   platform ? "linux",
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
+  allowConnectors ? false,
   enforcementRoots ? [ ],
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
@@ -36,6 +37,7 @@ let
       platform
       allowLocalCommits
       allowMemoryEdits
+      allowConnectors
       enforcementRoots
       extraDeny
       extraAllowedDomains

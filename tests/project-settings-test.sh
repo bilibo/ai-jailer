@@ -21,7 +21,10 @@ check "env preamble hooks present"              '.hooks | has("SessionStart") an
 check "sandbox on and mandatory"                '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false'
 check "ssh key files hidden"                    '.sandbox.filesystem.denyRead | index("~/.ssh")'
 check "agent socket stripped"                   '[.sandbox.credentials.envVars[] | select(.name == "SSH_AUTH_SOCK" and .mode == "deny")] | length == 1'
+# The `**/` entries are asserted for presence only: Linux skips glob write
+# entries (lib/settings.nix); `~/.claude` is the one that holds there.
 check "own settings not writable from the shell" '.sandbox.filesystem.denyWrite | index("**/.claude/settings.json") and index("**/.claude/settings.local.json") and index("~/.claude")'
+check "account connectors off"                  '.disableClaudeAiConnectors == true'
 check "worktrees stay writable"                 '.sandbox.filesystem.denyWrite | index("**/.claude") | not'
 check "no managed-only keys in a repo file"     '(has("allowManagedHooksOnly") or has("strictKnownMarketplaces") or has("disableSideloadFlags") or has("pluginConfigs") or (.sandbox.network | has("strictAllowlist"))) | not'
 

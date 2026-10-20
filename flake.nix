@@ -1,5 +1,5 @@
 {
-  description = "claude-nix-harness: guard-railed, project-scoped Claude Code for NixOS";
+  description = "claude-nix-harness: project-scoped, guard-railed Claude Code for any host with Nix; NixOS adds the managed layer";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -28,13 +28,25 @@
       packages = forAll (
         pkgs:
         let
+          # The same fallback as the modules: pkgs.direnv once nixpkgs ships
+          # >= 2.38, the override until then.
+          direnvPackage =
+            if pkgs.lib.versionOlder pkgs.direnv.version "2.38" then
+              import ./pkgs/direnv.nix { inherit pkgs; }
+            else
+              pkgs.direnv;
           hooks = import ./lib/hooks.nix {
-            inherit pkgs;
+            inherit pkgs direnvPackage;
             inherit (pkgs) lib;
-            direnvPackage = import ./pkgs/direnv.nix { inherit pkgs; };
           };
         in
         {
+          # Host tools for an unmanaged host, pinned by this flake's lock:
+          # `nix profile add path:<checkout>#direnv path:<checkout>#devenv`
+          # (scripts/bootstrap-fedora.sh does this). The same direnv the hooks
+          # call, the same devenv the modules assume.
+          direnv = direnvPackage;
+          devenv = pkgs.devenv;
           # A dedicated work host: every rule everywhere.
           managed = managedTree pkgs { };
           # A mixed host: project rules only under the roots.
