@@ -14,8 +14,7 @@ harness on an unmanaged host; the managed layer adds what only it can
 | Mixed host | NixOS module with `enforcementRoots = [ "~/code/git" ]`: managed rules only under the roots, sessions elsewhere keep `git commit` and friends | available, superseded by the unmanaged shape |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
-Containers as the main route were tried and dropped (podman inside
-vscode-fhs, double sandbox, no gain over the brief's threat model).
+
 `devenv/` is the project side instead: every repo imports it, and a
 per-project image stays available as an opt-in.
 
