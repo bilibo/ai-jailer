@@ -80,6 +80,25 @@ in
       description = "Additional permission deny rules appended to the harness set.";
     };
 
+    readFence = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Hide the rest of your home directory from sandboxed commands:
+        `denyRead ["~/"]` plus `allowRead` for this repo and the paths the
+        devenv shell entry needs (lib/settings.nix). Sibling repos and
+        `~/.claude/.credentials.json` become unreadable from the shell. Add
+        what the project itself reads under `$HOME` with `extraAllowRead`.
+      '';
+    };
+
+    extraAllowRead = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "~/.cargo" ];
+      description = "Further sandbox `allowRead` paths for a repo with `readFence` on, such as a `path:` devenv input or a tool's cache under `$HOME`.";
+    };
+
     extraAllowedDomains = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -126,8 +145,11 @@ in
     {
       files.".claude/settings.json".json = lib.recursiveUpdate (harnessLib.projectSettings {
         hookDir = "${hooks}";
+        repoRoot = config.devenv.root;
         inherit (cfg)
           platform
+          readFence
+          extraAllowRead
           allowLocalCommits
           allowMemoryEdits
           allowConnectors

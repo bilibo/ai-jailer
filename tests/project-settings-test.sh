@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-#   project-settings-test.sh <settings.json>
+#   project-settings-test.sh <settings.json> [fenced]
+#
+# `fenced`: the file was generated with `readFence = true`; the read fence
+# checks replace the default's "no fence" check.
 #
 # The repo's .claude/settings.json as the devenv module writes it. On a host
 # without managed settings this file is the whole harness, so every layer it
 # is supposed to carry is asserted here, and every hook it names must run.
 set -uo pipefail
-f="${1:?usage: project-settings-test.sh <settings.json>}"
+f="${1:?usage: project-settings-test.sh <settings.json> [fenced]}"
+fenced="${2:-}"
 pass=0; fail=0
 
 check() { # check <description> <jq filter that must be true>
@@ -25,6 +29,18 @@ check "agent socket stripped"                   '[.sandbox.credentials.envVars[]
 # entries (lib/settings.nix); `~/.claude` is the one that holds there.
 check "own settings not writable from the shell" '.sandbox.filesystem.denyWrite | index("**/.claude/settings.json") and index("**/.claude/settings.local.json") and index("~/.claude")'
 check "account connectors off"                  '.disableClaudeAiConnectors == true'
+# Linux honours literal write entries only: the repo's own files by absolute path.
+check "own files denied by literal path"        '.sandbox.filesystem.denyWrite | index("/repo/.claude/settings.json") and index("/repo/.claude/settings.local.json") and index("/repo/.git/hooks") and index("/repo/.git/config") and index("/repo/.claude-plugin")'
+check "subprocess environment scrubbed"         '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"'
+if [ "$fenced" = fenced ]; then
+  check "home hidden from the shell"            '.sandbox.filesystem.denyRead | index("~/")'
+  check "repo and shell entry paths readable"   '.sandbox.filesystem.allowRead | index("/repo") and index("~/.nix-profile") and index("~/.local/share/direnv") and index("~/.claude/shell-snapshots") and index("~/.cargo")'
+  check "credentials stay hidden"               '.sandbox.filesystem.allowRead | index("~/.claude") or index("~/") | not'
+else
+  check "no read fence by default"              '.sandbox.filesystem.denyRead | index("~/") | not'
+  check "no allowRead without the fence"        '.sandbox.filesystem | has("allowRead") | not'
+fi
+check "no github token inside the sandbox"      '[.sandbox.credentials.envVars[] | select(.mode == "deny") | .name] | index("GITHUB_TOKEN") and index("GH_TOKEN")'
 check "worktrees stay writable"                 '.sandbox.filesystem.denyWrite | index("**/.claude") | not'
 check "no managed-only keys in a repo file"     '(has("allowManagedHooksOnly") or has("strictKnownMarketplaces") or has("disableSideloadFlags") or has("pluginConfigs") or (.sandbox.network | has("strictAllowlist"))) | not'
 

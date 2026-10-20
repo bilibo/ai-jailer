@@ -70,8 +70,8 @@ every session on the host, inside a harness repo or not.
 
 ## 3. Onboarding a repo
 
-`scripts/init-repo.sh <customer>/<repo>` (a new directory under the code
-root) or `scripts/init-repo.sh <path>` (an existing repo) does steps 1 to 5
+`harness init <customer>/<repo>` (a new directory under the code
+root) or `harness init <path>` (an existing repo) does steps 1 to 5
 and 7, then runs section 5's unit tests on the generated file; `--dry-run`
 shows what it would write, existing files are left alone. The steps, for
 doing it by hand or for reading what the script wrote:
@@ -106,7 +106,7 @@ doing it by hand or for reading what the script wrote:
 | Host | Set |
 |---|---|
 | Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
-| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. Fedora 44 or newer: `scripts/bootstrap-fedora.sh` installs Fedora's `nix` and `nix-daemon` packages, direnv, devenv and ccmux from this flake (`nix profile add`), and the home module's direnv, tmux and PATH configuration as plain files. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
+| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. Fedora 44 or newer: `scripts/install.sh` installs Fedora's `nix` and `nix-daemon` packages and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`) and writes the home module's direnv, tmux and PATH configuration as plain files, plus the user-scope `strictAllowlist`. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
 | Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
 
 See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
@@ -136,7 +136,7 @@ rules.
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
 Host prerequisites on a host without the home module:
-`scripts/bootstrap-fedora.sh --check`, one line per item, exit 1 when
+`harness doctor`, one line per item, exit 1 when
 something the harness needs is missing. `claude doctor` is the Claude Code
 side: install health and settings-file validation, without a session.
 
@@ -146,13 +146,13 @@ host, so the sequence starts from a Fedora with only VS Code, Claude Code
 and this checkout on it (a reinstall of Fedora is the same list minus the
 first line). `<customer>/<repo>` is a throwaway repo under the code root:
 ```
-scripts/bootstrap-fedora.sh --reset                 # sudo; asks first; leaves ~/code/git alone
-rm -rf ~/code/git/<customer>/<repo>                 # the throwaway repo, so init-repo starts clean
-scripts/bootstrap-fedora.sh                         # sudo once: packages, nix.conf, SELinux label, socket, profile, user files
+harness reset                                 # sudo; asks first; reads the receipt; leaves ~/code/git alone
+rm -rf ~/code/git/<customer>/<repo>           # the throwaway repo, so init starts clean
+HARNESS_REF=path:$PWD scripts/install.sh      # sudo once: packages, nix.conf, SELinux label, socket; then harness bootstrap --no-root
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
-scripts/bootstrap-fedora.sh --check                 # every line ok
-scripts/init-repo.sh <customer>/<repo>              # files, two allows, 15 settings checks, 154 hook cases
-scripts/live-check.sh ~/code/git/<customer>/<repo>  # ten -p sessions, 10/10
+harness doctor                                # every line ok
+harness init <customer>/<repo>                # files, two allows, 20 settings checks, 154 hook cases
+harness check ~/code/git/<customer>/<repo>    # twelve -p sessions
 cd ~/code/git/<customer>/<repo> && ccmux            # interactive: trust dialog once, orange window when it waits
 ```
 Log out and in once at the end so GUI-launched VS Code sees the nix profile.
@@ -179,7 +179,7 @@ Run the flake check from your own terminal before committing anyway; the
 `path:` form checks the working tree, not what git tracks.
 
 Live checks, inside a harness repo (the test repo), on any host.
-`scripts/live-check.sh <repo>` runs them as a script, judged on the
+`harness check <repo>` runs them as a script, judged on the
 stream-json transcript and on the files afterwards rather than on the
 model's prose, and keeps the transcripts for the exact refusal text. By
 hand:
@@ -216,7 +216,7 @@ which is the dangerous direction.
   auto-update disabled, `nix flake update nixpkgs` moves it. Unmanaged
   host: the native install; `claude update` moves it and `autoUpdates`
   stays off in `~/.claude.json` so an upgrade is a decision, followed by
-  `scripts/live-check.sh`. Minimum 2.1.295 for `onFailure: block`; the
+  `harness check`. Minimum 2.1.295 for `onFailure: block`; the
   settings keys were last checked against 2.1.296 (`lib/settings.nix`
   header), the Fedora host runs 2.1.304.
 - direnv: `pkgs/direnv.nix` overrides to 2.38.2 while nixpkgs is older. The
@@ -226,7 +226,7 @@ which is the dangerous direction.
   unconditional import (`lib/managed-tree.nix` default) at `pkgs.direnv`;
   the NixOS, home and devenv modules and the flake's packages already fall
   back on their own.
-- Host tools on an unmanaged host: `scripts/bootstrap-fedora.sh --upgrade`
+- Host tools on an unmanaged host: `harness upgrade`
   after a `nix flake update` or a move of the checkout re-adds direnv,
   devenv and ccmux from the current lock.
 - devenv from nixpkgs (2.4.0 at the time of writing). Each repo pins its own
@@ -335,18 +335,30 @@ The README's "Lockdown level today" table summarises them; the roadmap's
   how this document was checked). The docs allow a read fence from the repo
   file (`denyRead ["~/"]` plus `allowRead` for the repo and the paths devenv
   needs); untested, see the roadmap.
-- Glob `denyWrite` entries do nothing on Linux. Seven of the eleven are
-  `**/...`; `mkdir $TMPDIR/x/.claude-plugin` succeeds inside the sandbox.
-  `~/.claude` holds, and Claude Code's own protections cover the settings,
-  hooks and `.git` files under the working directory.
-- Network is prompt-gated, not strict. `strictAllowlist` is user-or-managed
-  scope; without it an unlisted host prompts in an interactive session and
-  is refused in a `-p` one, which is why `live-check.sh` looks strict.
+- Glob `denyWrite` entries do nothing on Linux (`mkdir $TMPDIR/x/.claude-plugin`
+  succeeds inside the sandbox; they stay for macOS). Since 2026-10-21 the
+  repo file repeats the seven protected paths as literal paths under the
+  checkout (`config.devenv.root`), which Linux honours; a plugin manifest
+  or hook directory elsewhere under `$HOME` is still creatable, and
+  `~/.claude` plus Claude Code's own working-directory protections hold.
+- Network is prompt-gated unless the user-scope `~/.claude/settings.json`
+  sets `sandbox.network.strictAllowlist = true`, which the bootstrap writes
+  (user-or-managed scope; a repo cannot). Without it an unlisted host
+  prompts in an interactive session and is refused in a `-p` one, which is
+  why the live checks look strict either way.
 - Every unix socket is reachable (`allowAllUnixSockets`, all-or-none on
   Linux): the D-Bus session bus, the secret service behind it, the display
   server, not only the Nix daemon and go-plugin. One more reason to keep
   `trusted-users` off (the daemon socket would be root-equivalent).
-- The environment is inherited apart from the four denied variables.
+- The environment: since 2026-10-21 the repo file sets
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which removes credential-shaped
+  variables (by name or by value shape; `ANTHROPIC_API_KEY`,
+  `AWS_SECRET_ACCESS_KEY`, `*_PASSWORD`, URLs with passwords) from Bash
+  commands, hooks and stdio MCP servers, and the sandbox's
+  `credentials.envVars` denies the Azure secrets, the SSH agent and the
+  GitHub tokens the scrub keeps on purpose. A secret whose name and value
+  look like neither is still inherited; name it in `extraDeny`'s sibling,
+  `sandbox.credentials.envVars`, through `harness.settings`.
 - The hook strips quotes before matching, so a quoted string that mentions
   a config path next to something that looks like a write is refused too:
   `echo "settings -> $(readlink .claude/settings.json)"` (the `->`) and

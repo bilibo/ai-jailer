@@ -49,12 +49,12 @@ opens one window per call running `claude <args>; exec $SHELL`. Assumes
 nothing about direnv or devenv: the hook's `CLAUDE_ENV_FILE` preamble runs
 `direnv export bash` before every Bash command. No `doctor`, `new`,
 `upgrade` or `platform` subcommand exists on `ccmux`; since 2026-10-20 the
-work they were to do lives in three scripts: `scripts/bootstrap-fedora.sh
---check` is the host doctor, `scripts/init-repo.sh` is `new` without the
-customer registry and templates, `scripts/bootstrap-fedora.sh --upgrade`
-is `upgrade`, `scripts/live-check.sh` is the limits suite's first cut. The
-roadmap (item 3) folds them into one `harness` CLI; phases 1, 4 and 5 below
-build on that rather than on `ccmux`.
+work they were to do lives in the `harness` CLI (`pkgs/harness.nix`, one
+command since 2026-10-21, three scripts the day before): `harness doctor`
+is the host doctor, `harness init` is `new` without the customer registry
+and templates, `harness upgrade` is `upgrade`, `harness check` is the
+limits suite's first cut. Phases 1, 4 and 5 below build on that rather
+than on `ccmux`.
 
 **Settings.** One body, `lib/settings.nix`, two destinations:
 `managed = true` for `/etc/claude-code/managed-settings.json` (NixOS module
@@ -76,14 +76,17 @@ same settings body (`sandbox.*`), not a wrapper script. `allowWrite`
 hooks, skills and plugin manifests; `denyRead` `~/.azure`, `~/.gnupg`,
 `~/.terraform.d`, `~/.netrc`, plus `~/.ssh` as a project rule, plus
 `/run/WSL` and `/mnt/c` when `platform = "wsl"`. `WSL_INTEROP`,
-`ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET`, `SSH_AUTH_SOCK` and
-`SSH_AGENT_PID` denied as env vars. `allowAllUnixSockets = true` (go-plugin,
+`ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET`, the GitHub tokens,
+`SSH_AUTH_SOCK` and `SSH_AGENT_PID` denied as env vars, and
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` for the credential-shaped rest
+(2026-10-21). The repo copy adds its protected paths as literal `denyWrite`
+entries under `config.devenv.root`. `allowAllUnixSockets = true` (go-plugin,
 Nix daemon). `bubblewrap` and `socat` come from the host's system packages.
 `disableClaudeAiConnectors = true` since 2026-10-20 (`allowConnectors`
-option). What the sandbox does not do (open reads, glob `denyWrite`
-skipped on Linux, prompt-gated network, every unix socket, inherited
-environment) is in runbook section 8 and ordered as roadmap item 2; phase
-2 below is the read-fence part of it.
+option). What the sandbox does not do (open reads, every unix socket;
+the network is strict once the bootstrap has written the user-scope key)
+is in runbook section 8 and ordered as roadmap item 2; phase 2 below is
+the read-fence part of it.
 
 **devenv-base.** Does not exist. There is one devenv module,
 `devenv/devenv.nix`, imported as `harness/devenv`. It exports options `harness.*`
@@ -93,7 +96,7 @@ settings file, ships `ccmux` in the shell, exports `HARNESS_PROJECT`. No
 repo sets `AZURE_CONFIG_DIR`. The harness checkout itself lives outside the
 code root (`~/code/claude-nix-harness`) and has no `.envrc`, so a session
 there is not governed; the governed test repo is
-`~/code/git/raul/harness-test`, written by `scripts/init-repo.sh` with a
+`~/code/git/raul/harness-test`, written by `harness init` with a
 `path:` harness input. `raul/azfn-rust-handler`'s `devenv.yaml` still
 points at `git+file:///home/raul/nixos-config?dir=harness`, which no longer
 exists. Raul edits it (the hook forbids a session doing so).
@@ -104,7 +107,7 @@ This repo pins nixpkgs in `flake.lock` (2026-10-14; direnv 2.37.1 there,
 so `pkgs/direnv.nix` is in use). No container engine is assumed anywhere.
 
 **Host.** The laptop runs Fedora 44 (unmanaged host shape), set up by
-`scripts/bootstrap-fedora.sh`: Fedora's `nix` and `nix-daemon` packages,
+`scripts/install.sh` and `harness bootstrap`: Fedora's `nix` and `nix-daemon` packages,
 no `trusted-users`, SELinux enforcing with the daemon socket directory
 labelled `var_run_t`, `NIX_SSL_CERT_FILE` exported. The NixOS facts below
 apply to a managed host. `platform = "wsl"` is implemented but has never
@@ -188,14 +191,13 @@ Each phase: file list first, approval, implement, tests as cases in
   `nixos-rebuild build`, `nix build`, `nix flake check` alone. Test cases
   for each, both directions.
 - `--add-dir` into the hook's nested-`claude` flag list, with a test.
-- `harness doctor` (roadmap item 3; the host half exists as
-  `scripts/bootstrap-fedora.sh --check`): everything `--check` reports,
-  plus `claude doctor` (Claude Code's own read-only install and settings
-  diagnostics, 2.1.304), `HARNESS_CODE_ROOT`, `HARNESS_PROJECT`, the
-  resolved tier for the cwd (phase 2), the state of the repo's
-  `.claude/settings.json` symlink (present, dangling, which store path), and
-  the hook paths it registers. Plain text, one line per item, exit 1 when
-  something it needs is missing. `ccmux -n` stays as it is.
+- `harness doctor` exists since 2026-10-21: the host report, `claude
+  doctor` (Claude Code's own read-only diagnostics), the cwd repo's
+  `.claude/settings.json` symlink (present, dangling, which store path),
+  its direnv approval and the hooks it registers; plain text, one line per
+  item, exit 1 when something it needs is missing. Still to add:
+  `HARNESS_CODE_ROOT`, `HARNESS_PROJECT` and the resolved tier for the cwd
+  (phase 2). `ccmux -n` stays as it is.
 - Update the runbook's verification section to start with `harness doctor`.
 
 Tests: `nix flake check` passes; `harness doctor` output pasted by Raul
@@ -277,7 +279,7 @@ are testable with the existing hook-test pattern, and give Raul a
 
 ### Phase 4: `harness init` and `harness upgrade`
 
-`scripts/init-repo.sh` already renders `devenv.yaml`, `devenv.nix`,
+`harness init` already renders `devenv.yaml`, `devenv.nix`,
 `.envrc`, `.gitignore`, `.worktreeinclude` and `CLAUDE.md`, does
 `git init`, the two `direnv allow`s and the unit tests, with `--dry-run`,
 `--force` for the harness-owned files and idempotent re-runs. What phase 4
@@ -298,11 +300,12 @@ no changes.
 
 ### Phase 5: limits suite
 
-`scripts/live-check.sh` is the first cut: ten `claude -p` cases inside a
-harness repo, judged on the stream-json transcript and the files
-afterwards, transcripts kept for the exact refusal text, 10/10 on
-2026-10-20. Phase 5 makes it `harness check` (a `nix run` app, not a
-check: it needs a live `claude -p` and the network), runs it inside a
+`harness check` is the first cut: twelve `claude -p` cases inside a
+harness repo (thirteen with the read fence on), judged on the stream-json
+transcript and the files afterwards, transcripts kept for the exact
+refusal text, the first ten 10/10 on 2026-10-20. It is a `nix run` app,
+not a flake check (it needs a live `claude -p` and the network). Phase 5
+runs it inside a
 scratch customer repo created by `harness init`, and adds the cases:
 nested `claude --add-dir ..`, `nh os switch`, `nixos-rebuild switch`,
 `home-manager switch`, Read of a sibling customer file and of a file
@@ -330,11 +333,11 @@ tested. `harness doctor --full` runs it.
 7. Account connectors: off by default in every harness repo since
    2026-10-20 (`harness.allowConnectors`). Whether account-synced skills
    and plugins should be off on the work host too (`syncClaudeAiSkills`,
-   `syncClaudeAiPlugins`: user or managed scope, written by the bootstrap
-   or the managed settings, never the repo file).
-8. The CLI's name and home: a new `harness` command (`pkgs/harness.nix`,
-   roadmap item 3, recommended: `ccmux` stays a launcher and the scripts
-   keep their bash bodies), or subcommands of `ccmux` as the phases above
+   `syncClaudeAiPlugins`: user or managed scope; the bootstrap's
+   `--no-account-sync` writes them since 2026-10-21, default on).
+8. Decided 2026-10-21: a new `harness` command (`pkgs/harness.nix`;
+   `ccmux` stays a launcher and the scripts keep their bash bodies under
+   `pkgs/harness/`), not subcommands of `ccmux` as the phases above
    first said.
 9. Applied 2026-10-20: the `devenv/devenv.nix` hunk for `allowConnectors`
    (an option next to `platform`, and `allowConnectors` in the
