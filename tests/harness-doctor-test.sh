@@ -13,9 +13,10 @@ pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/home"
 
-# doctor <dir>: harness doctor in <dir> with nothing on PATH; sets out and rc.
+# doctor <dir> [<path>]: harness doctor in <dir> with nothing (or only <path>)
+# on PATH; sets out and rc.
 doctor() {
-  out=$(cd "$1" && env -i HOME="$tmp/home" PATH=/var/empty TMPDIR="$tmp" "$harness" doctor 2>&1); rc=$?
+  out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" "$harness" doctor 2>&1); rc=$?
 }
 check() { # check <description> <want-regex>
   if [[ "$out" =~ $2 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/)"; printf '%s\n' "$out" | sed 's/^/  /'; fi
@@ -55,6 +56,19 @@ rm "$tmp/repo/.claude/settings.json"; echo '{}' >"$tmp/repo/.claude/settings.jso
 doctor "$tmp/repo"
 check "plain file"              'MISSING \.claude/settings\.json is a plain file'
 check "plain file without hooks" 'MISSING no runnable hook'
+
+# Inside a session the sandbox masks the file as a character device: say so,
+# never report the repo as broken. (-c follows the symlink.)
+rm "$tmp/repo/.claude/settings.json"; ln -s /dev/null "$tmp/repo/.claude/settings.json"
+doctor "$tmp/repo"
+check "sandbox mask reported"   'warn  \.claude/settings\.json is masked by the sandbox'
+refute "mask is no repo verdict" 'no runnable hook|plain file|dangling symlink|points outside'
+
+# A `code` that answers nothing (the same sandbox): no extension verdict.
+mkdir -p "$tmp/bin"; printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/code"; chmod +x "$tmp/bin/code"
+doctor "$tmp/empty" "$tmp/bin"
+check "silent code reported"    'warn  code is on PATH but answers nothing'
+refute "no extension verdict"   'VS Code extension'
 
 out=$("$harness" --version 2>&1); rc=$?
 exits "--version" 0; check "--version prints the revision" '^harness .+'

@@ -6,31 +6,38 @@
 #   harness reset     [--no-root]
 #   each also takes --dry-run, --yes, --verbose
 #
-# Takes a Fedora host (44 or newer: Fedora packages Nix itself since 44) with
-# Claude Code and VS Code already installed to the unmanaged-host shape of the
-# README: Nix in multi-user mode from Fedora's own packages, direnv >= 2.38,
-# devenv, ccmux and harness from this flake (`nix profile add`, pinned by
-# flake.lock), and the user-side configuration the home module would write on
-# a managed host: direnv.toml, the tmux rules, the direnv hook,
-# HARNESS_CODE_ROOT, the session PATH for GUI-launched VS Code, mkhl.direnv.
-# No harness module and no managed settings: repos that import
-# `harness/devenv` carry the rules (`harness init` sets one up).
-# scripts/install.sh does the root steps `nix run` needs (dnf, the SELinux
-# label, the daemon socket), then runs `harness bootstrap`, which finds them
-# done and does the rest.
+# Takes a Linux host that has Nix (scripts/install.sh puts it there: on
+# Fedora 44 or newer from Fedora's own packages, on any other distro with the
+# nix-installer) and Claude Code to the unmanaged-host shape of the README:
+# direnv >= 2.38, devenv, ccmux and harness from this flake (`nix profile
+# add`, pinned by flake.lock), and the user-side configuration the home
+# module would write on a managed host: direnv.toml, the tmux rules, the
+# direnv hook for bash and zsh, HARNESS_CODE_ROOT, the session PATH for
+# GUI-launched VS Code, mkhl.direnv. No harness module and no managed
+# settings: repos that import `harness/devenv` carry the rules (`harness
+# init` sets one up). scripts/install.sh does the root steps `nix run`
+# needs, then runs `harness bootstrap`, which finds them done and does the
+# rest.
 #
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
-# harness ref's current flake.lock. Root is needed for dnf, /etc/nix/nix.conf
-# and the nix-daemon socket; those steps go through sudo and say what they do
-# first. --no-root skips them; --no-profile skips the `nix profile` step for a
-# host that gets direnv, devenv and ccmux some other way (the README's "your
-# own configuration"). `doctor` changes nothing and reports every
-# prerequisite, `claude doctor`, and, run in a harness repo, the repo's
-# settings symlink, direnv approval and hooks; exit 1 when one the harness
-# needs is missing. That is the host half of the runbook's verification
-# section. --dry-run prints every step and the command it would run, runs
-# none of them and never calls sudo; --verbose prints each command first.
+# harness ref's current flake.lock. Root is needed for dnf (Fedora),
+# /etc/nix/nix.conf (the devenv cache; flakes where the installer left them
+# off), the nix-daemon socket, and the one kernel setting the Claude Code
+# sandbox cannot run without: where the kernel confines unprivileged user
+# namespaces (Ubuntu 23.10 and later through AppArmor, older Debian through
+# kernel.unprivileged_userns_clone) a sysctl plus a drop-in under
+# /etc/sysctl.d, asked for on its own (--yes answers it); declined, the
+# command is printed for later and doctor keeps reporting it. Those steps go
+# through sudo and say what they do first. --no-root skips them; --no-profile
+# skips the `nix profile` step for a host that gets direnv, devenv and ccmux
+# some other way (the README's "your own configuration"). `doctor` changes
+# nothing and reports every prerequisite, `claude doctor`, and, run in a
+# harness repo, the repo's settings symlink, direnv approval and hooks; exit
+# 1 when one the harness needs is missing. That is the host half of the
+# runbook's verification section. --dry-run prints every step and the
+# command it would run, runs none of them and never calls sudo; --verbose
+# prints each command first.
 #
 # The harness ref (what `nix profile add` installs from): --harness, else
 # HARNESS_REF, else the receipt's, else the profile's ccmux entry, else
@@ -61,8 +68,10 @@
 # the harness block in nix.conf, the SELinux rule, the daemon socket, the
 # profile packages, every user file above, the VS Code pieces; Nix itself is
 # left, since nothing says who installed it) and removes the receipt last.
-# It asks before it starts unless --yes; it never touches the code root, so
-# delete a test repo by hand.
+# With a receipt that says scripts/install.sh ran the nix-installer, Nix goes
+# too (/nix/nix-installer uninstall); the dnf packages likewise. It asks
+# before it starts unless --yes; it never touches the code root, so delete a
+# test repo by hand.
 # shellcheck disable=SC1091,SC2015,SC2016,SC2088  # system files are not inputs; `x && ok || miss` reports, ok never fails; jq filters go through jq_edit; ~ in messages is text
 set -euo pipefail
 
@@ -109,15 +118,22 @@ ROOT_RPMS=(nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-pyth
 # The host files pkgs/ ships; pkgs/harness.nix points these at the store.
 DIRENV_TOML="${HARNESS_DIRENV_TOML:-$HARNESS_DIR/pkgs/direnv.toml}"
 TMUX_CONF="${HARNESS_TMUX_CONF:-$HARNESS_DIR/pkgs/tmux.conf}"
+# The system files the root steps touch; the tests point these, and the
+# os-release and CA bundle below, at a scratch directory.
+NIX_CONF="${HARNESS_NIX_CONF:-/etc/nix/nix.conf}"
+SYSCTL_DROPIN="${HARNESS_SYSCTL_DROPIN:-/etc/sysctl.d/99-claude-nix-harness.conf}"
+NIX_INSTALLER="${HARNESS_NIX_INSTALLER:-/nix/nix-installer}"
+OS_RELEASE="${HARNESS_OS_RELEASE:-/etc/os-release}"
+DEFERRED=()   # declined root steps, printed at the end as commands for later
 
 # Nix-built tools (devenv's fetcher included) look for the CA bundle at the
 # NixOS and Debian path, or where NIX_SSL_CERT_FILE points. Fedora 44 keeps
 # it only here (the legacy /etc/pki/tls/certs/ca-bundle.crt and
 # /etc/ssl/certs/ca-bundle.crt links are gone, which is also why Fedora's
 # own profile.d/nix-daemon.sh fails to set the variable).
-CA_BUNDLE=""
+CA_BUNDLE="${HARNESS_CA_BUNDLE:-}"
 for f in /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt; do
-  [ -r "$f" ] && { CA_BUNDLE="$f"; break; }
+  [ -z "$CA_BUNDLE" ] && [ -r "$f" ] && CA_BUNDLE="$f"
 done
 
 missing=0; nmiss=0; nwarn=0
@@ -134,7 +150,8 @@ json_list() { jq -n '$ARGS.positional' --args "$@"; }
 # for new shells; this shell may predate the dnf step.
 nix_path() {
   unset __ETC_PROFILE_NIX_SOURCED
-  [ -r /etc/profile.d/nix-daemon.sh ] && . /etc/profile.d/nix-daemon.sh
+  [ -r /etc/profile.d/nix-daemon.sh ] && . /etc/profile.d/nix-daemon.sh   # Fedora's package
+  [ -r /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ] && . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh   # the nix-installer
   [ -n "${NIX_SSL_CERT_FILE:-}" ] || [ -z "$CA_BUNDLE" ] || export NIX_SSL_CERT_FILE="$CA_BUNDLE"
   return 0
 }
@@ -148,6 +165,16 @@ run() { # run [-q] <command...>; -q drops the command's stdout
   if [ "$DRY_RUN" = 1 ]; then printf '    would run:'; printf ' %q' "$@"; echo; return 0; fi
   if [ "$VERBOSE" = 1 ]; then printf '    +'; printf ' %q' "$@"; echo; fi
   if [ "$quiet" = 1 ]; then "$@" >/dev/null; else "$@"; fi
+}
+
+# ask <question>: y/N from the terminal. --yes and --dry-run answer y (the
+# dry run then prints what it would run); no terminal at all answers n.
+ask() {
+  local a=""
+  [ "$YES" != 1 ] && [ "$DRY_RUN" != 1 ] || return 0
+  printf '%s [y/N] ' "$1"
+  if [ -t 0 ]; then read -r a || a=""; else { read -r a </dev/tty; } 2>/dev/null || a=""; fi
+  case "$a" in y|Y) return 0 ;; *) return 1 ;; esac
 }
 
 put_file() { # put_file <path> <content> [append]
@@ -181,6 +208,27 @@ root_write() { # root_write <path> <content>: a root-owned 0644 file, through su
 without_block() {
   awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }' "$1" 2>/dev/null || true
 }
+
+# put_block <file> <content>: the harness block, marked, after whatever else
+# the file holds; an older block is replaced. Recorded in the receipt as a
+# block, so reset strips it and leaves the rest.
+put_block() {
+  local want
+  want=$(without_block "$1")
+  want="${want:+$want
+}$MARK_BEGIN
+$2
+$MARK_END"
+  write_if_differs "$1" "$want"
+  record_file block "$1"
+}
+
+# The file tmux reads: ~/.tmux.conf when it exists (tmux stops at the first
+# file it finds), else ~/.config/tmux/tmux.conf.
+tmux_file() { if [ -e "$HOME/.tmux.conf" ]; then echo "$HOME/.tmux.conf"; else echo "$HOME/.config/tmux/tmux.conf"; fi; }
+tilde() { printf '~/%s' "${1#"$HOME/"}"; }   # tilde <path under $HOME>: for messages
+
+selinux_on() { command -v getenforce >/dev/null 2>&1 && command -v matchpathcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; }
 
 # ---------------------------------------------------------------- receipt
 # What this run put on the host, or found there in the harness's shape;
@@ -248,31 +296,36 @@ load_receipt() {
 rq() { jq -r "$1" <<<"$RECEIPT_JSON"; }  # rq <filter>: from the receipt, one value per line
 
 # ---------------------------------------------------------------- preflight
-[ -r /etc/os-release ] && . /etc/os-release
-host_ok() { [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null; }
-if [ "$CMD" != doctor ]; then
-  [ "${ID:-}" = fedora ] || die "this is for Fedora (found ${ID:-unknown}); the dnf step is the only distro-specific part"
-  host_ok || die "Fedora 44 or newer needed: the first release that packages nix and nix-daemon"
-  [ "$(id -u)" != 0 ] || die "run as your own user; sudo is used where root is needed"
-fi
+# shellcheck disable=SC1090  # the tests point this at a fake os-release
+[ -r "$OS_RELEASE" ] && . "$OS_RELEASE"
+# Fedora 44 or newer packages Nix itself: the dnf route. Everything else got
+# Nix from the nix-installer (scripts/install.sh); from here on the steps
+# are the same, minus dnf.
+HOST=generic
+[ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null && HOST=fedora
+[ "$CMD" = doctor ] || [ "$(id -u)" != 0 ] || die "run as your own user; sudo is used where root is needed"
 
 # ---------------------------------------------------------------- root steps
 root_steps() {
-  local need=() p
-  for p in "${ROOT_RPMS[@]}"; do rpm -q "$p" >/dev/null 2>&1 || need+=("$p"); done
-  if [ ${#need[@]} -gt 0 ]; then
-    step "dnf install ${need[*]}"
-    run sudo dnf install -y "${need[@]}"
-    R_ROOT_PKGS+=("${need[@]}")
+  local need=() p conf="$NIX_CONF" want flakes=""
+  if [ "$HOST" = fedora ]; then
+    for p in "${ROOT_RPMS[@]}"; do rpm -q "$p" >/dev/null 2>&1 || need+=("$p"); done
+    if [ ${#need[@]} -gt 0 ]; then
+      step "dnf install ${need[*]}"
+      run sudo dnf install -y "${need[@]}"
+      R_ROOT_PKGS+=("${need[@]}")
+    fi
   fi
 
-  # Fedora's nix.conf already enables nix-command and flakes. The harness block
-  # adds the devenv cache; trusted-users only on request (header).
-  local conf=/etc/nix/nix.conf want
+  # The harness block in nix.conf: the devenv cache; flakes when nothing else
+  # turns them on (Fedora's package does, the nix-installer leaves them off);
+  # trusted-users only on request (header).
   # Everything but a previous harness block, then the block.
   want=$(without_block "$conf")
+  grep -q -E '^experimental-features' <<<"$want" || flakes="
+experimental-features = nix-command flakes"
   want="${want:+$want
-}$MARK_BEGIN
+}$MARK_BEGIN$flakes
 extra-substituters = $DEVENV_CACHE
 extra-trusted-public-keys = $DEVENV_KEY"
   [ "$TRUSTED_USER" = 1 ] && want="$want
@@ -280,9 +333,9 @@ trusted-users = root $USER"
   want="$want
 $MARK_END"
   if [ "$(cat "$conf" 2>/dev/null)" != "$want" ]; then
-    step "write $conf (harness block: devenv cache$([ "$TRUSTED_USER" = 1 ] && echo ", trusted-users"))"
+    step "write $conf (harness block: devenv cache${flakes:+, flakes}$([ "$TRUSTED_USER" = 1 ] && echo ", trusted-users"))"
     root_write "$conf" "$want"
-    systemctl is-active -q nix-daemon.service && run sudo systemctl restart nix-daemon.service
+    systemctl is-active -q nix-daemon.service 2>/dev/null && run sudo systemctl restart nix-daemon.service
   fi
   R_ROOT_STEPS+=(nix.conf)
 
@@ -291,17 +344,46 @@ $MARK_END"
   # socket: Permission denied", no AVC in the journal when auditd runs). The
   # Determinate installer's nix.fc labels the socket directory var_run_t, the
   # type /run has; same here, as a persistent file-context rule.
-  if [ "$(getenforce 2>/dev/null)" != Disabled ] && ! matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then
+  if selinux_on && ! matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then
     step "SELinux: label /nix/var/nix/daemon-socket as var_run_t so systemd can create the daemon socket"
     run sudo semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?'
     run sudo restorecon -RF /nix/var/nix/daemon-socket
     R_ROOT_STEPS+=(selinux)
   fi
 
-  if ! systemctl is-enabled -q nix-daemon.socket 2>/dev/null || ! systemctl is-active -q nix-daemon.socket; then
+  # The nix-installer enables the socket itself; Fedora's package ships it
+  # disabled. No unit at all (a daemon run some other way) is left alone.
+  if systemctl cat nix-daemon.socket >/dev/null 2>&1 \
+     && { ! systemctl is-enabled -q nix-daemon.socket 2>/dev/null || ! systemctl is-active -q nix-daemon.socket 2>/dev/null; }; then
     step "enable the nix-daemon socket"
     run sudo systemctl enable --now nix-daemon.socket
     R_ROOT_STEPS+=(nix-daemon.socket)
+  fi
+
+  userns_steps
+}
+
+# The Claude Code sandbox is bubblewrap, which needs unprivileged user
+# namespaces. Ubuntu 23.10 and later confine them through AppArmor, older
+# Debian kernels gate them with unprivileged_userns_clone; with either on,
+# `failIfUnavailable` refuses every Claude command. A kernel setting, so it
+# is asked for on its own: the command is shown, --yes answers it, and a
+# decline prints it for later (doctor keeps reporting the restriction).
+userns_steps() {
+  local key val
+  command -v sysctl >/dev/null 2>&1 || return 0
+  if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then key=kernel.apparmor_restrict_unprivileged_userns; val=0
+  elif [ "$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ]; then key=kernel.unprivileged_userns_clone; val=1
+  else return 0; fi
+  step "user namespaces: $key is $((1 - val)), and the Claude Code sandbox (bubblewrap) needs them"
+  echo "    this runs: sudo sysctl -w $key=$val, and writes $SYSCTL_DROPIN so it holds across reboots"
+  if ask "    apply with sudo now?"; then
+    run sudo sysctl -w "$key=$val"
+    root_write "$SYSCTL_DROPIN" "$key = $val"
+    R_ROOT_STEPS+=(sysctl)
+  else
+    DEFERRED+=("sudo sysctl -w $key=$val && echo '$key = $val' | sudo tee $SYSCTL_DROPIN")
+    warn "declined: every Claude command is refused until it runs (harness doctor keeps reporting it)"
   fi
 }
 
@@ -319,7 +401,7 @@ profile_steps() {
   local sub=install name url
   nix_path
   if ! command -v nix >/dev/null; then
-    [ "$DRY_RUN" = 1 ] || die "nix not on PATH after the dnf step"
+    [ "$DRY_RUN" = 1 ] || die "nix not on PATH: scripts/install.sh installs it (Fedora's packages, or the nix-installer elsewhere)"
     for name in "${PROFILE_PKGS[@]}"; do step "nix profile add $HARNESS_REF#$name"; run nix profile add "$HARNESS_REF#$name"; done
     return 0
   fi
@@ -346,7 +428,7 @@ profile_steps() {
 
 user_steps() {
   # direnv: the home module's programs.direnv.config.global.
-  local f="$HOME/.config/direnv/direnv.toml" direnv_toml tmux_conf
+  local f="$HOME/.config/direnv/direnv.toml" direnv_toml
   direnv_toml="$MARK_BEGIN
 $(cat "$DIRENV_TOML")"
   if [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
@@ -356,21 +438,15 @@ $(cat "$DIRENV_TOML")"
   fi
 
   # tmux: the home module's programs.tmux.extraConfig, a marked block after
-  # whatever else the file holds. An older block is replaced, so a changed
-  # pkgs/tmux.conf reaches a bootstrapped host on the next bootstrap or upgrade.
-  f="$HOME/.config/tmux/tmux.conf"
-  tmux_conf=$(without_block "$f")
-  tmux_conf="${tmux_conf:+$tmux_conf
-}$MARK_BEGIN
-$(cat "$TMUX_CONF")
-$MARK_END"
-  write_if_differs "$f" "$tmux_conf"
-  record_file block "$f"
+  # whatever else the file tmux reads holds (tmux_file). An older block is
+  # replaced, so a changed pkgs/tmux.conf reaches a bootstrapped host on the
+  # next bootstrap or upgrade.
+  put_block "$(tmux_file)" "$(cat "$TMUX_CONF")"
 
-  # bash: the direnv hook and the code root (home.sessionVariables). Fedora's
-  # ~/.bashrc sources ~/.bashrc.d/* after /etc/bashrc has run profile.d, so
-  # the nix profile is already on PATH here. No HARNESS_EXPECT_MANAGED: this
-  # host has no managed settings by design.
+  # bash: the direnv hook and the code root (home.sessionVariables), in
+  # ~/.bashrc.d, which Fedora's stock ~/.bashrc sources after /etc/bashrc has
+  # run profile.d, so the nix profile is already on PATH here. No
+  # HARNESS_EXPECT_MANAGED: this host has no managed settings by design.
   local root_expr="$CODE_ROOT"
   [[ "$root_expr" == "$HOME/"* ]] && root_expr="\$HOME/${root_expr#"$HOME/"}"
   f="$HOME/.bashrc.d/claude-nix-harness.sh"
@@ -380,6 +456,20 @@ export HARNESS_CODE_ROOT=\"$root_expr\"
 [ -n \"\${NIX_SSL_CERT_FILE:-}\" ] || export NIX_SSL_CERT_FILE=\"${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem}\"
 if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook bash)\"; fi"
   record_file file "$f"
+
+  # Another distro's ~/.bashrc does not source ~/.bashrc.d, so it gets one
+  # line (a marked block) to do so. No rc file at all: ~/.bashrc is created,
+  # unless the person runs zsh (a ~/.zshrc and nothing else). A ~/.zshrc
+  # gets the same three lines as a block of its own.
+  local rc="$HOME/.bashrc" zrc="$HOME/.zshrc"
+  if { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
+    put_block "$rc" '[ -r ~/.bashrc.d/claude-nix-harness.sh ] && . ~/.bashrc.d/claude-nix-harness.sh'
+  fi
+  if [ -e "$zrc" ]; then
+    put_block "$zrc" "export HARNESS_CODE_ROOT=\"$root_expr\"
+[ -n \"\${NIX_SSL_CERT_FILE:-}\" ] || export NIX_SSL_CERT_FILE=\"${CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}\"
+if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook zsh)\"; fi"
+  fi
 
   # GUI session PATH: VS Code launched from the menu (and the claude it spawns)
   # otherwise never sees the nix profile. systemd user environment generator;
@@ -449,26 +539,31 @@ strip_keys() {
 }
 
 reset_steps() {
-  local pkgs=() steps=() profile=() exts=() nix_ours=0 i p f kind keys answer
+  local pkgs=() steps=() profile=() exts=() nix_from="" i p f kind keys answer key
   load_receipt
   mapfile -t pkgs < <(rq '.root.packages[]?')
   mapfile -t steps < <(rq '.root.steps[]?')
   mapfile -t profile < <(rq '.profile[]?')
   mapfile -t exts < <(rq '.vscodeExtensions[]?')
-  in_list nix "${pkgs[@]}" && nix_ours=1
+  # Who put Nix there: dnf (Fedora), the nix-installer, or nobody we know.
+  in_list nix "${pkgs[@]}" && nix_from=dnf
+  in_list nix-installer "${steps[@]}" && nix_from=installer
 
   echo "This removes, on this host ($([ "$HAVE_RECEIPT" = 1 ] && echo "from the receipt" || echo "the built-in lists")):"
   if [ "$NO_ROOT" = 1 ]; then echo "  root:  nothing (--no-root)"
   else
     [ ${#pkgs[@]} -eq 0 ] || echo "  root:  the packages ${pkgs[*]} (and the dependencies dnf pulled in with them)"
-    if [ "$nix_ours" = 1 ]; then echo "  root:  nix-daemon.socket, /nix and /etc/nix, the nixbld build users"
-    else
-      in_list nix-daemon.socket "${steps[@]}" && echo "  root:  nix-daemon.socket disabled (Nix stays; install.sh enables it again)"
-      in_list nix.conf "${steps[@]}" && echo "  root:  the harness block in /etc/nix/nix.conf"
-    fi
+    case "$nix_from" in
+      dnf) echo "  root:  nix-daemon.socket, /nix and /etc/nix, the nixbld build users" ;;
+      installer) echo "  root:  Nix, by $NIX_INSTALLER uninstall (/nix, /etc/nix, the build users, its lines in the system rc files)" ;;
+      *)
+        in_list nix-daemon.socket "${steps[@]}" && echo "  root:  nix-daemon.socket disabled (Nix stays; install.sh enables it again)"
+        in_list nix.conf "${steps[@]}" && echo "  root:  the harness block in $NIX_CONF" ;;
+    esac
     in_list selinux "${steps[@]}" && echo "  root:  the SELinux rule for the daemon socket"
+    in_list sysctl "${steps[@]}" && echo "  root:  $SYSCTL_DROPIN, and the kernel's user-namespace restriction back on"
   fi
-  if [ "$nix_ours" = 1 ]; then
+  if [ -n "$nix_from" ]; then
     echo "  user:  the nix profile and state (~/.nix-profile, ~/.local/state/nix), ~/.cache/nix,"
     echo "         ~/.cache/devenv, the direnv allow database (~/.local/share/direnv)"
   elif [ ${#profile[@]} -gt 0 ]; then
@@ -485,32 +580,48 @@ reset_steps() {
 
   if [ "$NO_ROOT" != 1 ]; then
     [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for the root part (or pass --no-root)"
-    if [ "$nix_ours" = 1 ] || in_list nix-daemon.socket "${steps[@]}"; then
+    # The nix-installer's uninstall stops the daemon itself.
+    if [ "$nix_from" = dnf ] || { [ -z "$nix_from" ] && in_list nix-daemon.socket "${steps[@]}"; }; then
       step "disable the nix daemon"
       run sudo systemctl disable --now nix-daemon.socket nix-daemon.service 2>/dev/null || true
     fi
     local installed=()
     for p in "${pkgs[@]}"; do rpm -q "$p" >/dev/null 2>&1 && installed+=("$p"); done
     if [ ${#installed[@]} -gt 0 ]; then step "dnf remove ${installed[*]}"; run sudo dnf remove -y "${installed[@]}"; fi
-    if [ "$nix_ours" = 1 ]; then
-      step "remove /nix and /etc/nix"
-      run sudo rm -rf /nix /etc/nix
-    elif in_list nix.conf "${steps[@]}" && grep -q -F "$MARK_BEGIN" /etc/nix/nix.conf 2>/dev/null; then
-      step "remove the harness block from /etc/nix/nix.conf"
-      root_write /etc/nix/nix.conf "$(without_block /etc/nix/nix.conf)"
-    fi
-    if in_list selinux "${steps[@]}" && [ "$(getenforce 2>/dev/null)" != Disabled ]; then
+    case "$nix_from" in
+      dnf)
+        step "remove /nix and /etc/nix"
+        run sudo rm -rf /nix /etc/nix ;;
+      installer)
+        if [ -x "$NIX_INSTALLER" ]; then step "uninstall Nix ($NIX_INSTALLER uninstall)"; run sudo "$NIX_INSTALLER" uninstall --no-confirm
+        else warn "$NIX_INSTALLER is gone: Nix left as it is"; fi ;;
+      *)
+        if in_list nix.conf "${steps[@]}" && grep -q -F "$MARK_BEGIN" "$NIX_CONF" 2>/dev/null; then
+          step "remove the harness block from $NIX_CONF"
+          root_write "$NIX_CONF" "$(without_block "$NIX_CONF")"
+        fi ;;
+    esac
+    if in_list selinux "${steps[@]}" && selinux_on; then
       step "remove the SELinux rule for the daemon socket"
       run sudo semanage fcontext -d '/nix/var/nix/daemon-socket(/.*)?' 2>/dev/null || true
     fi
-    if [ "$nix_ours" = 1 ]; then
+    if in_list sysctl "${steps[@]}"; then
+      step "remove $SYSCTL_DROPIN and put the kernel's user-namespace restriction back"
+      key=$(sed -n 's/ *=.*//p' "$SYSCTL_DROPIN" 2>/dev/null | head -1)
+      case "$key" in
+        kernel.apparmor_restrict_unprivileged_userns) run sudo sysctl -w "$key=1" ;;
+        kernel.unprivileged_userns_clone) run sudo sysctl -w "$key=0" ;;
+      esac
+      run sudo rm -f "$SYSCTL_DROPIN"
+    fi
+    if [ "$nix_from" = dnf ]; then
       step "remove the nixbld build users"
       for i in $(seq 1 10); do run sudo userdel "nixbld-$i" 2>/dev/null || true; done
       run sudo groupdel nixbld 2>/dev/null || true
     fi
   fi
 
-  if [ "$nix_ours" = 1 ]; then
+  if [ -n "$nix_from" ]; then
     step "remove the nix profile, caches and the direnv allow database"
     run rm -rf "$HOME/.nix-profile" "$HOME/.nix-defexpr" "$HOME/.nix-channels" "$HOME/.local/state/nix" \
            "$HOME/.cache/nix" "$HOME/.cache/devenv" "$HOME/.local/share/devenv" "$HOME/.local/share/direnv"
@@ -557,9 +668,9 @@ NEXT
 # ---------------------------------------------------------------- report
 report() {
   nix_path
-  local v
-  if host_ok; then echo "host: Fedora ${VERSION_ID} ($(uname -m)), SELinux $(getenforce 2>/dev/null || echo unknown)"
-  else miss "Fedora 44 or newer (found ${PRETTY_NAME:-no /etc/os-release}): bootstrap refuses to run here"; fi
+  local v route="" tf
+  if [ "$HOST" = fedora ]; then route="nix from Fedora's packages"; elif [ -x "$NIX_INSTALLER" ]; then route="nix from the nix-installer"; fi
+  echo "host: ${PRETTY_NAME:-unknown} ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
   else warn "no receipt at $RECEIPT: reset and upgrade use the built-in lists (harness bootstrap writes one)"; fi
@@ -567,9 +678,9 @@ report() {
   if command -v nix >/dev/null 2>&1; then
     v=$(nix --version | awk '{print $NF}')
     if nix store info >/dev/null 2>&1 || nix store ping >/dev/null 2>&1; then ok "nix $v, daemon answers"; else miss "nix $v installed but the daemon does not answer (systemctl enable --now nix-daemon.socket)"; fi
-    grep -q -E '^experimental-features.*flakes' /etc/nix/nix.conf 2>/dev/null && ok "flakes enabled in /etc/nix/nix.conf" || miss "flakes not enabled in /etc/nix/nix.conf"
-    grep -q -F "$DEVENV_CACHE" /etc/nix/nix.conf 2>/dev/null && ok "devenv cache in /etc/nix/nix.conf" || warn "devenv cache not in /etc/nix/nix.conf: devenv builds more from source"
-    if [ "$(getenforce 2>/dev/null)" != Disabled ]; then
+    grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null && ok "flakes enabled in $NIX_CONF" || miss "flakes not enabled in $NIX_CONF (harness bootstrap writes the line)"
+    grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null && ok "devenv cache in $NIX_CONF" || warn "devenv cache not in $NIX_CONF: devenv builds more from source"
+    if selinux_on; then
       if matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then ok "SELinux: daemon socket directory labeled var_run_t"
       else miss "SELinux: daemon socket directory labeled $(matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null), systemd cannot create the socket (sudo semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?'; sudo restorecon -RF /nix/var/nix/daemon-socket)"; fi
       if systemctl is-active -q auditd 2>/dev/null; then warn "SELinux denials go to auditd, not the journal: sudo ausearch -m avc -ts recent | grep nix"
@@ -577,7 +688,7 @@ report() {
       else ok "no SELinux denials mentioning nix in this boot's journal"; fi
     fi
   else
-    miss "nix (scripts/install.sh, or dnf install nix nix-daemon)"
+    miss "nix (scripts/install.sh installs it: Fedora's packages, or the nix-installer elsewhere)"
   fi
 
   if [ -n "$CA_BUNDLE" ]; then ok "CA bundle for Nix-built tools: $CA_BUNDLE (NIX_SSL_CERT_FILE)"; else miss "no CA bundle found for NIX_SSL_CERT_FILE: devenv cannot fetch over https"; fi
@@ -587,13 +698,18 @@ report() {
   if command -v devenv >/dev/null 2>&1; then ok "devenv $(devenv version 2>/dev/null | awk '{print $NF}') ($(command -v devenv))"; else miss "devenv (nix profile add $HARNESS_REF#devenv)"; fi
   if command -v ccmux >/dev/null 2>&1; then ok "ccmux ($(command -v ccmux))"; else warn "ccmux not on the host PATH (the devenv shell of a harness repo has it; nix profile add $HARNESS_REF#ccmux for everywhere)"; fi
 
-  for t in bwrap socat; do command -v "$t" >/dev/null 2>&1 && ok "$t ($(command -v "$t"))" || miss "$t (dnf install bubblewrap socat): the sandbox refuses to start without it"; done
+  for t in bwrap socat; do command -v "$t" >/dev/null 2>&1 && ok "$t ($(command -v "$t"))" || miss "$t (bubblewrap and socat from your distro's packages; the devenv shell's claude-code brings its own): the sandbox refuses to start without it"; done
   v=$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 0)
   [ "$v" -gt 0 ] && ok "user namespaces enabled (max $v)" || miss "user namespaces disabled: bubblewrap cannot run"
-  if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- /bin/true 2>/dev/null; then ok "bubblewrap works under this SELinux mode"; else miss "bubblewrap cannot create a sandbox here"; fi
-  if command -v tmux >/dev/null 2>&1; then v=$(tmux -V | awk '{print $2}'); ver_ge "${v//[a-z]/}" "$MIN_TMUX" && ok "tmux $v" || warn "tmux $v is older than $MIN_TMUX (extended-keys)"; else miss "tmux (dnf install tmux)"; fi
-  command -v jq >/dev/null 2>&1 && ok "jq" || miss "jq (dnf install jq)"
-  command -v git >/dev/null 2>&1 && ok "git $(git --version | awk '{print $3}')" || miss "git (dnf install git-core)"
+  if command -v sysctl >/dev/null 2>&1; then
+    if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then miss "AppArmor confines unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns = 1): bubblewrap cannot run; harness bootstrap offers the sysctl"
+    elif [ "$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ]; then miss "kernel.unprivileged_userns_clone = 0: bubblewrap cannot run; harness bootstrap offers the sysctl"
+    else ok "no sysctl confines unprivileged user namespaces"; fi
+  fi
+  if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- /bin/true 2>/dev/null; then ok "bubblewrap works here"; else miss "bubblewrap cannot create a sandbox here"; fi
+  if command -v tmux >/dev/null 2>&1; then v=$(tmux -V | awk '{print $2}'); ver_ge "${v//[a-z]/}" "$MIN_TMUX" && ok "tmux $v" || warn "tmux $v is older than $MIN_TMUX (extended-keys)"; else miss "tmux (your distro's package, or harness.claudeCode.enable in the repo)"; fi
+  command -v jq >/dev/null 2>&1 && ok "jq" || miss "jq (your distro's package)"
+  command -v git >/dev/null 2>&1 && ok "git $(git --version | awk '{print $3}')" || miss "git (your distro's package)"
 
   if command -v claude >/dev/null 2>&1; then
     v=$(claude --version 2>/dev/null | awk '{print $1}')
@@ -606,18 +722,31 @@ report() {
   else warn "account-synced skills and plugins load (syncClaudeAiSkills, syncClaudeAiPlugins; --no-account-sync turns them off)"; fi
   [ -r /etc/claude-code/managed-settings.json ] && warn "/etc/claude-code/managed-settings.json exists: this host carries managed settings, the harness assumed none" || ok "no managed settings (unmanaged host: the repo file is the whole harness)"
 
-  if command -v code >/dev/null 2>&1; then
-    ok "code $(code --version 2>/dev/null | head -1)"
-    code --list-extensions 2>/dev/null | grep -q -i -x 'anthropic.claude-code' && ok "VS Code extension anthropic.claude-code" || warn "VS Code extension anthropic.claude-code not installed"
-    code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv' && ok "VS Code extension mkhl.direnv" || miss "VS Code extension mkhl.direnv (code --install-extension mkhl.direnv)"
-  else warn "code not on PATH: VS Code steps skipped"; fi
+  # From inside a session `code` is on PATH but dies before printing (the
+  # shell's LD_LIBRARY_PATH makes the host binary load a Nix glibc, measured
+  # 2026-10-21), so an extension verdict there would be a false MISSING.
+  if ! command -v code >/dev/null 2>&1; then warn "code not on PATH: VS Code steps skipped"
+  else
+    v=$(code --version 2>/dev/null | head -1 || true)
+    if [ -z "$v" ]; then warn "code is on PATH but answers nothing (from inside a session the shell's library path breaks the host binary): VS Code steps skipped, run doctor from your own terminal"
+    else
+      ok "code $v"
+      code --list-extensions 2>/dev/null | grep -q -i -x 'anthropic.claude-code' && ok "VS Code extension anthropic.claude-code" || warn "VS Code extension anthropic.claude-code not installed"
+      code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv' && ok "VS Code extension mkhl.direnv" || miss "VS Code extension mkhl.direnv (code --install-extension mkhl.direnv)"
+    fi
+  fi
 
   [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ccmux resolves <customer>/<repo> under it)"
   if grep -q -F "$MARK_BEGIN" "$HOME/.config/direnv/direnv.toml" 2>/dev/null; then ok "direnv.toml"
   elif [ -e "$HOME/.config/direnv/direnv.toml" ]; then warn "~/.config/direnv/direnv.toml exists and is not the harness one (strict_env, warn_timeout, load_dotenv = false)"
   else miss "~/.config/direnv/direnv.toml"; fi
-  grep -q -F "$MARK_BEGIN" "$HOME/.config/tmux/tmux.conf" 2>/dev/null && ok "tmux.conf harness block" || miss "tmux.conf harness block"
+  tf=$(tmux_file)
+  grep -q -F "$MARK_BEGIN" "$tf" 2>/dev/null && ok "tmux harness block in $(tilde "$tf")" || miss "tmux harness block in $(tilde "$tf")"
   grep -q 'direnv hook bash' "$HOME/.bashrc.d/claude-nix-harness.sh" 2>/dev/null && ok "direnv hook and HARNESS_CODE_ROOT in ~/.bashrc.d" || miss "~/.bashrc.d/claude-nix-harness.sh"
+  if [ -e "$HOME/.bashrc" ] || [ ! -e "$HOME/.zshrc" ]; then
+    grep -q 'bashrc\.d' "$HOME/.bashrc" 2>/dev/null && ok "~/.bashrc sources ~/.bashrc.d" || miss "~/.bashrc does not source ~/.bashrc.d (harness bootstrap adds the line)"
+  fi
+  if [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (harness bootstrap adds it)"; fi
   [ -r "$HOME/.config/environment.d/50-claude-nix-harness.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"
   [ -n "${HARNESS_EXPECT_MANAGED:-}" ] && warn "HARNESS_EXPECT_MANAGED is set but this host has no managed settings" || true
 }
@@ -638,7 +767,10 @@ claude_doctor() {
 repo_report() {
   local s=.claude/settings.json h n=0
   echo; echo "repo: $PWD"
-  if [ -L "$s" ] && [ ! -e "$s" ]; then miss "$s is a dangling symlink to $(readlink "$s") (direnv reload rewrites it)"
+  # A session's sandbox masks the repo's own .claude files as character
+  # devices (measured 2026-10-21): nothing about the repo can be read here.
+  if [ -c "$s" ]; then warn "$s is masked by the sandbox (a character device): doctor runs inside a Claude Code session; run it from your own terminal to check the repo"; return 0
+  elif [ -L "$s" ] && [ ! -e "$s" ]; then miss "$s is a dangling symlink to $(readlink "$s") (direnv reload rewrites it)"
   elif [ -L "$s" ] && [[ "$(readlink -f "$s")" == /nix/store/* ]]; then ok "$s -> $(readlink "$s")"
   elif [ -L "$s" ]; then miss "$s points outside /nix/store ($(readlink -f "$s")): not the devenv module's file"
   else miss "$s is a plain file, not the devenv module's store symlink (anything can edit it; direnv reload rewrites it)"; fi
@@ -682,6 +814,9 @@ case "$CMD" in
     echo
     report
     summary
+    if [ ${#DEFERRED[@]} -gt 0 ]; then
+      echo; echo "Declined, run later (every Claude command is refused until then):"; printf '  %s\n' "${DEFERRED[@]}"
+    fi
     cat <<NEXT
 
 Next: open a new terminal (PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d), then

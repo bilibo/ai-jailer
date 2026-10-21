@@ -1,150 +1,136 @@
 #!/usr/bin/env bash
-#   install-test.sh <install.sh>
+#   install-test.sh <scripts/install.sh>
 #
-# Runs install.sh against a fake HOME with curl, sudo, nix, direnv, devenv,
-# sysctl and jq stubbed on PATH, so it runs anywhere and installs nothing.
-# Every stub appends its argv to $tmp/calls. `nix` is only on PATH when a
-# case puts it there; the sysctl stub reports the Ubuntu user-namespace
-# restriction while $tmp/restricted exists.
+# scripts/install.sh with every host command stubbed (curl, the installer it
+# fetches, sudo, rpm, systemctl, nix) and a fake os-release: the
+# nix-installer route (fetched only when nix is absent; --yes or a terminal
+# for its confirmation), the Fedora route (dnf, the socket, no installer),
+# what reaches bootstrap (the ref: this checkout, HARNESS_REF, or the
+# published repo when piped; the root steps; flakes on), the init of the
+# checkout, and the flags that stop it. Assumes no nix on the test's own PATH
+# and no controlling terminal, which the Nix build sandbox guarantees.
 set -uo pipefail
-script="${1:?usage: install-test.sh <install.sh>}"
-script=$(cd "$(dirname "$script")" && pwd -P)/$(basename "$script")
-repo=$(dirname "$script")
+script="${1:?usage: install-test.sh <scripts/install.sh>}"
 pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/stubs" "$tmp/nixbin" "$tmp/home" "$tmp/tools"
-# Only these reach the script, so the host's own nix never does; the
-# profile path and the uninstaller path are overridden below for the same
-# reason.
-for t in sh bash grep cp mkdir sed tee cat dirname basename mv rm head tail mktemp; do
-  ln -s "$(command -v "$t")" "$tmp/tools/$t"
-done
+log="$tmp/calls"
 
-stub() { # stub <dir> <name> [body]
-  printf '#!%s\necho "%s $*" >> "%s/calls"\n%s\nexit 0\n' "$BASH" "$2" "$tmp" "${3:-}" > "$1/$2"
-  chmod +x "$1/$2"
+# A checkout: the script under scripts/, flake.nix and .envrc beside it.
+mkdir -p "$tmp/checkout/scripts" "$tmp/bin" "$tmp/nixbin" "$tmp/home"
+cp "$script" "$tmp/checkout/scripts/install.sh"
+touch "$tmp/checkout/flake.nix" "$tmp/checkout/.envrc"
+
+stub() { # stub <dir> <name> <body>: logs its argv to $CALLS, then runs <body>
+  printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n%s\n' "$2" "$3" >"$1/$2"; chmod +x "$1/$2"
 }
-for s in curl sudo jq git; do stub "$tmp/stubs" "$s"; done
-# direnv logs where it ran: the script allows "." after a cd.
-printf '#!%s\necho "direnv $* (cwd $PWD)" >> "%s/calls"\nexit 0\n' "$BASH" "$tmp" > "$tmp/stubs/direnv"; chmod +x "$tmp/stubs/direnv"
-# The self-check reads the generated settings through the shell.
-stub "$tmp/stubs" devenv 'case "$*" in *disableBypassPermissionsMode*) echo disable;; esac'
-# curl writes nothing, so the installer runs as an empty script. `nix profile
-# add --help` decides add vs install; every nix call must see flakes enabled.
-stub "$tmp/nixbin" nix 'echo "  NIX_CONFIG=${NIX_CONFIG:-}" >> "'"$tmp"'/calls"; [ "${1:-}" = profile ] && [ "${2:-}" = add ] && [ "${3:-}" = --help ] && exit 0'
-stub "$tmp/stubs" sysctl 'case "$*" in *apparmor_restrict_unprivileged_userns*) [ -e "'"$tmp"'/restricted" ] && echo 1 || echo 0;; *) echo 1;; esac'
+# What curl "downloads": an installer that logs and does nothing else.
+printf '#!/bin/sh\necho "installer $*" >>"$CALLS"\n' >"$tmp/installer"
+stub "$tmp/bin" curl 'o=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && o="$2"; shift; done; [ -z "$o" ] || cp "$INSTALLER" "$o"'
+stub "$tmp/bin" sudo 'exit 0'
+stub "$tmp/bin" rpm 'exit 1'
+stub "$tmp/bin" systemctl 'exit 1'
+# nix: logs what bootstrap and init would see.
+stub "$tmp/nixbin" nix 'echo "env HARNESS_REF=$HARNESS_REF HARNESS_ROOT_PACKAGES=[$HARNESS_ROOT_PACKAGES] HARNESS_ROOT_STEPS=[$HARNESS_ROOT_STEPS] NIX_CONFIG=[$NIX_CONFIG]" >>"$CALLS"'
+# What the installer route sources afterwards: puts nix on PATH.
+printf 'PATH=%s:$PATH\n' "$tmp/nixbin" >"$tmp/nix-daemon.sh"
 
-# run <answer-to-prompts> [args...]: runs the script with stubs first on PATH.
+# run <os-id> <version> <cwd> [args...]: the script with nix absent, unless
+# WITH_NIX=1; stdin closed (no terminal). Sets out and rc, empties the log.
 run() {
-  local answer="$1"; shift
-  rm -f "$tmp/calls"; : > "$tmp/calls"
-  HOME="$tmp/home" PATH="$tmp/stubs:$tmp/nixbin:$tmp/tools" \
-    HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" HARNESS_NIX_INSTALLER="$tmp/nix-installer" \
-    sh "$script" "$@" > "$tmp/out" 2>&1 <<< "$answer"
-  echo "exit=$?" >> "$tmp/out"
+  local id="$1" ver="$2" cwd="$3" path="$tmp/bin:$PATH"; shift 3
+  [ "${WITH_NIX:-0}" = 1 ] && path="$tmp/nixbin:$path"
+  printf 'ID=%s\nVERSION_ID="%s"\nPRETTY_NAME="%s %s"\n' "$id" "$ver" "$id" "$ver" >"$tmp/os-release"
+  : >"$log"
+  out=$(cd "$cwd" && env -i HOME="$tmp/home" PATH="$path" TMPDIR="$tmp" CALLS="$log" INSTALLER="$tmp/installer" \
+    HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" ${HARNESS_REF:+HARNESS_REF="$HARNESS_REF"} \
+    bash "$tmp/checkout/scripts/install.sh" "$@" 2>&1 </dev/null); rc=$?
 }
-check() { # check <description> <regex over the calls log>
-  if grep -qE "$2" "$tmp/calls"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/)"; sed 's/^/  /' "$tmp/calls"; fi
-}
-check_absent() { if grep -qE "$2" "$tmp/calls"; then fail=$((fail+1)); echo "FAIL: $1 (/$2/ present)"; else pass=$((pass+1)); fi; }
-file_has() { # file_has <file> <fixed string> [count]
-  local n; n=$(grep -cF -- "$2" "$1" 2>/dev/null)
-  if [ "$n" = "${3:-1}" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 should contain '$2' ${3:-1} time(s), has $n"; fi
-}
-out_has() { if grep -qE -- "$1" "$tmp/out"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: output lacks /$1/"; sed 's/^/  /' "$tmp/out"; fi; }
-out_lacks() { if grep -qE -- "$1" "$tmp/out"; then fail=$((fail+1)); echo "FAIL: output has /$1/"; else pass=$((pass+1)); fi; }
+called()   { if grep -q -E -e "$2" "$log"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/ not in the calls)"; sed 's/^/  /' "$log"; fi; }
+uncalled() { if grep -q -E -e "$2" "$log"; then fail=$((fail+1)); echo "FAIL: $1 (/$2/ in the calls)"; sed 's/^/  /' "$log"; else pass=$((pass+1)); fi; }
+says()     { if [[ "$out" =~ $2 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/)"; printf '%s\n' "$out" | sed 's/^/  /'; fi; }
+exits()    { if [ "$rc" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (want exit $2, got $rc)"; printf '%s\n' "$out" | sed 's/^/  /'; fi; }
 
-# Download fails: stop with curl's error, not with "open a new terminal".
-mv "$tmp/nixbin/nix" "$tmp/nix.stub"
-printf '#!%s\necho "curl $*" >> "%s/calls"\nexit 22\n' "$BASH" "$tmp" > "$tmp/stubs/curl"
-run y
-out_has 'exit=22'
-out_lacks 'again'
-stub "$tmp/stubs" curl
+# Ubuntu, no nix, --yes: the installer, then bootstrap and init with the
+# checkout as the ref, the installer step recorded, flakes on, no sudo here
+# (the installer asks itself).
+run ubuntu 24.04 "$tmp/checkout" --yes
+exits "fresh host" 0
+called "installer fetched"         '^curl .*artifacts\.nixos\.org/nix-installer'
+called "installer run, no-confirm" '^installer install --no-confirm$'
+called "bootstrap from the checkout" "^nix run path:$tmp/checkout#harness -- bootstrap --yes$"
+called "installer step recorded"   'HARNESS_ROOT_STEPS=\[nix-installer\]'
+called "no packages recorded"      'HARNESS_ROOT_PACKAGES=\[\]'
+called "flakes on for nix"         'NIX_CONFIG=\[extra-experimental-features = nix-command flakes\]'
+called "init of the checkout"      "^nix run path:$tmp/checkout#harness -- init $tmp/checkout --yes$"
+uncalled "no dnf off fedora"       'dnf'
+uncalled "no sudo of our own"      '^sudo'
 
-# Fresh host: no nix, no rc files at all. Nothing in $HOME is touched before Nix is in.
-run y
-check "nix installer fetched"      '^curl .*artifacts\.nixos\.org/nix-installer'
-# The stub installer puts no nix on PATH, as a real one does for a shell
-# that has not sourced the profile yet: stop and say to run again.
-out_has 'exit=2'
-out_has 'again'
-[ -e "$tmp/home/.bashrc" ] && { fail=$((fail+1)); echo "FAIL: .bashrc edited before Nix exists"; } || pass=$((pass+1))
+# nix present: no installer, nothing recorded.
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
+exits "re-run" 0
+uncalled "no second installer"     '^curl|^installer'
+called "nothing recorded"          'HARNESS_ROOT_STEPS=\[\]'
+called "bootstrap again"           '-- bootstrap --yes$'
 
-# With nix on PATH: profile installs from this repo, rc lines, config files, allow, build, self-check.
-mv "$tmp/nix.stub" "$tmp/nixbin/nix"
-run y
-check_absent "no second installer"   '^curl'
-check "flakes on for every nix call" '^  NIX_CONFIG=experimental-features = nix-command flakes'
-check_absent "a nix call without"    '^  NIX_CONFIG=$'
-check_absent "no flag words"         '^nix --extra-experimental-features'
-check "add probed"                   '^nix profile add --help'
-check "devenv from this checkout"    "^nix profile add .*$repo#devenv"
-check "direnv from this checkout"    "^nix profile add .*$repo#direnv"
-check_absent "no path: source"       'path:'
-# `direnv allow` records the require_allowed files only once the .envrc has
-# been evaluated, so the script allows, exports, allows again.
-if [ "$(grep -c '^direnv allow' "$tmp/calls")" = 2 ] && grep -q '^direnv export' "$tmp/calls"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: allow, export, allow"; grep '^direnv' "$tmp/calls" | sed 's/^/  /'; fi
-check "self-check reads settings"    '^devenv shell -- jq .*disableBypassPermissionsMode'
-check "self-check runs the hook"     '^devenv shell -- .*PreToolUse'
-file_has "$tmp/home/.bashrc" 'eval "$(direnv hook bash)"'
-[ -e "$tmp/home/.zshrc" ] && { fail=$((fail+1)); echo "FAIL: .zshrc must not be created"; } || pass=$((pass+1))
-file_has "$tmp/home/.config/direnv/direnv.toml" 'strict_env = true'
-file_has "$tmp/home/.tmux.conf" 'source-file ~/.config/tmux/harness.conf'
-file_has "$tmp/home/.config/tmux/harness.conf" 'set -g extended-keys on'
-out_has "NIX_CONFIG='experimental-features = nix-command flakes' nix profile upgrade --all"
+# No terminal and no --yes: refused before the installer runs.
+run ubuntu 24.04 "$tmp/checkout"
+exits "no terminal" 1
+says "asks for --yes"              'run with --yes'
+uncalled "installer not run"       '^installer'
+uncalled "no bootstrap"            '^nix run'
 
-# Again, with a zsh rc and the user's own direnv.toml: nothing doubled, nothing overwritten.
-printf '[global]\nstrict_env = false\n' > "$tmp/home/.config/direnv/direnv.toml"
-touch "$tmp/home/.zshrc"
-run y
-file_has "$tmp/home/.bashrc" 'direnv hook bash' 1
-file_has "$tmp/home/.zshrc" 'eval "$(direnv hook zsh)"' 1
-file_has "$tmp/home/.tmux.conf" 'source-file' 1
-file_has "$tmp/home/.config/direnv/direnv.toml" 'strict_env = false' 1
-out_has 'direnv.toml.*(kept|exists|left)'
+# From another directory: still this checkout.
+WITH_NIX=1 run ubuntu 24.04 "$tmp" --yes
+called "ref is the checkout"       "^nix run path:$tmp/checkout#harness -- bootstrap"
+called "init of the checkout"      "-- init $tmp/checkout"
 
-# Ubuntu restriction, sudo declined: reported, no sudo, still exits 0, and
-# reported again on the next run.
-touch "$tmp/restricted"
-run n
-out_has 'apparmor_restrict_unprivileged_userns'
-check_absent "no sudo when declined" '^sudo'
-out_has 'exit=0'
-run n
-out_has 'apparmor_restrict_unprivileged_userns'
-# Accepted: the sysctl is applied and persisted with sudo.
-run y
-check "sysctl applied with sudo"    '^sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
-check "sysctl persisted with sudo"  '^sudo .*99-claude-nix-harness.conf'
-rm -f "$tmp/restricted"
+# Piped into bash, no checkout: the published ref, no init.
+: >"$log"
+out=$(cd "$tmp" && env -i HOME="$tmp/home" PATH="$tmp/nixbin:$tmp/bin:$PATH" TMPDIR="$tmp" CALLS="$log" INSTALLER="$tmp/installer" \
+  HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" \
+  bash -s -- --yes <"$tmp/checkout/scripts/install.sh" 2>&1); rc=$?
+exits "piped" 0
+called "published ref"             '^nix run github:bilibo/claude-nix-harness#harness -- bootstrap --yes$'
+uncalled "no init without a checkout" ' init '
 
-# Run from elsewhere with no argument: the target is the script's own directory.
-(cd "$tmp" && run y)
-check "target is the repo"          "^direnv allow \. \(cwd $repo\)\$"
-# An explicit target.
-mkdir -p "$tmp/proj"; touch "$tmp/proj/.envrc"; (cd "$tmp" && run y "$tmp/proj")
-check "explicit target"             "^direnv allow \. \(cwd $tmp/proj\)\$"
-out_has 'new terminal'
-# A target that was never onboarded stops before touching anything.
-mkdir -p "$tmp/bare"; (cd "$tmp" && run y "$tmp/bare")
-out_has 'no .envrc'
-out_has 'exit=1'
+# HARNESS_REF wins over the checkout; init still runs on the checkout.
+HARNESS_REF=github:bilibo/claude-nix-harness WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
+called "HARNESS_REF wins"          '^nix run github:bilibo/claude-nix-harness#harness -- bootstrap'
+called "init on the checkout"      "github:bilibo/claude-nix-harness#harness -- init $tmp/checkout"
 
-# Nix present but not from this installer: no uninstall line. With it: the line.
-run y
-out_lacks 'nix-installer uninstall'
-touch "$tmp/nix-installer"; run y
-out_has 'nix-installer uninstall'
-# sudo fails (wrong password, read-only /proc/sys in a container): deferred, not fatal.
-touch "$tmp/restricted"; printf '#!%s\necho "sudo $*" >> "%s/calls"\nexit 1\n' "$BASH" "$tmp" > "$tmp/stubs/sudo"
-run y
-out_has 'exit=0'
-out_has 'later'
-rm -f "$tmp/restricted"; stub "$tmp/stubs" sudo
-# zsh-only user: no ~/.bashrc is created.
-rm -f "$tmp/home/.bashrc"; run y
-[ -e "$tmp/home/.bashrc" ] && { fail=$((fail+1)); echo "FAIL: .bashrc created although .zshrc exists"; } || pass=$((pass+1))
+# --no-init, and which flags reach bootstrap and init.
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes --no-init
+uncalled "--no-init"               ' init '
+called "--no-init not passed on"   '-- bootstrap --yes$'
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --verbose --no-account-sync --yes
+called "bootstrap flags"           '-- bootstrap --verbose --no-account-sync --yes$'
+called "init flags"                "-- init $tmp/checkout --verbose --yes$"
 
-echo "install-test: pass=$pass fail=$fail"
+# --check: nothing runs. --dry-run without nix: the installer is reported,
+# nothing runs; with nix: bootstrap --dry-run, then init --dry-run.
+run ubuntu 24.04 "$tmp/checkout" --check
+exits "--check" 0
+says "check reports"               'install.sh --check: nothing changed'
+uncalled "check runs nothing"      '^curl|^installer|^nix|^sudo'
+run ubuntu 24.04 "$tmp/checkout" --dry-run
+exits "--dry-run" 0
+says "dry run names the installer" 'would run: curl'
+uncalled "dry run runs nothing"    '^curl|^installer|^nix'
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --dry-run
+called "bootstrap --dry-run"       '-- bootstrap --dry-run$'
+called "init --dry-run"            '-- init .* --dry-run$'
+
+# Fedora 44: dnf, the socket, no installer; the packages reach bootstrap.
+WITH_NIX=1 run fedora 44 "$tmp/checkout" --yes
+exits "fedora" 0
+called "dnf"                       '^sudo dnf install -y nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils$'
+called "socket"                    '^sudo systemctl enable --now nix-daemon.socket$'
+uncalled "no installer on fedora"  '^curl|^installer'
+called "packages recorded"         'HARNESS_ROOT_PACKAGES=\[nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils\]'
+called "socket recorded"           'HARNESS_ROOT_STEPS=\[nix-daemon.socket\]'
+# Fedora 43 has no nix package: the installer route.
+WITH_NIX=1 run fedora 43 "$tmp/checkout" --yes
+uncalled "fedora 43 is the installer route" 'dnf'
+
+echo "install-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

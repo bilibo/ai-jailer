@@ -79,9 +79,10 @@ doing it by hand or for reading what the script wrote:
    `imports: - harness/devenv`. Use a git URL pinned by `devenv.lock`; the
    `path:` form is for developing the harness itself.
 2. `devenv.nix`: project tools, and `harness.settings` for project allow
-   rules. On a host without the home module (one set up by `install.sh`),
-   `harness.claudeCode.enable = true` here and `allow_unfree: true` in
-   devenv.yaml put Claude Code, tmux and jq in the shell.
+   rules. On a host without the home module (one set up by
+   `scripts/install.sh`), `harness.claudeCode.enable = true` here and
+   `allow_unfree: true` in devenv.yaml put Claude Code, tmux and jq in the
+   shell.
 3. `.envrc`:
    ```
    eval "$(devenv direnvrc)"
@@ -108,7 +109,7 @@ doing it by hand or for reading what the script wrote:
 | Host | Set |
 |---|---|
 | Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
-| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. Fedora 44 or newer: `scripts/install.sh` installs Fedora's `nix` and `nix-daemon` packages and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`) and writes the home module's direnv, tmux and PATH configuration as plain files, plus the user-scope `strictAllowlist`. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
+| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist`, and offers the user-namespace sysctl where the kernel confines them. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
 | Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
 
 See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
@@ -148,13 +149,14 @@ when install.sh put them there, so the sequence starts from a Fedora with
 only VS Code, Claude Code and this checkout on it (a reinstall of Fedora is
 the same list minus the first line). Without a receipt, reset leaves Nix
 installed with its daemon socket off, and install.sh turns it back on. A
-host without `harness` on PATH runs the first line as `nix run
-path:$PWD#harness -- reset`. `<customer>/<repo>` is a throwaway repo under
-the code root:
+host set up before the `harness` CLI existed (by the old
+`scripts/bootstrap-fedora.sh`) has no `harness` on PATH: run install.sh
+once first, which adds it and writes the receipt. `<customer>/<repo>` is a
+throwaway repo under the code root:
 ```
 harness reset                                 # sudo; asks first; reads the receipt; leaves ~/code/git alone
 rm -rf ~/code/git/<customer>/<repo>           # the throwaway repo, so init starts clean
-HARNESS_REF=path:$PWD scripts/install.sh      # sudo: dnf, SELinux label, daemon socket; then harness bootstrap: nix.conf (sudo again), profile, user files
+scripts/install.sh                            # sudo: dnf, SELinux label, daemon socket; then harness bootstrap (nix.conf, profile, user files) and harness init on this checkout; the ref is this checkout
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
 harness doctor                                # every line ok
 harness init <customer>/<repo>                # files, two allows, the settings checks, the hook cases
@@ -212,19 +214,24 @@ Outside the repo: on an unmanaged host everything your own settings allow;
 on a mixed host `git commit` allowed, `sudo` still blocked.
 
 On a fresh distro (a throwaway Ubuntu 24.04 VM with a sudo user), the
-install route:
+install route, never yet run there (the nix-installer route is tested with
+every host command stubbed: `install-test`, `harness-bootstrap-test`):
 
-1. `git clone <repo> harness && cd harness && ./install.sh`: the
-   user-namespace restriction is reported and fixed on `y`, Nix installed,
-   two profile installs, shell built, the self-check line passes.
+1. `git clone <repo> harness && cd harness && scripts/install.sh`: the
+   nix-installer runs and confirms on the terminal; bootstrap reports the
+   user-namespace restriction and fixes it on `y`, adds the four profile
+   packages and writes the user files; `harness init` builds this
+   checkout's shell and its checks pass; the report ends with `0 missing`.
 2. New terminal, `cd harness`, `ccmux` opens tmux with Claude; in a second
    window `claude -p 'run: git commit -m x'` is refused and
    `claude -p 'run: grep -i nonewprivs /proc/self/status'` prints
    `NoNewPrivs: 1`.
 3. VS Code with the direnv extension: the integrated terminal has `claude`
    and `ccmux`.
-4. `./install.sh` again: no installer, no duplicate rc lines.
-5. `/nix/nix-installer uninstall`: apt untouched, repo intact.
+4. `scripts/install.sh` again: no installer, no duplicate rc lines, the
+   same report.
+5. `harness reset`: Nix gone through `/nix/nix-installer uninstall`, the
+   sysctl drop-in gone, apt untouched, the repo intact.
 
 After a Claude Code upgrade also re-read the settings reference for the
 keys in `lib/settings.nix`; the file header records the version they were
@@ -378,7 +385,7 @@ The README's "Lockdown level today" table summarises them; the roadmap's
   SSH agent is the measured case (2026-10-21): `SSH_AUTH_SOCK` is stripped,
   but `/run/user/<uid>/gcr/ssh` is guessable and answers from inside the
   sandbox, so what holds is that no plain key is loaded in the agent
-  (README, "Git over SSH"). Roadmap item 3.3 hides the socket directories.
+  (README, "Git over SSH"). Roadmap item 2.3 hides the socket directories.
 - The environment: since 2026-10-21 the repo file sets
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which removes credential-shaped
   variables (by name or by value shape; `ANTHROPIC_API_KEY`,
