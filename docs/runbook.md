@@ -150,7 +150,7 @@ first line). `<customer>/<repo>` is a throwaway repo under the code root:
 ```
 harness reset                                 # sudo; asks first; reads the receipt; leaves ~/code/git alone
 rm -rf ~/code/git/<customer>/<repo>           # the throwaway repo, so init starts clean
-HARNESS_REF=path:$PWD scripts/install.sh      # sudo once: packages, nix.conf, SELinux label, socket; then harness bootstrap --no-root
+HARNESS_REF=path:$PWD scripts/install.sh      # sudo for dnf, then harness bootstrap: nix.conf, SELinux label, socket (sudo again), profile, user files
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
 harness doctor                                # every line ok
 harness init <customer>/<repo>                # files, two allows, 20 settings checks, 154 hook cases

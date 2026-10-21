@@ -183,8 +183,9 @@ without_block() {
 
 # ---------------------------------------------------------------- receipt
 # What this run put on the host, or found there in the harness's shape;
-# write_receipt adds it to the receipt. scripts/install.sh hands over its own
-# root steps in HARNESS_ROOT_PACKAGES and HARNESS_ROOT_STEPS.
+# write_receipt adds it to the receipt. scripts/install.sh hands over the
+# packages its dnf step installed in HARNESS_ROOT_PACKAGES; HARNESS_ROOT_STEPS
+# is for root steps done by other means before a --no-root run.
 R_PROFILE=(); R_FILES=(); R_EXT=()
 read -r -a R_ROOT_PKGS <<<"${HARNESS_ROOT_PACKAGES:-}"
 read -r -a R_ROOT_STEPS <<<"${HARNESS_ROOT_STEPS:-}"
@@ -345,7 +346,7 @@ profile_steps() {
 
 user_steps() {
   # direnv: the home module's programs.direnv.config.global.
-  local f="$HOME/.config/direnv/direnv.toml" direnv_toml
+  local f="$HOME/.config/direnv/direnv.toml" direnv_toml tmux_conf
   direnv_toml="$MARK_BEGIN
 $(cat "$DIRENV_TOML")"
   if [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
@@ -354,14 +355,16 @@ $(cat "$DIRENV_TOML")"
     write_if_differs "$f" "$direnv_toml"; record_file file "$f"
   fi
 
-  # tmux: the home module's programs.tmux.extraConfig, appended once.
+  # tmux: the home module's programs.tmux.extraConfig, a marked block after
+  # whatever else the file holds. An older block is replaced, so a changed
+  # pkgs/tmux.conf reaches a bootstrapped host on the next bootstrap or upgrade.
   f="$HOME/.config/tmux/tmux.conf"
-  if ! grep -q -F "$MARK_BEGIN" "$f" 2>/dev/null; then
-    step "append the harness block to $f"
-    put_file "$f" "$MARK_BEGIN
+  tmux_conf=$(without_block "$f")
+  tmux_conf="${tmux_conf:+$tmux_conf
+}$MARK_BEGIN
 $(cat "$TMUX_CONF")
-$MARK_END" append
-  fi
+$MARK_END"
+  write_if_differs "$f" "$tmux_conf"
   record_file block "$f"
 
   # bash: the direnv hook and the code root (home.sessionVariables). Fedora's

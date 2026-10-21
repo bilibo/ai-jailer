@@ -4,7 +4,7 @@
 # pkgs.direnv itself; delete the file then and import pkgs.direnv instead.
 { pkgs }:
 if pkgs.lib.versionOlder pkgs.direnv.version "2.38" then
-  pkgs.direnv.overrideAttrs (old: rec {
+  pkgs.direnv.overrideAttrs (_: rec {
     version = "2.38.2";
     src = pkgs.fetchFromGitHub {
       owner = "direnv";

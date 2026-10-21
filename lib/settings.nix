@@ -148,7 +148,7 @@ assert managed -> marketplaceDir != null;
     CwdChanged = [ { hooks = [ (hook { timeout = 30; }) ]; } ];
     FileChanged = [
       {
-        matcher = ".envrc|devenv.nix|devenv.yaml|devenv.lock|devenv.local.nix";
+        matcher = ".envrc|devenv.nix|devenv.yaml|devenv.lock|devenv.local.nix|devenv.local.yaml";
         hooks = [ (hook { timeout = 30; }) ];
       }
     ];

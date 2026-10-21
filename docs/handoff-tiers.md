@@ -23,7 +23,7 @@ edits to `devenv/devenv.nix` (its pattern matches any `devenv.nix`),
 
 ## 1. Already done from the nixos-config session (2026-10-18)
 
-In this repo, committed: `ccmux` replaces `ccode` (the old name stays as a second entry point), tested under both names.
+In this repo, committed: `ccmux` replaces `ccode`; the `ccode` entry point was dropped on 2026-10-21.
 
 In `~/nixos-config`, uncommitted:
 

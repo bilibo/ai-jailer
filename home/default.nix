@@ -12,7 +12,7 @@ let
 
   ccmux = import ../pkgs/ccmux.nix {
     inherit pkgs;
-    codeRoot = cfg.codeRoot;
+    inherit (cfg) codeRoot;
   };
 in
 {
@@ -35,22 +35,24 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    programs.claude-code = {
-      enable = true;
-      settings.worktree.baseRef = "head";
-    };
+    programs = {
+      claude-code = {
+        enable = true;
+        settings.worktree.baseRef = "head";
+      };
 
-    programs.direnv = {
-      enable = true;
-      package = cfg.direnvPackage;
-      nix-direnv.enable = true;
-      # Shared with install.sh, so a bootstrapped host gets the same settings.
-      config.global = (builtins.fromTOML (builtins.readFile ../pkgs/direnv.toml)).global;
-    };
+      direnv = {
+        enable = true;
+        package = cfg.direnvPackage;
+        nix-direnv.enable = true;
+        # Shared with install.sh, so a bootstrapped host gets the same settings.
+        config.global = (builtins.fromTOML (builtins.readFile ../pkgs/direnv.toml)).global;
+      };
 
-    programs.tmux = {
-      enable = true;
-      extraConfig = builtins.readFile ../pkgs/tmux.conf;
+      tmux = {
+        enable = true;
+        extraConfig = builtins.readFile ../pkgs/tmux.conf;
+      };
     };
 
     home.packages = [
