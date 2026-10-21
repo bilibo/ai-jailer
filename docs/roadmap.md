@@ -181,10 +181,10 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
    split (item 2 of the handoff phases). Only after everything above is
    boring. Groundwork in since 2026-10-21 (changelog): `lib/mods.nix`, the
    marketplace and `enabledPlugins` wiring, `harness.mods`, and the part of
-   stage A that needs no tier (the `$.store` row, `/fleet`); the validate
-   and plugin-test run (`tests/mod-validate-test.sh`) and the first
-   managed-host load are still to do. The tier line, stage B and stage C
-   wait as before.
+   stage A that needs no tier (the `$.store` row, `/fleet`).
+   `tests/mod-validate-test.sh` over `managed-mods` passes (2026-10-21, by
+   hand); the first managed-host load is still to do. The tier line, stage
+   B and stage C wait as before.
 
 ## Open questions
 

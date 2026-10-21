@@ -5,6 +5,32 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Broker mod, first validate and test run, by hand on the built mod
+  (`nix build .#harness-broker`, `claude plugin validate --strict result`,
+  `claude plugin test result`): validate passes, 5 tests pass. Strict
+  validate fails a manifest with no `author`, so `mkMod` takes `author` and
+  writes `author.name`; the broker's is `claude-nix-harness`, the
+  marketplace owner. Learned from the first test run: a test's `$` raises
+  events only (`session.start`, `session.end`, `command.run`); the plugin's
+  own calls (`$.session.id`, `$.store`, `$.clock`, `$.command.register`,
+  `$.ui.status`) are answered by the test's `on` hooks, with `mock.store`,
+  `mock.clock` and `mock.env` for three of them, and the test cannot make
+  them itself. The three cases that read the store back through `$` were
+  replaced by five that read `/fleet` and what the plugin handed those
+  hooks: two sessions on one machine (the other's row seeded in the store)
+  both listed, an ending session removing only its own row, the tier in the
+  status line, a session started by hand, an empty store.
+  `tests/mod-validate-test.sh` over `managed-mods` then failed the same
+  way on the marketplace manifest: strict validate wants a top-level
+  `description` (where the official and ponytail marketplaces keep it, not
+  under `metadata`), so `mkMarketplace` takes `description`; rerun, it
+  ends `mod-validate-test: ok` (marketplace and mod validate, 5 tests
+  pass). Not run yet: a load on a managed host. Decided the same day: no Node in
+  the devenv. The `node: command not found` SessionStart error came from
+  the ponytail plugin's hook, a personal plugin; the host has no Node at
+  all, and a runtime on every agent's PATH for one optional plugin is not
+  the harness's to ship. A repo that needs JavaScript adds it in its own
+  `devenv.nix`.
 - Broker mod groundwork, roadmap item 8 started out of order: only stage C
   (the gate) depends on the tier split; the builder, the registration keys
   and the observe slice depend on nothing above it. `lib/mods.nix`: `mkMod`

@@ -58,6 +58,7 @@ let
   marketplace = (import ./mods.nix { inherit pkgs lib; }).mkMarketplace {
     name = marketplaceName;
     owner = "claude-nix-harness";
+    description = "Mods the harness ships to every session on this machine";
     inherit mods;
   };
 in
