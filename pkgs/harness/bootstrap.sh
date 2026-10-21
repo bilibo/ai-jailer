@@ -57,9 +57,9 @@
 # the harness ref and revision. Each bootstrap and upgrade adds to it.
 #
 # `reset` reverses what the receipt lists (without one, the built-in lists:
-# the nix packages, /nix, /etc/nix, the SELinux rule, the build users, the nix
-# profile and caches, the direnv allow database, every user file above, the
-# VS Code pieces) so the next run is from zero, and removes the receipt last.
+# the harness block in nix.conf, the SELinux rule, the daemon socket, the
+# profile packages, every user file above, the VS Code pieces; Nix itself is
+# left, since nothing says who installed it) and removes the receipt last.
 # It asks before it starts unless --yes; it never touches the code root, so
 # delete a test repo by hand.
 # shellcheck disable=SC1091,SC2015,SC2016,SC2088  # system files are not inputs; `x && ok || miss` reports, ok never fails; jq filters go through jq_edit; ~ in messages is text
@@ -105,7 +105,9 @@ RECEIPT="$HOME/.local/state/claude-nix-harness/receipt.json"
 # back to on a host without a receipt.
 PROFILE_PKGS=(direnv devenv ccmux harness)
 ROOT_RPMS=(nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils)
-NIX_RPMS=(nix nix-daemon nix-legacy nix-core nix-libs nix-system nix-filesystem)
+# The host files pkgs/ ships; pkgs/harness.nix points these at the store.
+DIRENV_TOML="${HARNESS_DIRENV_TOML:-$HARNESS_DIR/pkgs/direnv.toml}"
+TMUX_CONF="${HARNESS_TMUX_CONF:-$HARNESS_DIR/pkgs/tmux.conf}"
 
 # Nix-built tools (devenv's fetcher included) look for the CA bundle at the
 # NixOS and Debian path, or where NIX_SSL_CERT_FILE points. Fedora 44 keeps
@@ -219,9 +221,9 @@ write_receipt() {
 
 # What reset used before there was a receipt.
 legacy_receipt() {
-  jq -n --arg h "$HOME" --argjson pkgs "$(json_list "${NIX_RPMS[@]}")" --argjson profile "$(json_list "${PROFILE_PKGS[@]}")" '
+  jq -n --arg h "$HOME" --argjson profile "$(json_list "${PROFILE_PKGS[@]}")" '
     { version: 1, profile: $profile,
-      root: {packages: $pkgs, steps: ["nix.conf", "selinux", "nix-daemon.socket"]},
+      root: {packages: [], steps: ["nix.conf", "selinux", "nix-daemon.socket"]},
       files: [
         {kind: "file",  path: "\($h)/.config/direnv/direnv.toml"},
         {kind: "block", path: "\($h)/.config/tmux/tmux.conf"},
@@ -343,15 +345,9 @@ profile_steps() {
 
 user_steps() {
   # direnv: the home module's programs.direnv.config.global.
-  local f="$HOME/.config/direnv/direnv.toml"
-  local direnv_toml="$MARK_BEGIN
-[global]
-strict_env = true
-# devenv evaluations are slow; the default 5s warning is noise.
-warn_timeout = \"2m\"
-# .env files hold credentials.
-load_dotenv = false
-# No whitelist.prefix entries, ever: path-only, never re-prompts."
+  local f="$HOME/.config/direnv/direnv.toml" direnv_toml
+  direnv_toml="$MARK_BEGIN
+$(cat "$DIRENV_TOML")"
   if [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
     warn "$f exists and is not the harness one; merge by hand: strict_env, warn_timeout = \"2m\", load_dotenv = false, no whitelist"
   else
@@ -362,25 +358,9 @@ load_dotenv = false
   f="$HOME/.config/tmux/tmux.conf"
   if ! grep -q -F "$MARK_BEGIN" "$f" 2>/dev/null; then
     step "append the harness block to $f"
-    put_file "$f" "$(cat <<TMUX
-$MARK_BEGIN
-# The tmux server keeps the first client's environment. Refresh these on
-# attach and never seed them into new panes, so a pane opened from customer
-# A's shell never carries A's direnv state into customer B.
-set -ga update-environment "DIRENV_DIR DIRENV_DIFF DIRENV_WATCHES DIRENV_FILE"
-set-environment -gu DIRENV_DIR
-set-environment -gu DIRENV_DIFF
-set-environment -gu DIRENV_WATCHES
-set-environment -gu DIRENV_FILE
-# Claude Code's TUI: shift+enter and other chords need extended keys, focus
-# events keep its redraws right, passthrough lets it talk to the outer
-# terminal (clipboard, images).
-set -g extended-keys on
-set -g focus-events on
-set -g allow-passthrough on
-$MARK_END
-TMUX
-)" append
+    put_file "$f" "$MARK_BEGIN
+$(cat "$TMUX_CONF")
+$MARK_END" append
   fi
   record_file block "$f"
 

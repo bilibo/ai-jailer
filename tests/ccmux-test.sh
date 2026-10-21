@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#   ccmux-test.sh <path-to-ccmux-or-ccode>
+#   ccmux-test.sh <path-to-ccmux>
 #
 # `ccmux -n` prints the resolution instead of touching tmux, so this runs
-# anywhere. flake.nix runs it once per entry point (ccmux and the ccode alias).
+# anywhere.
 set -uo pipefail
 ccmux="${1:?usage: ccmux-test.sh <ccmux>}"
 pass=0; fail=0

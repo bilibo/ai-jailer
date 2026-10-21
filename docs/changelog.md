@@ -5,6 +5,53 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Ponytail audit of the tree, fixes applied the same day. The hook's
+  credential rule is path-first: a command naming a secret file is refused
+  unless it is one harmless verb (`ls`, `stat`, `file`, `du`, `wc`, `rm`,
+  `git rm`, `test`, `echo`, `printf`, `touch`) with no pipe, `$(`, backtick
+  or `<`; the reader-verb list is gone and `git checkout <ref> -- <file>`
+  joined the git history rule (22 new hook-test cases). `devenv.local.nix`
+  and `devenv.local.yaml` are in `repoProtected`: measured, an interpreter
+  write of `devenv.local.nix` landed from inside the sandbox, and devenv
+  imports that file with no `require_allowed` prompt, so the human's next
+  shell would have run it; a literal `denyWrite` masks a missing path, so
+  it cannot be created now. Bootstrap's pasted tmux block lacked the
+  `HARNESS_PROJECT` unsets that `pkgs/tmux.conf` has (a pane for customer B
+  inherited A's project); bootstrap now appends the `pkgs/` files, handed
+  over by `harness.nix`. `reset` without a receipt no longer lists Nix as
+  its own. `scripts/install.sh` keeps only the dnf step and execs `harness
+  bootstrap`, which does the other root steps. `ccode` removed;
+  `install-test` takes the three files it reads, not the whole checkout.
+  Not changed: `require_allowed devenv.local.nix` in the `.envrc` template,
+  since direnv's behaviour on a file that does not exist is unverified.
+- External review of four items (docs as cross-session state, the SSH
+  threat model, operator config in `home/default.nix`, hook bypasses)
+  checked against `0d586f5` and HEAD. Two described files this tree never
+  had (`lib/mcp.nix`, `tests/env-guard-test.nix`, git identity in the home
+  module); dropped. Measured here: the gcr agent socket answers from
+  inside the sandbox at its guessed path and listed a plain ED25519 key
+  next to the `-sk` one, so the laptop was out of its own README's spec;
+  the reader and git forms now in `hook-test.sh` passed the hook (`dd`,
+  `tr <`, bare redirection, `perl`, `git show HEAD:.env`, `git checkout
+  <ref> -- .envrc`, interpreter writes to `.envrc`), while `git restore`
+  and the readers added in `c3060bb` were blocked; the `Read(**/.env)` deny rules
+  do fence `.env` under the checkout in the sandbox (bind-mounted as
+  `/dev/null`), which the review had assumed nothing did. Into the
+  roadmap: root `CLAUDE.md` (item 1), keyring `denyRead` plus a doctor
+  warning, the worktrees `denyWrite`, `repoProtected` additions and the
+  `core.hooksPath` live case (items 3.3 to 3.6), the path-first reader
+  rule and the Edit-rule asymmetry (ideas). Left out: everything about
+  operator identity in the home module, which never carried any.
+- An issue draft for a "fleet" mod loaded through `prependPlugins` was
+  checked against `docs/sessions.md` and the mods docs: it is the broker
+  mod's stage A. What it got right and the design lacked is the loading
+  shape: `strictKnownMarketplaces` registers nothing, a managed mod needs
+  `extraKnownMarketplaces` plus `enabledPlugins`, and `prependPlugins`,
+  once set, must name `sec-default@builtin` or the guard stops loading.
+  Written into sessions.md section 5. Dropped from the draft: `$.fs` and
+  `$.process` guards inside the mod (nothing else loads on a managed
+  host), `DEVENV_ROOT` as the identity (the harness exports
+  `HARNESS_TIER` and `HARNESS_PROJECT`), a separate `ccmux-centre` mod.
 - Sandbox hardening, items 1, 2 and 4 of the roadmap's list: the bootstrap
   writes `sandbox.network.strictAllowlist = true` into the user-scope
   `~/.claude/settings.json` (merged with jq, reported by the host check,

@@ -85,7 +85,7 @@ Nix daemon). `bubblewrap` and `socat` come from the host's system packages.
 `disableClaudeAiConnectors = true` since 2026-10-20 (`allowConnectors`
 option). What the sandbox does not do (open reads, every unix socket;
 the network is strict once the bootstrap has written the user-scope key)
-is in runbook section 8 and ordered as roadmap item 2; phase 2 below is
+is in runbook section 8 and ordered as roadmap item 3; phase 2 below is
 the read-fence part of it.
 
 **devenv-base.** Does not exist. There is one devenv module,

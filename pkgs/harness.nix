@@ -57,6 +57,10 @@ pkgs.writeShellApplication {
     HARNESS_REV = rev;
     HARNESS_TESTS = "${tests}";
     HARNESS_DEFAULT_REF = defaultRef;
+    # bootstrap appends these to the user's direnv and tmux config; the home
+    # module and install.sh read the same files.
+    HARNESS_DIRENV_TOML = "${./direnv.toml}";
+    HARNESS_TMUX_CONF = "${./tmux.conf}";
   };
   text = ''
     usage() {

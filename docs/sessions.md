@@ -113,6 +113,39 @@ One mod, `harness-broker`, in this repository under `mods/`, deployed
 through the managed marketplace directory on managed hosts. Three stages,
 each shipped and boring before the next:
 
+**Deployment shape** (checked against the mods admin and reference pages,
+2026-10-21). Today `lib/settings.nix` lists the managed marketplace in
+`strictKnownMarketplaces` only, and that key restricts which sources a
+user may add; it registers nothing. A managed mod loads when the
+marketplace is in `extraKnownMarketplaces` by absolute path
+(`{ source = { source = "directory"; path = "<store path>/plugins"; }; }`)
+and the plugin is `true` in `enabledPlugins`; it then counts as the
+organisation's mod and runs before user mods. `prependPlugins` only orders
+mods that are already enabled, and once it is set, `sec-default@builtin`
+must be named in it or the guard stops loading; without `prependPlugins`
+the guard loads on its own whenever managed settings exist, on every login
+kind, which is what the live check in runbook section 5 sees today. So the
+module change is: `extraKnownMarketplaces` entry for the managed directory
+(the existing `harness.extraKnownMarketplaces` option feeds
+`strictKnownMarketplaces` and keeps that job), `enabledPlugins` for the
+mod, and no `prependPlugins` until a second managed mod needs ordering. A
+`mkMod` builder in `lib/` takes `plugin.json` plus `hooks/register.js`,
+runs `claude plugin validate --strict` in its check phase and outputs the
+marketplace directory; `lib/managed-tree.nix` places it at
+`$out/plugins`. A `/nix/store` path is root-owned and read-only, which is
+the in-place local directory the docs ask for. On an unmanaged host the
+same `enabledPlugins` and marketplace entries go into the user-scope
+`~/.claude/settings.json`, which `harness bootstrap` already edits with jq.
+Not verified: that the managed file alone registers a directory
+marketplace, and the exact `strictKnownMarketplaces` entry shape; the first
+managed-host run settles both.
+
+The mod reads `HARNESS_PROJECT`, which the devenv shell exports today, and
+`HARNESS_TIER` once handoff phase 2 has `ccmux` export it; `DEVENV_ROOT` is
+the fallback when a session was started by hand. It does
+not guard `$.fs`, `$.process` or `$.env` calls: those are its own API, and
+on a managed host no other mod loads, so there is nothing to police.
+
 **Stage A, observe.** `session.start` reads `HARNESS_TIER`, `HARNESS_PROJECT`
 and the cwd, writes the session's row to `$.store` (tier, project,
 directory, pane, state: working or waiting), shows the tier in the status
@@ -144,7 +177,8 @@ to enforce without it.
 
 - `claude plugin validate mods/harness-broker` is the contract: what the
   module hooks and calls. Its output is checked in and diffed in CI.
-- `claude plugin test` cases per stage: a row appears for a started
+- `claude plugin test` cases per stage (`*.test.ts` under the mod's
+  directory, no session or network needed): a row appears for a started
   session; a proposal round-trips; the gate denies an unmatched write and
   allows a matched one.
 - The live suite (`harness check`) gains one case per stage once a
@@ -154,8 +188,10 @@ to enforce without it.
 
 ## 7. Open questions
 
-- `$.store` scope: per plugin per machine is assumed; verify it is shared
-  across sessions of different projects and not per working directory.
+- `$.store` is per plugin, shared by every session on the machine, capped
+  at 4 MiB (reference page, 2026-10-21); the fleet rows and proposals fit,
+  diffs may not. Decide whether a proposal carries the diff or a path to
+  it under the platform root.
 - Whether a platform session can be kept out of bypass mode by its
   generated settings alone (`disableBypassPermissionsMode` is honoured from
   any scope; confirm it covers `--permission-mode` on the outer `claude`,

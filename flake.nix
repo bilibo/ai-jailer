@@ -80,9 +80,7 @@
               extraAllowRead = [ "~/.cargo" ];
             }
           );
-          # bin/ccmux and bin/ccode (the former name).
           ccmux = import ./pkgs/ccmux.nix { inherit pkgs; };
-          ccode = self.packages.${pkgs.stdenv.hostPlatform.system}.ccmux;
           # bin/harness: bootstrap, upgrade, doctor, init, check, reset.
           harness = import ./pkgs/harness.nix {
             inherit pkgs;
@@ -122,6 +120,16 @@
             inherit (pkgs) lib;
             direnvPackage = direnvStub;
           };
+          # install.sh reads the two host files next to it and defaults to its
+          # own directory as the project; only these are the test's input, not
+          # the whole checkout.
+          installFiles = pkgs.runCommand "install-files" { } ''
+            mkdir -p $out/pkgs
+            cp ${./install.sh} $out/install.sh
+            cp ${./.envrc} $out/.envrc
+            cp ${./pkgs/direnv.toml} $out/pkgs/direnv.toml
+            cp ${./pkgs/tmux.conf} $out/pkgs/tmux.conf
+          '';
           test =
             name: script: args:
             pkgs.runCommand name
@@ -148,10 +156,9 @@
             test "project-settings-fenced-test" ./tests/project-settings-test.sh
               "${p.project-settings-fenced} fenced";
           ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
-          ccode-test = test "ccode-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccode";
           hook-test-worktree = test "hook-test-worktree" ./tests/hook-test.sh "${stubHooks}/env-guard.sh --direnv-stub";
           host-config-test = test "host-config-test" ./tests/host-config-test.sh "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
-          install-test = test "install-test" ./tests/install-test.sh "${self}/install.sh";
+          install-test = test "install-test" ./tests/install-test.sh "${installFiles}/install.sh";
           # No nix, claude or code in the build sandbox: the MISSING case.
           harness-doctor-test =
             test "harness-doctor-test" ./tests/harness-doctor-test.sh

@@ -54,6 +54,15 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   with every command stubbed (`install-test`, `host-config-test`); not yet
   run on a real distro. Overlaps with `scripts/install.sh` + `harness
   bootstrap`; one of the two goes.
+- Secret paths in the hook, path-first (2026-10-21): a command naming a
+  secret file is refused unless it is one harmless verb with no pipe,
+  substitution or input redirection; the reader-verb list is gone.
+  `devenv.local.nix` and `devenv.local.yaml` in `repoProtected`, so the
+  file devenv auto-imports without any re-approval cannot be created from
+  the sandbox. Bootstrap appends `pkgs/direnv.toml` and `pkgs/tmux.conf`
+  instead of its own copies; `reset` without a receipt leaves Nix alone;
+  `scripts/install.sh` does the dnf step only and hands the rest to
+  `harness bootstrap`; `ccode` is gone.
 - Read fence prototype (2026-10-21): `harness.readFence` (off by default)
   hides the rest of `$HOME` from sandboxed commands; the hook's env preamble
   puts direnv and devenv on PATH by store path because `~/.nix-profile`, a
@@ -68,13 +77,22 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
    stub-tested) and `scripts/install.sh` + `harness bootstrap` (Fedora,
    run end to end); fold the survivor's tests into the other, run it on a
    fresh Ubuntu 24.04.
-1. **Interactive check of the repo-only shape.** `-p` sessions are verified
+1. **Root `CLAUDE.md`, under 30 lines.** A session in this checkout has no
+   in-repo anchor saying which document owns what; the README's paragraph
+   says it for humans. Contents: README for current state, roadmap for
+   order, changelog for history, `handoff-tiers.md` for the standing "do
+   not activate" rule; and the rule that a closed decision is reopened only
+   by a new dated roadmap or changelog entry, never by editing the old one.
+   The repo imports its own devenv module since 2026-10-21 (root
+   `devenv.nix`), so `harness init` and `harness check` can run against it;
+   neither has yet.
+2. **Interactive check of the repo-only shape.** `-p` sessions are verified
    (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
    Left: a `ccmux` session in the test repo, the trust dialog accepted
    once, hooks seen firing and the tmux window turning orange. The
    Notification matcher names are verified against the hooks reference;
    whether the event fires in tmux is not.
-2. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
+3. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
    section 8, "Sandbox limits"); the strict allowlist, the literal
    `denyWrite` paths and the environment scrub are done. Each item is a
    `lib/settings.nix` change with a `project-settings-test` check, or a
@@ -91,31 +109,57 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
       scope, `true` wins; it stops the Read tool outside the working
       directories, which also stops a session in the test repo reading the
       harness checkout. Decide per tier (handoff phase 2).
-   3. Accepted, not closable from a repo: every unix socket reachable
-      (`allowAllUnixSockets` is all-or-none on Linux).
-3. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
+   3. Keyring agent sockets: `denyRead` for `/run/user/*/gcr` and
+      `/run/user/*/keyring` next to the `/run/WSL` entry. Every unix socket
+      is reachable and the gcr address is guessable; `ssh-add -l` against it
+      listed the user's keys from inside the sandbox (changelog 2026-10-21);
+      whether the agent signs without a desktop prompt was not measured. If
+      the wildcard does not take on Linux, the NixOS module writes the
+      literal uid path. `harness check`: `ls /run/user/$(id -u)/gcr` fails
+      and `ssh-add -l` against the guessed path gets `Could not open a
+      connection`. `harness doctor`: warn when `ssh-add -l` lists a key that
+      is not `-sk`. With it: the `lib/ssh-sandbox.nix` header (the gate is
+      no usable key in any agent, not an unknown address) and a README line
+      on `ssh-add -c` and the hardware-key touch timing.
+   4. `<repoRoot>/.claude/worktrees` as a literal `denyWrite` in the main
+      checkout's file: a child path neither the literal list nor Claude
+      Code's cwd-and-parents protection covers. Check first that a worktree
+      session's own file (the worktree as `repoRoot`) still writes there;
+      if the parent's deny wins, document sibling worktrees as an accepted
+      gap.
+   5. `.envrc`, `devenv.nix`, `devenv.yaml` and `.env*` in `repoProtected`
+      (`devenv.local.*` is in since 2026-10-21): closes the interpreter
+      writes the hook cannot see. Check first that the preamble's `direnv
+      export` and devenv's first evaluation write none of them;
+      `devenv.lock` is the doubtful one. `harness check`: an interpreter
+      write gets a permission error, not the hook's message.
+   6. `harness check`: `git config core.hooksPath /tmp/h` inside the
+      sandbox, expecting a permission error on `.git/config`. If the write
+      lands, the literal-path protection has a hole; else runbook section 8
+      says the `-c` and `--global` forms are the accepted ones.
+4. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
    azurerm/azuread/alz providers, tflint, trivy, and the `AZURE_CONFIG_DIR`
    task under `.git/devenv-base/azure` shared by worktrees.
    `imports: - devenv-base/azure` resolves to `azure/devenv.nix`, same rule
    as `harness/devenv`.
-4. **Repo template**: the test repo minus Rust, plus the azure module;
+5. **Repo template**: the test repo minus Rust, plus the azure module;
    `harness init` renders it. Convert one real customer repo; confirm
    `az account show` and `terraform plan` inside the sandbox with the
    network allowlist, and record the exact blob hosts the first
    `terraform init` and `trivy` run need.
-5. **Reader-only service principal per customer.** The one control that
+6. **Reader-only service principal per customer.** The one control that
    holds against every client, including things the hook never sees. Human
    logs it into the repo's `AZURE_CONFIG_DIR`.
-6. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
+7. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
    a throwaway repo (`harness init` into a temporary code root), the cases
-   from item 2, the `.devenv/shell-*.sh` litter count over 50 commands,
+   from item 3, the `.devenv/shell-*.sh` litter count over 50 commands,
    `harness doctor --full` running it.
-7. **Managed host base config**: a NixOS-WSL base configuration (and later
+8. **Managed host base config**: a NixOS-WSL base configuration (and later
    a native NixOS one) shipped with the harness, `harness.enable` on both
    modules and nothing else, with the WSL-specific checks (`/run/WSL` and
    `/mnt/c` empty inside the sandbox, `cmd.exe` fails). First time the
    managed layer runs live.
-8. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
+9. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
    before the next: observe (`/fleet` from `$.store`, tier in the status
    line, tier contract in the system prompt), propose (`/propose` and a
    `/proposals` pane with accept and reject in the platform session), gate
@@ -130,7 +174,7 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
 - Notification hook: the matcher names (`permission_prompt`, `idle_prompt`,
   `elicitation_dialog`) are in the hooks reference (2026-10-20), with more
   available (`auth_success`, `agent_needs_input`, `agent_completed`).
-  Whether the window turns orange in tmux is item 1 above.
+  Whether the window turns orange in tmux is item 2 above.
 - FileChanged matcher: the reference says the value is split on `|` and
   each part is a literal file name in the working directory, so the
   current matcher is right for a session started at the repo root; a
@@ -154,12 +198,29 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   (`$IFS`, `$(`, `base64 -d |`) inside the enforcement roots. Each one
   starts as a test case. Also: stop matching `*/devenv.nix` when the path
   is the harness's own `devenv/devenv.nix`, which the hook refuses today.
-- Remote Control (`claude remote-control`): the driven session is the local
-  process, so managed settings, hook and sandbox apply unchanged; what
-  changes is that anyone holding the claude.ai account can prompt a machine
-  with work credentials nearby. Per-host opt-in, off on a managed host until
-  the broker and the verification suite exist; check whether managed
-  settings can disable it outright.
+- Edit-rule asymmetry: the hook refuses Edit on `.envrc`, `devenv.*`,
+  `.claude/settings*`, `.claude/hooks`, `.claude/skills` and
+  `.claude-plugin`; Claude Code's own sandbox also protects `.mcp.json`,
+  `.claude/agents`, `.claude/commands`, `.claude/workflows` and `.vscode`
+  from Bash writes. Mirror that set in `lib/deny-rules.nix` and the hook's
+  `config_files`, or write down why not (`.mcp.json` and `.vscode/tasks.json`
+  have their own prompts). `.github/workflows/` is separate: CI runs with
+  repository secrets, and "agents never push" is the gate today.
+- Remote Control (`claude remote-control`, `claude rc`, `--remote-control`,
+  `/rc` in a session): the driven session is the local process, so managed
+  settings, hook and sandbox apply unchanged; what changes is that anyone
+  holding the claude.ai account can prompt a machine with work credentials
+  nearby, and attachments from the phone land on disk as `@` references.
+  Needs a claude.ai login (Pro, Max, Team, Enterprise; not API key, Bedrock
+  or Foundry), so on this laptop it refuses to start today (2.1.300).
+  `disableRemoteControl = true` turns it off everywhere it can start,
+  including the in-session toggle; the settings reference lists the key as
+  any-file scope (checked 2026-10-21), so the repo file can carry it with a
+  `harness.allowRemoteControl` option in the `allowConnectors` shape, and
+  the managed file makes it final. Which scope wins when they disagree is
+  not stated; assume `true` wins as for `disableBypassPermissionsMode` and
+  confirm live. Off until the broker and the verification suite exist; the
+  hook's nested-launch rule does not need the flag once the key is set.
 - nix-darwin module: same `lib/`, managed settings under
   `/Library/Application Support/ClaudeCode/`, seatbelt sandbox keys; the
   glob `denyWrite` entries apply there.
