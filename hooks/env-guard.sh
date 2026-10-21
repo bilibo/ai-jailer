@@ -151,7 +151,7 @@ ENV
 
         # 1. git history and index writes (project rule)
         if [ "$in_scope" = 1 ]; then
-        git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|tag +-d|stash +(drop|clear|pop)|checkout( +[^ ]+)* +--|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
+        git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|tag +-d|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
         [ "$ALLOW_LOCAL_COMMITS" = 1 ] || git_ops="commit|$git_ops"
         # `/usr/bin/git`, `git -C . push`, `git --git-dir=.git push`.
         re="(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +($git_ops)$e"
@@ -176,13 +176,20 @@ ENV
         re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +sp +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
         [[ "$n" =~ $re ]] && deny "credential operation blocked"
         # A secret path anywhere blocks, unless the whole command is one simple
-        # command whose verb cannot show content, with no pipe, substitution or
-        # input redirection. A reader list cannot be completed (dd, tr, perl,
-        # `git show <ref>:.env`, a bare `< .env`).
+        # command whose verb cannot show content: one line (the normaliser
+        # folds newlines, so the raw command is checked), no pipe, no `$(`,
+        # backtick or `>(` substitution, no input redirection, and none of
+        # the options that read file names from a file, whose errors echo
+        # each line (`file -f`, `--files0-from`, `--pathspec-from-file`). A
+        # reader list cannot be completed (dd, tr, perl, `git show
+        # <ref>:.env`, a bare `< .env`).
         cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.azure/|\.terraform\.d/|credentials\.json|\.claude\.json|\.credentials|/\.ssh/|id_(rsa|ed25519)|\.netrc|\.npmrc|\.pypirc)'
-        harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch)( [^;&|<$`]*)?$'
-        if [[ "$n" =~ $cred_files ]] && ! [[ "$n" =~ $harmless ]]; then
-          deny "credential file access blocked"
+        harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch)( [^;&|<$`(]*)?$'
+        list_opts='--files0-from|--pathspec-from-file|(^| )file +-[a-z]*f'
+        if [[ "$n" =~ $cred_files ]]; then
+          safe=0
+          [[ "$cmd" != *$'\n'* ]] && [[ "$n" =~ $harmless ]] && ! [[ "$n" =~ $list_opts ]] && safe=1
+          [ "$safe" = 1 ] || deny "credential file access blocked"
         fi
 
         # 4. system and config (universal)

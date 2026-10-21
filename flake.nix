@@ -156,8 +156,12 @@
             test "project-settings-fenced-test" ./tests/project-settings-test.sh
               "${p.project-settings-fenced} fenced";
           ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
-          hook-test-worktree = test "hook-test-worktree" ./tests/hook-test.sh "${stubHooks}/env-guard.sh --direnv-stub";
-          host-config-test = test "host-config-test" ./tests/host-config-test.sh "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
+          hook-test-worktree =
+            test "hook-test-worktree" ./tests/hook-test.sh
+              "${stubHooks}/env-guard.sh --direnv-stub";
+          host-config-test =
+            test "host-config-test" ./tests/host-config-test.sh
+              "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
           install-test = test "install-test" ./tests/install-test.sh "${installFiles}/install.sh";
           # No nix, claude or code in the build sandbox: the MISSING case.
           harness-doctor-test =

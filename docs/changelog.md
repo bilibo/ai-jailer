@@ -5,6 +5,26 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Check of the day's commit (`ffe26ad`), fixes applied. The path-first
+  credential rule had three ways through, each measured to print the file:
+  a second line after a harmless verb (the normaliser folds newlines, so the
+  raw command is now checked too), `>(cat ...)` process substitution (`(`
+  joined the excluded characters) and the options that read file names from
+  a file (`file -f`, `--files0-from`, `--pathspec-from-file`), whose errors
+  echo each line; those are refused by name. `git checkout <ref> -- <path>`
+  also caught `git checkout main && npm run build -- --watch`; the ref group
+  now stops at `;`, `&` and `|`. Ten hook-test cases. Bootstrap appended
+  the tmux block only when no marker was there, so the `HARNESS_PROJECT`
+  unsets never reached a host bootstrapped earlier; the block is replaced
+  when it differs, on bootstrap and upgrade. The FileChanged matcher gained
+  `devenv.local.yaml`, which devenv's direnvrc watches. Stale `ccode` and
+  `--no-root` lines in the docs dropped; nixfmt, statix and deadnix clean
+  over the whole tree (the root `devenv.nix` by hand, since the hook does
+  not let a session edit it). Learned: inside a harnessed session `nix flake check` on
+  the checkout fails, since Claude Code masks the absent `.gitmodules` as a
+  device node and Nix's git fetcher cannot open it; run it on a `git
+  archive` copy. `deadnix .` in the sandbox errors on the masked
+  `devenv.local.nix` the same way.
 - Ponytail audit of the tree, fixes applied the same day. The hook's
   credential rule is path-first: a command naming a secret file is refused
   unless it is one harmless verb (`ls`, `stat`, `file`, `du`, `wc`, `rm`,
