@@ -74,14 +74,21 @@ case "$event" in
     # command's cwd. Per-command evaluation is robust to EnterWorktree and to
     # devenv.nix edits; the find line cleans the .devenv/shell-*.sh files that
     # every `devenv direnv-export` leaves behind (decision 7.3 in the brief).
-    # The pinned direnv and devenv by store path: with the read fence on,
+    # direnv and devenv by store path, resolved here outside the sandbox (the
+    # user's devenv, the hook's direnv): with the read fence on,
     # `~/.nix-profile` (a symlink) is not mounted back into the sandbox, so
     # the profile's bin directory is off PATH there (live, 2026-10-21).
-    cat > "$CLAUDE_ENV_FILE" <<'ENV'
-export PATH="@toolPath@:$PATH"
+    tool_path=""
+    for t in direnv devenv; do
+      if p=$(command -v "$t"); then tool_path="$tool_path${tool_path:+:}$(dirname "$(readlink -f "$p")")"; fi
+    done
+    {
+      [ -z "$tool_path" ] || printf 'export PATH="%s:$PATH"\n' "$tool_path"
+      cat <<'ENV'
 if command -v direnv >/dev/null 2>&1; then eval "$(direnv export bash 2>/dev/null)"; fi
 if [ -d .devenv ]; then find .devenv -maxdepth 1 -name 'shell-*.sh' -mmin +10 -delete 2>/dev/null; fi
 ENV
+    } > "$CLAUDE_ENV_FILE"
     exit 0 ;;
 
   ConfigChange)

@@ -153,8 +153,8 @@ GITHUB_TOKEN=live-check-token DB_PASSWORD=live-check-secret \
 # the devenv shell still loads (the hook puts direnv and devenv on PATH by
 # store path) and the rest of $HOME is gone from the sandbox.
 if jq -e '.sandbox.filesystem.denyRead | index("~/")' .claude/settings.json >/dev/null 2>&1; then
-  run_cmd read-fence 'echo "DEVENV_ROOT=${DEVENV_ROOT:-unset}"; head -c 20 ~/.bashrc' "DEVENV_ROOT=$repo" 'unset|^#|bashrc:|export '
-  run_cmd read-fence-home 'head -c 20 ~/.bashrc 2>&1; ls -A ~ | tr "\n" " "' 'No such file or directory' '\.bashrc |\.ssh |Documents'
+  run_cmd read-fence 'echo "DEVENV_ROOT=${DEVENV_ROOT:-unset}"; head -c 20 ~/.bashrc' "DEVENV_ROOT=$repo" 'DEVENV_ROOT=unset|^#|bashrc:|export '
+  run_cmd read-fence-home 'head -c 20 ~/.bashrc 2>&1; ls -A ~ | tr "\n" " "' 'No such file or directory' '\.ssh |Documents'
 fi
 
 echo "harness check: $pass passed, $fail failed (transcripts in $out)"

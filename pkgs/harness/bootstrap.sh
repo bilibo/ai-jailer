@@ -194,12 +194,6 @@ record_file() { # record_file <file|block|keys> <path> [<key path as a JSON arra
 write_receipt() {
   local old=null new
   [ -s "$RECEIPT" ] && old=$(jq -c . "$RECEIPT" 2>/dev/null || echo null)
-  # A host bootstrapped before receipts existed: the harness block in nix.conf
-  # says the root steps were the harness's, so the receipt takes over the
-  # lists reset used then.
-  if [ "$old" = null ] && [ ${#R_ROOT_PKGS[@]} -eq 0 ] && grep -q -F "$MARK_BEGIN" /etc/nix/nix.conf 2>/dev/null; then
-    R_ROOT_PKGS=("${NIX_RPMS[@]}"); R_ROOT_STEPS+=(nix.conf selinux nix-daemon.socket)
-  fi
   new=$(jq -n --argjson old "$old" \
     --arg ref "$HARNESS_REF" --arg rev "${HARNESS_REV:-unknown}" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg root "$CODE_ROOT" \
     --argjson profile "$(json_list "${R_PROFILE[@]}")" \

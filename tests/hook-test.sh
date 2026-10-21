@@ -243,6 +243,8 @@ run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"skills\",\"cwd\":\"$IN
 envfile=$(mktemp)
 CLAUDE_ENV_FILE="$envfile" "$hook" <<<"{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$IN\"}" >/dev/null 2>&1
 if grep -q 'direnv export bash' "$envfile"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: SessionStart did not write CLAUDE_ENV_FILE"; fi
+# The read fence hides ~/.nix-profile: direnv must be on PATH by store path.
+if grep -q '^export PATH="/nix/store/[^":]*direnv[^":]*/bin' "$envfile"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: env preamble does not put direnv on PATH by store path"; sed 's/^/  /' "$envfile"; fi
 rm -f "$envfile"
 # Other tools and events pass through.
 run 0 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Read\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$IN/.env\"}}"
