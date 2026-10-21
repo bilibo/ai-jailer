@@ -12,6 +12,9 @@
   allowManagedHooksOnly ? true,
   strictAllowlist ? true,
   extraKnownMarketplaces ? [ ],
+  # Mods built by lib/mods.nix, shipped at `$out/plugins/<name>` and enabled
+  # from the managed settings. Empty: an empty, unregistered marketplace.
+  mods ? [ ],
   direnvPackage ? import ../pkgs/direnv.nix { inherit pkgs; },
   # The JSON refers to its own hooks by this stable path, not by store path.
   managedDir ? "/etc/claude-code",
@@ -46,15 +49,21 @@ let
       ;
     hookDir = "${managedDir}/hooks";
     marketplaceDir = "${managedDir}/plugins";
+    mods = map (m: m.modName) mods;
+    inherit marketplaceName;
   };
   settingsJson = (pkgs.formats.json { }).generate "managed-settings.json" settings;
+
+  marketplaceName = "harness";
+  marketplace = (import ./mods.nix { inherit pkgs lib; }).mkMarketplace {
+    name = marketplaceName;
+    owner = "claude-nix-harness";
+    inherit mods;
+  };
 in
 pkgs.runCommand "claude-nix-harness-managed" { } ''
-  mkdir -p $out/plugins/.claude-plugin
+  mkdir -p $out
   cp ${settingsJson} $out/managed-settings.json
   cp -r ${hooks} $out/hooks
-  # The broker mod lands here later (brief 5.7).
-  cat > $out/plugins/.claude-plugin/marketplace.json <<'JSON'
-  { "name": "harness", "owner": { "name": "claude-nix-harness" }, "plugins": [] }
-  JSON
+  cp -r ${marketplace} $out/plugins
 ''

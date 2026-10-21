@@ -12,10 +12,9 @@ settings).
 | Host | Configuration | Status |
 |---|---|---|
 | Managed host (NixOS or NixOS-WSL) | NixOS + home module, `harness.enable = true`, nothing else: every rule everywhere, strict network allowlist | module ready, untested on WSL |
-| Unmanaged host | no harness modules; harness repos import `harness/devenv` and carry their own rules; `scripts/install.sh` sets a Fedora host up | in use (Fedora 44 laptop) |
+| Unmanaged host, any Linux | no harness modules; harness repos import `harness/devenv` and carry their own rules; `scripts/install.sh` sets the host up, Nix included (see "Any Linux") | in use (Fedora 44 laptop); the nix-installer route for other distros is tested with stubbed hosts, unverified on a real one |
 | Mixed host | NixOS module with `enforcementRoots = [ "~/code/git" ]`: managed rules only under the roots, sessions elsewhere keep `git commit` and friends | available, superseded by the unmanaged shape |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
-| Any Linux, no Nix yet | `git clone`, `./install.sh`: Nix, devenv, direnv and this repo's shell; the unmanaged tier (see "Any Linux") | script and tests ready, unverified on a real distro |
 
 `devenv/` is the project side: every repo imports it. A container route
 was built and set aside; it lives in the claude-nix-harness-container repo,
@@ -29,53 +28,66 @@ other (tiers, proposals, the broker mod): `docs/sessions.md`.
 ## Layout
 
 ```
-lib/        pure Nix: deny rules (universal + project), settings.nix (one body for the managed and the repo copy), hooks packaging, managed-tree packaging
+lib/        pure Nix: deny rules (universal + project), settings.nix (one body for the managed and the repo copy), hooks packaging, managed-tree packaging, mods.nix (mod and marketplace builders)
+mods/       the mods the managed marketplace ships: harness-broker (docs/sessions.md section 5), hooks module, types and tests; the manifest is generated
 hooks/      env-guard.sh (the guard hook), tmux-notify.sh
 nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json with deny rules, hooks and sandbox; `ccmux`
 pkgs/       ccmux launcher, direnv >= 2.38 override, the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
-scripts/    install.sh: the root steps before Nix exists on a Fedora host, then `harness bootstrap`
-tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, harness-doctor-test.sh, harness-init-test.sh
+scripts/    install.sh: the one install route; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap`, then `harness init` on the checkout
+tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod wiring), mod-validate-test.sh (`claude plugin validate` and `claude plugin test` over the built tree, needs a claude binary)
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), roadmap, changelog, handoff-tiers (tiers, read fence, customer module, phased), sessions (tiers, proposals, broker mod)
 ```
 
 ## Any Linux: the install script
 
-For a host without Nix. Needs curl, git, and sudo: the Nix installer asks
-for it, and one optional kernel setting does.
+For a host with or without Nix. Needs git and sudo, and curl off Fedora
+(the nix-installer is fetched with it).
 
 ```
 git clone https://github.com/bilibo/claude-nix-harness.git harness
 cd harness
-./install.sh
+scripts/install.sh
 ccmux
 ```
 
-The script runs once and says what it did. It installs Nix with the
-nix-installer served at artifacts.nixos.org (multi-user daemon, its own
-uninstaller; the script turns flakes on for its own nix calls),
-puts devenv and direnv from this repo's flake into your Nix profile, adds
-the direnv hook to `~/.bashrc` (and `~/.zshrc` if you have one), writes
-`~/.config/direnv/direnv.toml` unless you already have one, puts the tmux
-settings `ccmux` relies on in `~/.config/tmux/harness.conf` sourced from
-`~/.tmux.conf`, then runs `direnv allow` here and builds the shell. The
-shell carries Claude Code, tmux and `ccmux`, pinned by `devenv.lock`. The
-last lines check that `.claude/settings.json` was generated with bypass
-mode disabled.
+The script runs once and says what it did. On Fedora 44 or newer it
+installs Fedora's own `nix` and `nix-daemon` packages (with bubblewrap,
+socat, tmux, jq and git), labels the daemon socket directory for SELinux
+and enables the socket. On any other Linux it fetches the nix-installer
+served at artifacts.nixos.org (multi-user daemon; its uninstaller stays at
+`/nix/nix-installer`), which asks for sudo itself and confirms on the
+terminal (`--yes` passes `--no-confirm`). Then it hands over to `harness
+bootstrap`: the devenv cache in `nix.conf`, and flakes where the installer
+left them off; direnv, devenv, `ccmux` and `harness` from this repo's
+flake into your Nix profile; `~/.config/direnv/direnv.toml` unless you
+have one; the tmux settings `ccmux` relies on as a marked block in the
+file tmux reads; the direnv hook and `HARNESS_CODE_ROOT` in `~/.bashrc.d`,
+sourced by `~/.bashrc` (which gets one line for it where it does not
+already) and, if you have one, in `~/.zshrc`; the session PATH for
+GUI-launched VS Code; the user-scope strict network allowlist; a receipt
+of all of it. Last, run from a checkout, `harness init` on the checkout
+itself: `direnv allow`, the shell built (Claude Code, tmux and `ccmux` in
+it, pinned by `devenv.lock`), and the generated `.claude/settings.json`
+and its hook run through the unit tests.
 
 Ubuntu 23.10 and later confine unprivileged user namespaces, and the
-Claude Code sandbox needs them. The script detects this, shows the sysctl
+Claude Code sandbox needs them. Bootstrap detects this, shows the sysctl
 and the drop-in file it would write under /etc/sysctl.d, and applies them
-with sudo only if you say yes. Declined, it prints the command for later;
-until it runs, every Claude command is refused.
+with sudo only if you say yes (`--yes` says it). Declined, it prints the
+command for later and `harness doctor` keeps reporting it; until it runs,
+every Claude command is refused.
 
-After the script: `devenv update` moves the project's inputs. devenv and
-direnv follow this checkout's `flake.lock`, so `git pull` here and then
-`NIX_CONFIG='experimental-features = nix-command flakes' nix profile upgrade --all`
-moves them (the installer leaves flakes off, hence the variable).
-`/nix/nix-installer uninstall` removes Nix and leaves the repo and your rc
-files. `./install.sh` again is harmless: nothing is installed twice.
+After the script: `devenv update` moves a project's inputs; after a `git
+pull` here, `harness upgrade` moves the profile packages to this
+checkout's current `flake.lock`; `harness doctor` reports every
+prerequisite. `harness reset` reverses what the receipt lists, Nix
+included when the script installed it. `scripts/install.sh` again is
+harmless: nothing is installed twice. The profile and the receipt point at
+this checkout; `HARNESS_REF=github:bilibo/claude-nix-harness` pins them to
+the published repo instead, which is the default when the script is piped
+into bash from the raw URL (then with `--yes`, having no terminal).
 
 This is the unmanaged tier: the rules live in the repo file and apply in
 harness repos only. For machine-wide rules that your own settings cannot
@@ -85,8 +97,8 @@ as root, which then governs every Claude session on the machine.
 
 Another project that imports `harness/devenv` gets the same shell contents
 with `harness.claudeCode.enable = true` in its devenv.nix and
-`allow_unfree: true` in its devenv.yaml; `./install.sh <project-dir>` from
-this checkout sets up the host and builds that project instead.
+`allow_unfree: true` in its devenv.yaml; `harness init <customer>/<repo>`
+writes one and does its first shell entry.
 
 ## Enforcement layers
 
@@ -211,9 +223,9 @@ and `bubblewrap` and `socat` with user namespaces enabled for the sandbox
 module below brings the first two; on an unmanaged host they come from
 your own configuration, or from this flake, pinned by its lock:
 `nix profile add path:<checkout>#direnv path:<checkout>#devenv
-path:<checkout>#ccmux`. On Fedora 44 or newer `scripts/install.sh` does
-the root steps `nix run` needs (Fedora packages Nix: `dnf install nix
-nix-daemon`, then the SELinux label and the daemon socket) and
+path:<checkout>#ccmux`. `scripts/install.sh` does the root steps `nix
+run` needs (on Fedora 44 or newer the `nix` and `nix-daemon` packages, the
+SELinux label and the daemon socket; elsewhere the nix-installer) and
 hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and
 `harness` itself to the profile and writes the user files; `harness
 doctor` reports every host prerequisite afterwards, `claude doctor`
@@ -345,7 +357,7 @@ enforces everywhere. A session that runs `git push` there gets
 ## Tests
 
 ```
-nix flake check              # hook unit tests (both managed trees), the generated repo file, ccmux resolver tests (both entry points)
+nix flake check              # hook unit tests (both managed trees), the generated repo file, ccmux resolution, the install route with stubbed hosts, doctor and init
 nix build .#managed-scoped   # a managed tree to inspect: result/managed-settings.json
 nix build .#project-settings # the repo's .claude/settings.json with default options
 ```

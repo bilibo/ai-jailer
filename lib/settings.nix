@@ -38,8 +38,16 @@
   # Managed only (user-or-managed scope; a repo cannot set it).
   # true: unknown hosts are refused inside the sandbox; false: prompted.
   strictAllowlist ? true,
-  # Managed only. Same shape as strictKnownMarketplaces.
+  # Managed only. Same shape as strictKnownMarketplaces (a list of sources
+  # the user may add); not the settings key of the same name, which
+  # registers marketplaces and is written below from `mods`.
   extraKnownMarketplaces ? [ ],
+  # Managed only. Names of the mods in the managed marketplace directory
+  # (lib/mods.nix). Non-empty: the directory is registered by absolute path
+  # and each mod enabled from it, which is what makes them the
+  # organisation's mods under the guard (docs/sessions.md section 5).
+  mods ? [ ],
+  marketplaceName ? "harness",
   # Repo only: the checkout's absolute path (devenv's `config.devenv.root`).
   # Linux skips glob `denyWrite` entries, so the repo copy also lists its own
   # settings, hooks and `.git` files as literal paths. A worktree has a
@@ -302,8 +310,8 @@ assert managed -> marketplaceDir != null;
 }
 // lib.optionalAttrs managed {
   # The built-in guard only loads when managed settings exist and reads
-  # `allowManagedModsOnly` from here only. The managed marketplace is empty
-  # until the broker mod exists, so the guard refuses every mod.
+  # `allowManagedModsOnly` from here only. With no mods listed the managed
+  # marketplace is empty and unregistered, so the guard refuses every mod.
   pluginConfigs."cc-plugin-sec-default@builtin".options.allowManagedModsOnly = true;
   disableSideloadFlags = true;
   strictKnownMarketplaces = [
@@ -313,5 +321,19 @@ assert managed -> marketplaceDir != null;
     }
   ]
   ++ extraKnownMarketplaces;
+}
+// lib.optionalAttrs (managed && mods != [ ]) {
+  # Key shapes from the plugin marketplace, org and mods admin pages
+  # (2026-10-21): an object keyed by marketplace name, a `directory` source
+  # by absolute path; `enabledPlugins` keyed `<plugin>@<marketplace>`. No
+  # `prependPlugins`: once set it must name `sec-default@builtin` or the
+  # guard stops loading, and one managed mod needs no ordering.
+  extraKnownMarketplaces.${marketplaceName}.source = {
+    source = "directory";
+    path = marketplaceDir;
+  };
+  enabledPlugins = lib.listToAttrs (
+    map (name: lib.nameValuePair "${name}@${marketplaceName}" true) mods
+  );
 }
 // lib.optionalAttrs (managed && allowManagedHooksOnly) { allowManagedHooksOnly = true; }

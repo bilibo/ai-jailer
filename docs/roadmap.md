@@ -71,29 +71,40 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   devenv shell loads, `~/.bashrc` and the VS Code settings unreadable,
   `~/.claude` present for the shell snapshot. `project-settings-fenced-test`
   (21 checks).
+- Root `CLAUDE.md` (2026-10-21), under 30 lines: which document owns what,
+  the handoff's standing rules, the closed-decision rule, how a session runs
+  the checks. First `harness doctor` and `harness init --dry-run` against
+  the checkout: init leaves `devenv.yaml`, `devenv.nix` and `.envrc` alone
+  and would add three `.gitignore` lines that `.claude/` already covers;
+  doctor's repo report and VS Code lines were false from inside a session
+  (the sandbox masks `.claude/settings.json` as a character device, and the
+  host's `code` dies on the shell's `LD_LIBRARY_PATH`), now reported as
+  such (`harness-doctor-test` 27 checks). `harness check` against the
+  checkout still has not run: it needs a terminal, not a session.
+- One install route (2026-10-21): `scripts/install.sh` + `harness
+  bootstrap` survives; the root `install.sh` is gone and what only it did
+  moved over. The script: the nix-installer where Fedora's packages are
+  not there (before `nix run` exists), the checkout as the default ref,
+  `harness init` on the checkout at the end (the old shell build and
+  self-check). bootstrap: no Fedora-only preflight, the user-namespace
+  sysctl offered on its own and declinable, the direnv hook in a
+  `~/.bashrc` that does not source `~/.bashrc.d` and in `~/.zshrc`, the
+  tmux block in the file tmux reads (`~/.tmux.conf` when it exists),
+  flakes in `nix.conf` where the installer left them off; `reset` undoes
+  the sysctl and runs the installer's uninstaller. `install-test` rewritten
+  for the script (both routes, 44 checks), `harness-bootstrap-test` new
+  (94 checks: rc-file layouts, nix.conf, the sysctl, idempotency, reset). Run on nothing but the stubs so far; the runbook's
+  fresh-distro list (section 5) is the verification, on Ubuntu 24.04.
 
 ## Next, in order
 
-0. **One install route.** Decide between root `install.sh` (any Linux,
-   stub-tested) and `scripts/install.sh` + `harness bootstrap` (Fedora,
-   run end to end); fold the survivor's tests into the other, run it on a
-   fresh Ubuntu 24.04.
-1. **Root `CLAUDE.md`, under 30 lines.** A session in this checkout has no
-   in-repo anchor saying which document owns what; the README's paragraph
-   says it for humans. Contents: README for current state, roadmap for
-   order, changelog for history, `handoff-tiers.md` for the standing "do
-   not activate" rule; and the rule that a closed decision is reopened only
-   by a new dated roadmap or changelog entry, never by editing the old one.
-   The repo imports its own devenv module since 2026-10-21 (root
-   `devenv.nix`), so `harness init` and `harness check` can run against it;
-   neither has yet.
-2. **Interactive check of the repo-only shape.** `-p` sessions are verified
+1. **Interactive check of the repo-only shape.** `-p` sessions are verified
    (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
    Left: a `ccmux` session in the test repo, the trust dialog accepted
    once, hooks seen firing and the tmux window turning orange. The
    Notification matcher names are verified against the hooks reference;
    whether the event fires in tmux is not.
-3. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
+2. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
    section 8, "Sandbox limits"); the strict allowlist, the literal
    `denyWrite` paths and the environment scrub are done. Each item is a
    `lib/settings.nix` change with a `project-settings-test` check, or a
@@ -138,29 +149,29 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
       sandbox, expecting a permission error on `.git/config`. If the write
       lands, the literal-path protection has a hole; else runbook section 8
       says the `-c` and `--global` forms are the accepted ones.
-4. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
+3. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
    azurerm/azuread/alz providers, tflint, trivy, and the `AZURE_CONFIG_DIR`
    task under `.git/devenv-base/azure` shared by worktrees.
    `imports: - devenv-base/azure` resolves to `azure/devenv.nix`, same rule
    as `harness/devenv`.
-5. **Repo template**: the test repo minus Rust, plus the azure module;
+4. **Repo template**: the test repo minus Rust, plus the azure module;
    `harness init` renders it. Convert one real customer repo; confirm
    `az account show` and `terraform plan` inside the sandbox with the
    network allowlist, and record the exact blob hosts the first
    `terraform init` and `trivy` run need.
-6. **Reader-only service principal per customer.** The one control that
+5. **Reader-only service principal per customer.** The one control that
    holds against every client, including things the hook never sees. Human
    logs it into the repo's `AZURE_CONFIG_DIR`.
-7. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
+6. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
    a throwaway repo (`harness init` into a temporary code root), the cases
-   from item 3, the `.devenv/shell-*.sh` litter count over 50 commands,
+   from item 2, the `.devenv/shell-*.sh` litter count over 50 commands,
    `harness doctor --full` running it.
-8. **Managed host base config**: a NixOS-WSL base configuration (and later
+7. **Managed host base config**: a NixOS-WSL base configuration (and later
    a native NixOS one) shipped with the harness, `harness.enable` on both
    modules and nothing else, with the WSL-specific checks (`/run/WSL` and
    `/mnt/c` empty inside the sandbox, `cmd.exe` fails). First time the
    managed layer runs live.
-9. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
+8. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
    before the next: observe (`/fleet` from `$.store`, tier in the status
    line, tier contract in the system prompt), propose (`/propose` and a
    `/proposals` pane with accept and reject in the platform session), gate
@@ -168,14 +179,19 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
    accepted proposals). Deployed through the managed marketplace directory,
    `claude plugin validate` output as the contract. Stage C needs the tier
    split (item 2 of the handoff phases). Only after everything above is
-   boring.
+   boring. Groundwork in since 2026-10-21 (changelog): `lib/mods.nix`, the
+   marketplace and `enabledPlugins` wiring, `harness.mods`, and the part of
+   stage A that needs no tier (the `$.store` row, `/fleet`); the validate
+   and plugin-test run (`tests/mod-validate-test.sh`) and the first
+   managed-host load are still to do. The tier line, stage B and stage C
+   wait as before.
 
 ## Open questions
 
 - Notification hook: the matcher names (`permission_prompt`, `idle_prompt`,
   `elicitation_dialog`) are in the hooks reference (2026-10-20), with more
   available (`auth_success`, `agent_needs_input`, `agent_completed`).
-  Whether the window turns orange in tmux is item 2 above.
+  Whether the window turns orange in tmux is item 1 above.
 - FileChanged matcher: the reference says the value is split on `|` and
   each part is a literal file name in the working directory, so the
   current matcher is right for a session started at the repo root; a
@@ -190,6 +206,11 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   `--no-account-sync` writes the `false`s) or on (the default). Today's
   sessions load the official marketplace plugins and the claude.ai skills,
   none of which the harness reviews.
+- `LD_LIBRARY_PATH` inside a session carries a Nix alsa-lib path that
+  neither devenv, direnv nor the harness exports (2026-10-21); the host's
+  `code` loads `librt` from the Nix glibc through it and dies. Trace the
+  exporter (the launcher, the terminal, Claude Code itself) before the
+  managed host, where more host binaries run from sessions.
 
 ## Ideas, not planned
 

@@ -5,6 +5,79 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Broker mod groundwork, roadmap item 8 started out of order: only stage C
+  (the gate) depends on the tier split; the builder, the registration keys
+  and the observe slice depend on nothing above it. `lib/mods.nix`: `mkMod`
+  writes the manifest from Nix attributes, so the checkout holds no
+  `.claude-plugin` (the deny rules keep an agent out of one, `harness init`
+  refuses one under `.claude`); `mkMarketplace` lists each mod by relative
+  path, which is what makes it the organisation's under the guard.
+  `mods/harness-broker`: the first slice of stage A, a row per session in
+  `$.store`, the tier in the status line, `/fleet`; three `claude plugin
+  test` cases. `harness.mods` on the NixOS module; when a mod is listed the
+  managed settings carry `extraKnownMarketplaces.harness` (a `directory`
+  source by absolute path) and `enabledPlugins."<mod>@harness"`, shapes from
+  the marketplace, org and mods admin pages, the org page saying the managed
+  file alone registers and installs. `packages.managed` is unchanged until
+  `harness.mods` is set; `managed-mods` is the tree with the broker.
+  `managed-tree-test` (12 checks) in `nix flake check`.
+  `tests/mod-validate-test.sh` (`claude plugin validate --strict` and
+  `claude plugin test` over the built tree) is a check only where unfree
+  packages are allowed, claude-code being unfree in nixpkgs, and has not been
+  run: an agent's session cannot run `claude plugin`, so the validate loop
+  (`mods/harness-broker/README.md`) is the human's. Nothing has run on a
+  managed host.
+- One install route, roadmap item 0 decided: the root `install.sh` (any
+  Linux, stub-tested, never run on a distro) folded into
+  `scripts/install.sh` + `harness bootstrap` (Fedora, run end to end) and
+  removed. The script keeps the Fedora route and gains the root script's
+  nix-installer route for every other Linux (downloaded to a file first;
+  `--yes` passes `--no-confirm`, and is required when piped into bash with
+  no terminal), defaults the ref to the checkout it runs from (the
+  runbook's `HARNESS_REF=path:$PWD` is no longer needed) and ends with
+  `harness init` on that checkout, the root script's shell build and
+  self-check; the root `.gitignore` carries the three lines init ensures,
+  so the run leaves the tree clean. bootstrap: the Fedora-only preflight
+  is gone (Fedora 44 or newer is the dnf route, anything else the
+  installer's; SELinux steps only where the tools exist, the socket step
+  only where the unit exists); the user-namespace sysctl, offered on its
+  own, `--yes` answering it, a decline printed at the end and kept in
+  doctor's report; the direnv hook wired into a `~/.bashrc` that does not
+  source `~/.bashrc.d` (Fedora's stock one does) and into `~/.zshrc`; the
+  tmux block in the file tmux reads, since tmux stops at `~/.tmux.conf`
+  when it exists and the old block in the XDG file never loaded there;
+  `experimental-features` in the nix.conf block when no line outside it
+  sets them. `reset` puts the sysctl back and runs `/nix/nix-installer
+  uninstall` when the receipt says the script installed Nix. The system
+  files bootstrap touches are overridable for the tests (`HARNESS_NIX_CONF`,
+  `HARNESS_SYSCTL_DROPIN`, `HARNESS_NIX_INSTALLER`, `HARNESS_OS_RELEASE`,
+  `HARNESS_CA_BUNDLE`). `install-test` rewritten (44 checks),
+  `harness-bootstrap-test` new (94). Found by the new test: the doctor's
+  `code` probe from earlier in the day ran before its `command -v` guard,
+  which under bootstrap's errexit and pipefail ended a run on a host
+  without VS Code with exit 127; fixed. Nothing run on a real non-Fedora
+  host yet.
+- Root `CLAUDE.md` (the day's roadmap item 1, now in Done): under 30 lines,
+  which document owns what, the handoff's standing rules, the
+  closed-decision rule, how a session runs the checks. First `harness
+  doctor` and `harness init --dry-run` against the checkout, from inside a
+  session. init: `devenv.yaml` and `devenv.nix` differ by design (this repo
+  imports `./devenv`), `.envrc` and `.worktreeinclude` unchanged, the three
+  `.gitignore` lines it would add are covered by `.claude/`. doctor: every
+  host line ok, but the repo report called `.claude/settings.json` a plain
+  file with no runnable hook, and the VS Code lines said mkhl.direnv was
+  missing. Both false: the sandbox masks the repo's `.claude` files as
+  character devices, and `code` dies before printing because the session's
+  `LD_LIBRARY_PATH` carries a Nix alsa-lib path and the host binary then
+  loads `librt` from the Nix glibc (`symbol lookup error`). doctor now says
+  so, a warning each and no verdict; `harness-doctor-test` 27 checks. Where
+  that variable comes from is open: not devenv, not direnv, not the harness.
+  The bootstrap plan's boxes for tasks 1 to 5 are ticked; task 6 and the
+  route decision stay open (roadmap item 0). Learned: the hook refuses a
+  command that runs `git init`, `git add` or `git commit` on a scratch copy
+  under `$TMPDIR` as well, so the flake check from a session is `git
+  archive HEAD | tar -x` into a directory, then `nix flake check path:<dir>`
+  (passed on `7cc5803` and on the working tree).
 - Check of the day's commit (`ffe26ad`), fixes applied. The path-first
   credential rule had three ways through, each measured to print the file:
   a second line after a harmless verb (the normaliser folds newlines, so the

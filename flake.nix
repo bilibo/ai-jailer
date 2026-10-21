@@ -12,6 +12,13 @@
       ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       harnessLib = pkgs: import ./lib { inherit (pkgs) lib; };
+      # The mods this repository ships, built plugin directories (lib/mods.nix).
+      mods =
+        pkgs:
+        import ./mods {
+          inherit pkgs;
+          inherit (pkgs) lib;
+        };
       managedTree =
         pkgs: args:
         import ./lib/managed-tree.nix (
@@ -63,6 +70,12 @@
             enforcementRoots = [ "~/code/git" ];
             strictAllowlist = false;
           };
+          # The work host once the broker mod ships: `harness.mods` set.
+          managed-mods = managedTree pkgs { mods = [ (mods pkgs).harness-broker ]; };
+          # The broker mod as a plugin directory: `claude plugin validate
+          # --strict result`, `claude plugin test result`, `claude --plugin-dir
+          # result` (mods/harness-broker/README.md).
+          inherit (mods pkgs) harness-broker;
           # What the devenv module writes into a repo, with default options;
           # `/repo` stands for the checkout path devenv passes.
           project-settings = (pkgs.formats.json { }).generate "claude-settings.json" (
@@ -120,16 +133,6 @@
             inherit (pkgs) lib;
             direnvPackage = direnvStub;
           };
-          # install.sh reads the two host files next to it and defaults to its
-          # own directory as the project; only these are the test's input, not
-          # the whole checkout.
-          installFiles = pkgs.runCommand "install-files" { } ''
-            mkdir -p $out/pkgs
-            cp ${./install.sh} $out/install.sh
-            cp ${./.envrc} $out/.envrc
-            cp ${./pkgs/direnv.toml} $out/pkgs/direnv.toml
-            cp ${./pkgs/tmux.conf} $out/pkgs/tmux.conf
-          '';
           test =
             name: script: args:
             pkgs.runCommand name
@@ -162,14 +165,42 @@
           host-config-test =
             test "host-config-test" ./tests/host-config-test.sh
               "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
-          install-test = test "install-test" ./tests/install-test.sh "${installFiles}/install.sh";
+          # The pre-Nix script with its host commands stubbed, both routes.
+          install-test = test "install-test" ./tests/install-test.sh "${./scripts/install.sh}";
           # No nix, claude or code in the build sandbox: the MISSING case.
           harness-doctor-test =
             test "harness-doctor-test" ./tests/harness-doctor-test.sh
               "${p.harness}/bin/harness ${p.project-settings}";
+          # bootstrap, doctor and reset on a stubbed non-Fedora host.
+          harness-bootstrap-test =
+            test "harness-bootstrap-test" ./tests/harness-bootstrap-test.sh
+              "${p.harness}/bin/harness";
           harness-init-dry-run-test =
             test "harness-init-dry-run-test" ./tests/harness-init-test.sh
               "${p.harness}/bin/harness";
+          # The managed tree's mod wiring, with and without a mod.
+          managed-tree-test =
+            test "managed-tree-test" ./tests/managed-tree-test.sh
+              "${p.managed-mods} ${p.managed} ${./mods}";
+        }
+        # claude-code is unfree in nixpkgs: the validate and plugin-test run
+        # is a check only when the evaluator allows it (NIXPKGS_ALLOW_UNFREE=1
+        # with --impure, or allowUnfree in the nixpkgs config); otherwise run
+        # tests/mod-validate-test.sh by hand with the host's claude.
+        // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
+          mod-validate-test =
+            pkgs.runCommand "mod-validate-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.jq
+                  pkgs.claude-code
+                ];
+              }
+              ''
+                export HOME=$TMPDIR
+                bash ${./tests/mod-validate-test.sh} ${p.managed-mods}/plugins | tee $out
+              '';
         }
       );
     };
