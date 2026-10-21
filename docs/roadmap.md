@@ -111,6 +111,69 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
   green on the combined tree.
 
+## Target flow (2026-10-21)
+
+What the pieces add up to, and what is missing for it:
+
+1. One installer per host: `curl -fsSL .../scripts/install.sh | bash -s
+   -- --yes` (or `scripts/install.sh` from a clone) does the root and
+   pre-Nix work, then `harness bootstrap` the user side, on Fedora,
+   Ubuntu and NixOS, each also under WSL.
+2. The harness checkout is the command center: its own devenv shell,
+   `ccmux` in it, the session where the human accepts what other
+   sessions propose.
+3. `harness init <customer>/<repo>` per project: a standard
+   `devenv.nix` a non-Nix user can add tools to.
+4. `ccmux` sessions per project, set on tasks by hand or by the command
+   center; what their rules refuse, they propose to the command center
+   instead of working around.
+
+Status against it: 1 runs end to end on Fedora 44; Ubuntu is
+stub-tested only; nothing detects NixOS or WSL. 2 works by convention
+(CLAUDE.md contracts and `SendMessage`, as on 2026-10-21 when three
+sessions worked the audit board); the checkout is itself under the
+customer rules (the hook refuses its `devenv.nix`) until the tier split.
+3 works; the template has no guide. 4 works by hand.
+
+The gaps, in order:
+
+- A. **Host detection** (`scripts/install.sh`, once; exported to bootstrap
+  and init). Fedora 44+ as today. NixOS (`/etc/NIXOS` exists): no
+  installer, and bootstrap must not write `/etc/nix/nix.conf` (a store
+  symlink the next rebuild restores): print the `nix.settings` lines for
+  the devenv cache instead, or point at the NixOS and home modules (the
+  README's managed row), then do the user steps. WSL
+  (`/proc/sys/fs/binfmt_misc/WSLInterop` or `WSL_DISTRO_NAME`): check
+  that systemd runs in the distro (`[boot] systemd=true` in
+  `/etc/wsl.conf`; the nix-installer's daemon needs it, else
+  `--init none`: verify which), skip the `environment.d` step (no
+  Linux GUI login), and `harness init` writes `harness.platform =
+  "wsl";` into `devenv.nix` so `/mnt/c` and `/run/WSL` are hidden from
+  the sandbox; today no unmanaged WSL repo gets that. NixOS-WSL stays the
+  module route (item 7). Tests: install-test and harness-bootstrap-test
+  cases with a fake `ID=nixos` os-release plus a marker path, and a fake
+  WSL marker (`HARNESS_*` overrides, as the other system paths have).
+- B. **Ubuntu for real**: runbook section 5's fresh-distro list on Ubuntu
+  24.04, done under WSL so it verifies A's WSL branch on the same run.
+- C. **A guide to the project devenv for non-Nix users**
+  (`docs/project-devenv.md`, linked from the README and from the
+  `devenv.nix` `harness init` writes): what the four files are and which
+  ones a human edits; adding a tool (`packages = [ pkgs.terraform ];`,
+  names from search.nixos.org/packages); a language toolchain
+  (`languages.rust.enable = true;`); environment variables (`env.X =
+  "...";`, never secrets: README "Where project configuration goes");
+  project allow rules (`harness.settings.permissions.allow`); network
+  hosts for the sandbox (`harness.extraAllowedDomains`); unfree packages
+  (`allow_unfree: true`); the `direnv allow` prompt after every change
+  and why (`require_allowed`); and the agent's side: it proposes the
+  diff, the human applies it. The template gains one commented line per
+  case pointing at the guide. Phase 3's `lang` option (handoff) shortens
+  it later; the guide comes first.
+- D. **Command center as a tier**: handoff phase 2 (tiers: the checkout
+  and `~/nixos-config` as platform roots, `HARNESS_TIER` from `ccmux`),
+  then the broker's stage B (item 8: `/propose`, the `/proposals` pane).
+  No new work beyond those two; the order is phase 2 first.
+
 ## Next, in order
 
 0. **Audit follow-ups (2026-10-21).** What the audit fixes left open or
@@ -123,39 +186,83 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
    2. `devenv/devenv.nix` lines 33-37 (the hook refuses it from a
       session): `direnvPackage = import ../pkgs/direnv.nix { inherit pkgs;
       };` in place of the `versionOlder` if/else, as `flake.nix` now has.
-   3. Decide: the Fedora root steps (dnf list, SELinux label, daemon
-      socket) are in both `scripts/install.sh` and
-      `pkgs/harness/bootstrap.sh`, the package list written four times
-      (two scripts, two tests). Drop them from bootstrap, since install.sh
-      always runs first, or keep both and say why in bootstrap's header.
-   4. `CLAUDE.md`'s check recipe: `git archive` misses untracked files
-      the flake references, and the `git ls-files -co` copy that works
-      needs a regular-file filter (the sandbox masks untracked dotfiles as
-      device nodes, and `tar` stops on them):
-      `git ls-files -co --exclude-standard -z | while IFS= read -r -d ''
-      f; do [ -f "$f" ] && printf '%s\0' "$f"; done | tar --null -T - -cf
-      - | tar -xf - -C <dir>`. The session memory note on the same recipe
-      needs the filter too; a session here cannot write `~/.claude`.
-   5. `harness-bootstrap-test` is not hermetic: it inherits the host PATH,
-      so outside the Nix sandbox on this laptop (`getenforce`, `code`
-      present) 29 cases fail. Give its runs a PATH of the stubs plus the
-      store tools, as `harness-doctor-test` does, so a session can run it
-      directly.
-   6. `harness init`: a foreign `devenv.lock` is approved by the second
-      `direnv allow` without being shown, and it pins every input,
-      nixpkgs included. When `devenv.yaml` or `devenv.lock` is foreign,
-      print the lock's locked input URLs and revisions (jq over `.nodes`)
-      with the other files, or suggest `devenv update` before the first
-      load.
-   7. Hook gap, decide: `git checkout <path>` and `git checkout <branch>
-      <path>` without `.` or `--` discard edits, and text cannot tell a
-      path from a branch name. Either fail closed on `git checkout` with
-      two or more non-flag words, or list it in runbook section 8 next to
-      the `git -c alias.x=reset` case already there.
-   8. `harness check`: one live case for the new `denyRead` entries (a
-      fake `~/.config/gh/hosts.yml`, read inside the sandbox, expecting a
-      sandbox refusal rather than the hook's), so the sandbox layer is
-      seen to hold on its own.
+   3. One installer, decided 2026-10-21 (Target flow, below):
+      `scripts/install.sh` owns every root and pre-Nix step, `harness
+      bootstrap` the user side. In `pkgs/harness/bootstrap.sh`, from
+      `root_steps`: delete the `ROOT_RPMS` dnf loop, the SELinux block and
+      the daemon-socket block, and the `ROOT_RPMS` array; keep the
+      nix.conf block (the devenv cache) and `userns_steps`. `reset` keeps
+      undoing them from the receipt (install.sh hands them over in
+      `HARNESS_ROOT_PACKAGES`/`HARNESS_ROOT_STEPS`); `doctor` keeps
+      reporting SELinux and the socket. `tests/harness-bootstrap-test.sh`
+      case 11 (dnf on Fedora) goes; the Fedora host line check moves to a
+      doctor-only case. Fix the header (lines 9-35: "Root is needed for
+      dnf (Fedora)...").
+   4. `CLAUDE.md`, section "Checks": the `git archive` copy misses
+      untracked files the flake references. Replace "run it on a `git
+      archive` copy" with a copy of the regular files only (the sandbox
+      masks untracked dotfiles as device nodes and `tar` stops on them):
+      ```
+      git ls-files -co --exclude-standard -z \
+        | while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\0' "$f"; done \
+        | tar --null -T - -cf - | tar -xf - -C <dir>
+      nix flake check path:<dir>
+      ```
+      The same filter goes into the memory note `nix-build-from-tree-copy`
+      (`~/.claude/projects/-home-raul-code-claude-nix-harness/memory/`),
+      which a session cannot write.
+   5. `tests/harness-bootstrap-test.sh` line 63: `PATH="$tmp/bin:$PATH"`
+      becomes `PATH="$tmp/bin"`; the harness wrapper prepends its own
+      store tools (`pkgs/harness.nix` runtimeInputs), so the stubs are all
+      it needs. Measured 2026-10-21 on this laptop: 67 passed, 34 failed
+      as is (the host's `getenforce` and `code`); 101 passed, 0 failed
+      with the change. Drop "and no getenforce or code on PATH, which the
+      Nix build sandbox guarantees" from the header (lines 14-16).
+   6. `pkgs/harness/init.sh`, the foreign-file block (lines 192-199): a
+      foreign `devenv.lock` is approved by the second `direnv allow`
+      without being shown, and it pins every input, nixpkgs included.
+      When `devenv.lock` existed before this run, print its inputs under
+      the same `==>` header instead of the raw file (it is not readable),
+      and count it in `foreign` so the y/N covers it:
+      ```
+      jq -r '.nodes | to_entries[] | select(.value.locked) | .value.locked as $l
+        | "  \(.key): \($l.type):\($l.owner // "")\(if $l.owner then "/" else "" end)\($l.repo // $l.path // $l.url // "") @ \($l.rev // $l.narHash // "?")"' devenv.lock
+      ```
+      (on this repo's lock: `devenv: github:cachix/devenv @ a86a087…`,
+      `nixpkgs: github:NixOS/nixpkgs @ fe13242…`). Check for the lock in
+      that block, before the first `direnv allow`: the first load creates
+      one, which is the harness's own. Test in `tests/harness-init-test.sh` beside the
+      existing foreign-file case: a repo with its own lock, its input
+      line printed, no `direnv allow` without `--yes`.
+   7. Hook, `git checkout` with paths. `git checkout main src/a.ts`
+      discards edits to `src/a.ts` and passes today; one word (`git
+      checkout src/a.ts`) cannot be told from a branch name and stays
+      open. In `hooks/env-guard.sh` after the `-C`/`-B` check (line 166),
+      inside the same project-rule block:
+      ```
+      re='(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +checkout( +-[^ ;&|]+)* +[^- ;&|][^ ;&|]* +[^- ;&|][^ ;&|]*'
+      creates='checkout( +[^ ;&|]+)* +(-b|--orphan|-t|--track)( |$)'
+      [[ "$n" =~ $re ]] && ! [[ "$n" =~ $creates ]] && deny "git history/index write blocked"
+      ```
+      Checked against ten commands on 2026-10-21: blocks `git checkout
+      main src/a.ts`, `git checkout -q main src/a.ts`, `git -c x=y
+      checkout main a b`; allows `git checkout main`, `git checkout -b x
+      origin/x`, `--track`, `-t`, `--orphan gh-pages`, `git checkout main
+      && ls a b`. `tests/hook-test.sh`: those as `block`/`allow` lines
+      next to the other checkout cases (lines 48-79). `lib/deny-rules.nix`
+      cannot express it; leave it to the hook. Runbook section 8, under
+      the git items: one line that `git checkout <path>` (one word) and
+      `git -c alias.x=reset x` are open, the second with the `-c` keys.
+   8. `pkgs/harness/check.sh`, a case 14 before the dry-run cut (line
+      151): the sandbox hides `~/.git-credentials` on its own. The hook
+      refuses the path by name, so the command spells it around the
+      `cred_files` regex: `f=~/.git-; wc -c "${f}credentials"`. Create
+      the file with a fake line first when absent (`https://x:live-check@
+      example.invalid`) and remove it after; leave a real one alone.
+      Expect the sandbox's answer (a masked file reads as empty, `^0 `,
+      or a permission error: confirm which on the first run), forbid
+      `live-check`. Then the header count ("twelve" and "thirteen")
+      goes up by one.
    Not planned: `~/.kube/config` and `~/.docker/config.json` the same way
    as `~/.aws`, until a harness host holds them.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified

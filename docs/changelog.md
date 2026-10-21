@@ -5,6 +5,13 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Decided: one installer. `scripts/install.sh` owns every root and
+  pre-Nix step and `harness bootstrap` the user side, so the Fedora root
+  steps leave bootstrap (roadmap item 0.3). The target flow (installer,
+  the checkout as command center, `harness init` per project, `ccmux`
+  sessions that propose what they are refused) is written down in the
+  roadmap with its gaps: NixOS and WSL detection, a real Ubuntu run, a
+  devenv guide for non-Nix users, the tier split.
 - Whole-repo audit, twice (Opus, then Fable), every hook claim re-run
   against the built hook; of the 13 findings, three idle sessions fixed
   eleven the same evening, staged for review (roadmap Done; the rest and
