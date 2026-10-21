@@ -31,8 +31,7 @@ for an agent.
    VS Code terminal it attaches. It resolves the project from the argument,
    else from `HARNESS_PROJECT` (exported by the devenv shell at entry), else
    from the current directory under the code root. `ccmux -n ...` prints the
-   resolution without starting anything. `ccode` is the former name and
-   still works.
+   resolution without starting anything.
 3. Several objectives at once: one `ccmux` call each. Sessions that edit files
    get `--worktree`; the worktree lives under `.claude/worktrees/<name>`,
    has its own `.devenv/`, and its `.envrc` is auto-allowed only if it is
@@ -347,15 +346,19 @@ The README's "Lockdown level today" table summarises them; the roadmap's
   `denyRead` paths (`~/.azure`, `~/.gnupg`, `~/.terraform.d`, `~/.netrc`,
   `~/.ssh`). `~/.claude/.credentials.json`, `~/.claude.json`, `~/.aws`,
   `~/.config` and every sibling repo under the code root are readable by
-  any command the hook's reader regex does not list, and the Read tool
+  any command the hook's secret-path rule lets through (one harmless verb,
+  no pipe), and the Read tool
   reaches them too (`blockReadsOutsideWorkingDirectories` is unset: a
   session in the test repo reads the harness checkout through it, which is
   how this document was checked). The docs allow a read fence from the repo
   file (`denyRead ["~/"]` plus `allowRead` for the repo and the paths devenv
-  needs); untested, see the roadmap.
+  needs); untested, see the roadmap. The `Read(**/.env)` deny rules do
+  become sandbox `denyRead`: a `.env` under the checkout is bind-mounted as
+  `/dev/null` for every command, whatever verb reads it (measured
+  2026-10-21); a `.env` outside the cwd tree is not fenced.
 - Glob `denyWrite` entries do nothing on Linux (`mkdir $TMPDIR/x/.claude-plugin`
   succeeds inside the sandbox; they stay for macOS). Since 2026-10-21 the
-  repo file repeats the seven protected paths as literal paths under the
+  repo file repeats its protected paths as literal paths under the
   checkout (`config.devenv.root`), which Linux honours; a plugin manifest
   or hook directory elsewhere under `$HOME` is still creatable, and
   `~/.claude` plus Claude Code's own working-directory protections hold.
@@ -367,7 +370,11 @@ The README's "Lockdown level today" table summarises them; the roadmap's
 - Every unix socket is reachable (`allowAllUnixSockets`, all-or-none on
   Linux): the D-Bus session bus, the secret service behind it, the display
   server, not only the Nix daemon and go-plugin. One more reason to keep
-  `trusted-users` off (the daemon socket would be root-equivalent).
+  `trusted-users` off (the daemon socket would be root-equivalent). The
+  SSH agent is the measured case (2026-10-21): `SSH_AUTH_SOCK` is stripped,
+  but `/run/user/<uid>/gcr/ssh` is guessable and answers from inside the
+  sandbox, so what holds is that no plain key is loaded in the agent
+  (README, "Git over SSH"). Roadmap item 3.3 hides the socket directories.
 - The environment: since 2026-10-21 the repo file sets
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which removes credential-shaped
   variables (by name or by value shape; `ANTHROPIC_API_KEY`,
@@ -380,7 +387,11 @@ The README's "Lockdown level today" table summarises them; the roadmap's
 - The hook strips quotes before matching, so a quoted string that mentions
   a config path next to something that looks like a write is refused too:
   `echo "settings -> $(readlink .claude/settings.json)"` (the `->`) and
-  `ls ~/.claude/.credentials.json | head` are both denied. Rephrase.
+  `ls ~/.claude/.credentials.json | head` are both denied. A secret path
+  anywhere in a command is refused unless the command is one harmless verb
+  (`ls`, `stat`, `rm`, `wc`, `echo`, ...) with no pipe, substitution or
+  input redirection, so `claude -p "why is .env hidden"` is refused too.
+  Rephrase.
 
 Accepted for now (2026-10-17), after comparing with Hermes Agent, Codex,
 destructive_command_guard and codex-protect. Each is a text-matching gap the
@@ -398,8 +409,7 @@ other layers are meant to catch; revisit when tightening:
   `credential.helper`, `--config-env`, `git log --output`. The `.git/hooks`
   write block does not cover a hooksPath pointing elsewhere.
 - `az storage blob upload` and other az upload or copy verbs: the az regex
-  lists mutation verbs, not transfer verbs, and `az` is not in the
-  credential-reader list.
+  lists mutation verbs, not transfer verbs.
 - Shell writes to your own config (`echo >> ~/.bashrc`, `authorized_keys`,
   `git config --global`): the Edit tool is blocked, the shell path is left
   to the sandbox write allowlist.

@@ -34,7 +34,7 @@ hooks/      env-guard.sh (the guard hook), tmux-notify.sh
 nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json with deny rules, hooks and sandbox; `ccmux`
-pkgs/       ccmux launcher (also installed as `ccode`, the former name), direnv >= 2.38 override, the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
+pkgs/       ccmux launcher, direnv >= 2.38 override, the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
 scripts/    install.sh: the root steps before Nix exists on a Fedora host, then `harness bootstrap`
 tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, harness-doctor-test.sh, harness-init-test.sh
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), roadmap, changelog, handoff-tiers (tiers, read fence, customer module, phased), sessions (tiers, proposals, broker mod)
@@ -166,7 +166,7 @@ human at the terminal decides; a `-p` session treats a prompt as a refusal.
 | Enforced | deny rules; the fail-closed hook on every writing tool and settings change; the Bash sandbox with no unsandboxed fallback; bypass mode off; `~/.ssh` and the agent socket hidden; account connectors off | the same inside the roots; plus mod policy and the built-in guard | the same everywhere; plus the strict network allowlist and immunity to user settings |
 | Enforced since 2026-10-21 | the strict network allowlist (user-scope key written by the bootstrap); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; credential-shaped variables and the GitHub tokens stripped from every subprocess (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, `credentials.envVars`) | the same | the same |
 | Prompted | edits outside the working directory | network hosts outside the allowlist (`sandboxStrictAllowlist = false`) | nothing in the sandbox: unknown hosts are refused |
-| Open | reads of the whole home and of sibling repos except the five `denyRead` paths (the hook's reader regex is the only gate for `cat ~/.aws/x`); every unix socket (D-Bus, the display, the secret service); account-synced skills and plugins unless the bootstrap ran with `--no-account-sync`; the user's own marketplace; `/add-dir` typed by the human; dynamic shell constructs (runbook section 8) | the same, minus the marketplace | the same, minus the marketplace and the synced skills |
+| Open | reads of the whole home and of sibling repos except the five `denyRead` paths (the hook's secret-path rule is the only gate for `cat ~/.aws/x`); every unix socket (D-Bus, the display, the secret service); account-synced skills and plugins unless the bootstrap ran with `--no-account-sync`; the user's own marketplace; `/add-dir` typed by the human; dynamic shell constructs (runbook section 8) | the same, minus the marketplace | the same, minus the marketplace and the synced skills |
 
 The glob `denyWrite` entries (`**/...`) have no effect on Linux and stay
 for macOS; the repo copy repeats them as literal paths under the checkout
@@ -250,6 +250,21 @@ harness.enable = true;
 While changing the harness itself, build the host from a checkout instead
 of the locked revision:
 `nixos-rebuild switch --override-input harness path:/path/to/claude-nix-harness`.
+
+### Where project configuration goes
+
+Agents never read `.env`: the sandbox mounts it as `/dev/null` and the hook
+refuses commands that name it. So split a project's settings by what they
+are, not by where a dotenv file would have put them:
+
+| What | Where | Who sees it |
+|---|---|---|
+| Identifiers the tools need: tenant, subscription, client and resource IDs, region, environment name | `devenv.nix`, `env.ARM_TENANT_ID = "..."` and friends, committed | you and the agent, exported into every command by the devenv shell |
+| The same, per developer or not for the repository | `devenv.local.nix`, gitignored; devenv imports it on its own | you and the agent; the agent cannot create or change it |
+| Secrets: client secrets, tokens, passwords | `.env`, loaded into your shell with devenv's `dotenv.enable = true` (direnv's own dotenv loading is off on a harness host), or your `az login` session | you only; the agent's preamble loads an empty file, and `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET` and the GitHub tokens are stripped from its environment either way |
+
+A project that keeps its IDs in `.env` today sees `az` and `terraform plan`
+fail inside the sandbox until those lines move to `devenv.nix`.
 
 ## Git over SSH
 

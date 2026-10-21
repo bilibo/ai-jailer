@@ -31,7 +31,7 @@ check "own settings not writable from the shell" '.sandbox.filesystem.denyWrite 
 check "account connectors off"                  '.disableClaudeAiConnectors == true'
 check "no co-author trailer"                    '.includeCoAuthoredBy == false'
 # Linux honours literal write entries only: the repo's own files by absolute path.
-check "own files denied by literal path"        '.sandbox.filesystem.denyWrite | index("/repo/.claude/settings.json") and index("/repo/.claude/settings.local.json") and index("/repo/.git/hooks") and index("/repo/.git/config") and index("/repo/.claude-plugin")'
+check "own files denied by literal path"        '.sandbox.filesystem.denyWrite | index("/repo/.claude/settings.json") and index("/repo/.claude/settings.local.json") and index("/repo/.git/hooks") and index("/repo/.git/config") and index("/repo/.claude-plugin") and index("/repo/devenv.local.nix")'
 check "subprocess environment scrubbed"         '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"'
 if [ "$fenced" = fenced ]; then
   check "home hidden from the shell"            '.sandbox.filesystem.denyRead | index("~/")'

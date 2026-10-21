@@ -81,10 +81,14 @@ let
     "~/.gitconfig"
   ];
   # Paths under a checkout that no shell command may write: the agent's own
-  # rules, its hooks and skills, and git's exec vectors.
+  # rules, its hooks and skills, git's exec vectors, and devenv's
+  # auto-imported local files, which no direnv re-approval covers. A path
+  # that does not exist is masked, so it cannot be created either.
   repoProtected = [
     ".git/hooks"
     ".git/config"
+    "devenv.local.nix"
+    "devenv.local.yaml"
     ".claude/settings.json"
     ".claude/settings.local.json"
     ".claude/hooks"
@@ -144,7 +148,7 @@ assert managed -> marketplaceDir != null;
     CwdChanged = [ { hooks = [ (hook { timeout = 30; }) ]; } ];
     FileChanged = [
       {
-        matcher = ".envrc|devenv.nix|devenv.yaml|devenv.lock";
+        matcher = ".envrc|devenv.nix|devenv.yaml|devenv.lock|devenv.local.nix";
         hooks = [ (hook { timeout = 30; }) ];
       }
     ];
