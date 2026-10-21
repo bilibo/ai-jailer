@@ -85,7 +85,7 @@ Nix daemon). `bubblewrap` and `socat` come from the host's system packages.
 `disableClaudeAiConnectors = true` since 2026-10-20 (`allowConnectors`
 option). What the sandbox does not do (open reads, every unix socket;
 the network is strict once the bootstrap has written the user-scope key)
-is in runbook section 8 and ordered as roadmap item 3; phase 2 below is
+is in runbook section 8 and ordered as roadmap item 2; phase 2 below is
 the read-fence part of it.
 
 **devenv-base.** Does not exist. There is one devenv module,
@@ -283,7 +283,8 @@ are testable with the existing hook-test pattern, and give Raul a
 `.envrc`, `.gitignore`, `.worktreeinclude` and `CLAUDE.md`, does
 `git init`, the two `direnv allow`s and the unit tests, with `--dry-run`,
 `--force` for the harness-owned files and idempotent re-runs. What phase 4
-adds, as the `init` subcommand of the `harness` CLI (roadmap item 3): the
+adds, as the `init` subcommand of the `harness` CLI (in the roadmap's Done
+list since 2026-10-21): the
 registry at `~/code/git/<customer>/customer.toml`, the customer block in
 `devenv.nix`, `README.md` and `.editorconfig`, the first commit, the two
 `AZURE_CONFIG_DIR` directories, the template version recorded in

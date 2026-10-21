@@ -67,7 +67,7 @@ pkgs.writeShellApplication {
       cat <<'EOF'
     usage: harness <command> [--dry-run] [--yes] [--verbose] [options]
 
-      bootstrap   set this Fedora host up (scripts/install.sh runs it after the root steps)
+      bootstrap   set this host up (scripts/install.sh runs it once Nix is there)
       upgrade     bootstrap, and move the profile packages to the harness ref's current lock
       doctor      every host prerequisite, claude doctor, and the harness repo in the cwd
       init        a harness repo: <customer>/<repo> under the code root, or a path
