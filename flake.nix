@@ -111,6 +111,17 @@
         let
           system = pkgs.stdenv.hostPlatform.system;
           p = self.packages.${system};
+          # The worktree .envrc auto-allow calls direnv; this stand-in logs the
+          # calls and answers `status` from an env var (hook-test.sh --direnv-stub).
+          direnvStub = pkgs.writeShellScriptBin "direnv" ''
+            echo "direnv $*" >> "''${DIRENV_STUB_LOG:-/dev/null}"
+            case "$1" in status) printf '%s' "''${DIRENV_STUB_STATUS:-}" ;; esac
+          '';
+          stubHooks = import ./lib/hooks.nix {
+            inherit pkgs;
+            inherit (pkgs) lib;
+            direnvPackage = direnvStub;
+          };
           test =
             name: script: args:
             pkgs.runCommand name
@@ -138,6 +149,9 @@
               "${p.project-settings-fenced} fenced";
           ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
           ccode-test = test "ccode-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccode";
+          hook-test-worktree = test "hook-test-worktree" ./tests/hook-test.sh "${stubHooks}/env-guard.sh --direnv-stub";
+          host-config-test = test "host-config-test" ./tests/host-config-test.sh "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
+          install-test = test "install-test" ./tests/install-test.sh "${self}/install.sh";
           # No nix, claude or code in the build sandbox: the MISSING case.
           harness-doctor-test =
             test "harness-doctor-test" ./tests/harness-doctor-test.sh

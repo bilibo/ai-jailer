@@ -29,6 +29,7 @@ check "agent socket stripped"                   '[.sandbox.credentials.envVars[]
 # entries (lib/settings.nix); `~/.claude` is the one that holds there.
 check "own settings not writable from the shell" '.sandbox.filesystem.denyWrite | index("**/.claude/settings.json") and index("**/.claude/settings.local.json") and index("~/.claude")'
 check "account connectors off"                  '.disableClaudeAiConnectors == true'
+check "no co-author trailer"                    '.includeCoAuthoredBy == false'
 # Linux honours literal write entries only: the repo's own files by absolute path.
 check "own files denied by literal path"        '.sandbox.filesystem.denyWrite | index("/repo/.claude/settings.json") and index("/repo/.claude/settings.local.json") and index("/repo/.git/hooks") and index("/repo/.git/config") and index("/repo/.claude-plugin")'
 check "subprocess environment scrubbed"         '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"'
