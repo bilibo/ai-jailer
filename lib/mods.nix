@@ -19,6 +19,7 @@ in
       name,
       version,
       description,
+      author,
       src,
     }:
     pkgs.runCommand "mod-${name}-${version}"
@@ -31,7 +32,12 @@ in
       }
       ''
         mkdir -p $out/.claude-plugin
-        cp ${json.generate "plugin.json" { inherit name version description; }} \
+        cp ${
+          json.generate "plugin.json" {
+            inherit name version description;
+            author.name = author;
+          }
+        } \
           $out/.claude-plugin/plugin.json
         for d in hooks types tests; do
           if [ -d ${src}/$d ]; then cp -r ${src}/$d $out/$d; fi
@@ -46,11 +52,12 @@ in
     {
       name,
       owner,
+      description,
       mods ? [ ],
     }:
     let
       manifest = json.generate "marketplace.json" {
-        inherit name;
+        inherit name description;
         owner.name = owner;
         plugins = map (m: {
           name = m.modName;
