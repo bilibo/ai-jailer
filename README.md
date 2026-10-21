@@ -212,7 +212,8 @@ module below brings the first two; on an unmanaged host they come from
 your own configuration, or from this flake, pinned by its lock:
 `nix profile add path:<checkout>#direnv path:<checkout>#devenv
 path:<checkout>#ccmux`. On Fedora 44 or newer `scripts/install.sh` does
-the root steps (Fedora packages Nix: `dnf install nix nix-daemon`) and
+the root steps `nix run` needs (Fedora packages Nix: `dnf install nix
+nix-daemon`, then the SELinux label and the daemon socket) and
 hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and
 `harness` itself to the profile and writes the user files; `harness
 doctor` reports every host prerequisite afterwards, `claude doctor`

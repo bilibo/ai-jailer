@@ -142,18 +142,22 @@ Host prerequisites on a host without the home module:
 something the harness needs is missing. `claude doctor` is the Claude Code
 side: install health and settings-file validation, without a session.
 
-From zero on an unmanaged Fedora host, end to end, repeatable. The
-bootstrap's `--reset` reverses everything it and the nix packages put on the
-host, so the sequence starts from a Fedora with only VS Code, Claude Code
-and this checkout on it (a reinstall of Fedora is the same list minus the
-first line). `<customer>/<repo>` is a throwaway repo under the code root:
+From zero on an unmanaged Fedora host, end to end, repeatable. `harness
+reset` reverses what the receipt lists, the Fedora nix packages included
+when install.sh put them there, so the sequence starts from a Fedora with
+only VS Code, Claude Code and this checkout on it (a reinstall of Fedora is
+the same list minus the first line). Without a receipt, reset leaves Nix
+installed with its daemon socket off, and install.sh turns it back on. A
+host without `harness` on PATH runs the first line as `nix run
+path:$PWD#harness -- reset`. `<customer>/<repo>` is a throwaway repo under
+the code root:
 ```
 harness reset                                 # sudo; asks first; reads the receipt; leaves ~/code/git alone
 rm -rf ~/code/git/<customer>/<repo>           # the throwaway repo, so init starts clean
-HARNESS_REF=path:$PWD scripts/install.sh      # sudo for dnf, then harness bootstrap: nix.conf, SELinux label, socket (sudo again), profile, user files
+HARNESS_REF=path:$PWD scripts/install.sh      # sudo: dnf, SELinux label, daemon socket; then harness bootstrap: nix.conf (sudo again), profile, user files
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
 harness doctor                                # every line ok
-harness init <customer>/<repo>                # files, two allows, 20 settings checks, 154 hook cases
+harness init <customer>/<repo>                # files, two allows, the settings checks, the hook cases
 harness check ~/code/git/<customer>/<repo>    # twelve -p sessions
 cd ~/code/git/<customer>/<repo> && ccmux            # interactive: trust dialog once, orange window when it waits
 ```
