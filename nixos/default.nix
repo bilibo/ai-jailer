@@ -23,7 +23,7 @@ let
       direnvPackage
       ;
     strictAllowlist = cfg.sandboxStrictAllowlist;
-    inherit (cfg) extraKnownMarketplaces;
+    inherit (cfg) extraKnownMarketplaces mods;
   };
 in
 {
@@ -66,6 +66,18 @@ in
         Plugin marketplaces allowed besides the managed one. Required on a
         machine where the user keeps their own plugins; `strictKnownMarketplaces`
         refuses every source not listed.
+      '';
+    };
+
+    mods = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = lib.literalExpression "[ harness.packages.\${pkgs.stdenv.hostPlatform.system}.harness-broker ]";
+      description = ''
+        Mods (hooks modules built by `lib/mods.nix`) shipped in the managed
+        marketplace directory and enabled from the managed settings, so they
+        count as the organisation's under the built-in guard. Empty: nothing
+        is registered and the guard refuses every mod.
       '';
     };
 

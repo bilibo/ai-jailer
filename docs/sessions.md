@@ -96,7 +96,7 @@ Relay is for the genuine case: a customer session needing a change to
 harness source or project configuration. Routine work bouncing through the
 platform session means a rule over-matches, and the fix is the rule.
 
-## 5. The broker mod (roadmap item 9)
+## 5. The broker mod (roadmap item 8)
 
 A mod is a hooks module loaded into the Claude Code engine: it hooks
 events (`session.start`, `tool.call`, `prompt.compose`, `command.run`,
@@ -124,21 +124,30 @@ organisation's mod and runs before user mods. `prependPlugins` only orders
 mods that are already enabled, and once it is set, `sec-default@builtin`
 must be named in it or the guard stops loading; without `prependPlugins`
 the guard loads on its own whenever managed settings exist, on every login
-kind, which is what the live check in runbook section 5 sees today. So the
-module change is: `extraKnownMarketplaces` entry for the managed directory
-(the existing `harness.extraKnownMarketplaces` option feeds
-`strictKnownMarketplaces` and keeps that job), `enabledPlugins` for the
-mod, and no `prependPlugins` until a second managed mod needs ordering. A
-`mkMod` builder in `lib/` takes `plugin.json` plus `hooks/register.js`,
-runs `claude plugin validate --strict` in its check phase and outputs the
-marketplace directory; `lib/managed-tree.nix` places it at
-`$out/plugins`. A `/nix/store` path is root-owned and read-only, which is
-the in-place local directory the docs ask for. On an unmanaged host the
-same `enabledPlugins` and marketplace entries go into the user-scope
-`~/.claude/settings.json`, which `harness bootstrap` already edits with jq.
-Not verified: that the managed file alone registers a directory
-marketplace, and the exact `strictKnownMarketplaces` entry shape; the first
-managed-host run settles both.
+kind, which is what the live check in runbook section 5 sees today. The
+module change is in since 2026-10-21: `lib/settings.nix` writes
+`extraKnownMarketplaces.harness` (a `directory` source by absolute path)
+and `enabledPlugins."<mod>@harness"` when its `mods` list is non-empty,
+keeps the `harness.extraKnownMarketplaces` option feeding
+`strictKnownMarketplaces`, and sets no `prependPlugins`. `lib/mods.nix`
+has `mkMod`, which writes the manifest from Nix attributes so the checkout
+holds no `.claude-plugin` (the deny rules keep an agent out of one, and
+`harness init` refuses one under `.claude`), and `mkMarketplace`, each mod
+by relative path; `lib/managed-tree.nix` places the result at
+`$out/plugins`, and `harness.mods` on the NixOS module lists what ships
+(`packages.managed` carries nothing until it is set; `managed-mods` is the
+tree with the broker). Validation is `tests/mod-validate-test.sh` over the
+built tree rather than a check phase: claude-code is unfree in nixpkgs, so
+it is in `nix flake check` only where unfree is allowed, and an agent's
+session cannot run `claude plugin` at all. A `/nix/store` path is
+root-owned and read-only, which is the in-place local directory the docs
+ask for. On an unmanaged host the same keys go into the user-scope
+`~/.claude/settings.json`, which `harness bootstrap` already edits with
+jq; not wired. Key shapes checked against the marketplace, org and mods
+admin pages on 2026-10-21; the org page says the managed file alone
+registers the marketplace and installs the plugin at the next session's
+start. Not verified live: the first managed-host run settles that, and
+the `strictKnownMarketplaces` entry shape with it.
 
 The mod reads `HARNESS_PROJECT`, which the devenv shell exports today, and
 `HARNESS_TIER` once handoff phase 2 has `ccmux` export it; `DEVENV_ROOT` is
@@ -175,7 +184,9 @@ to enforce without it.
 
 ## 6. Testing
 
-- `claude plugin validate mods/harness-broker` is the contract: what the
+- `claude plugin validate --strict` on the built mod (`nix build
+  .#harness-broker`, then `result`; `tests/mod-validate-test.sh` runs it
+  over every mod in the built marketplace) is the contract: what the
   module hooks and calls. Its output is checked in and diffed in CI.
 - `claude plugin test` cases per stage (`*.test.ts` under the mod's
   directory, no session or network needed): a row appears for a started
