@@ -37,9 +37,9 @@ happened and what was learned on the day.
   directory was hidden as intended but `DEVENV_ROOT` was unset, because
   `~/.nix-profile` is a symlink and allowed paths are mounted by their real
   path, so direnv fell off PATH. Fixed in the hook's preamble (direnv and
-  devenv by store path, `lib/hooks.nix`); second run: devenv shell loaded,
-  `~/.bashrc` and `~/.config/Code` unreadable, `~/.claude/shell-snapshots`
-  readable so the Bash tool works. The hook refused the first probe for
+  devenv by store path, resolved by the hook outside the sandbox); second
+  run: devenv shell loaded, `~/.bashrc` and `~/.config/Code` unreadable,
+  `~/.claude/shell-snapshots` readable so the Bash tool works. The hook refused the first probe for
   naming the credentials file, as it should.
 - Nix hygiene after the CLI landed: `pkgs/harness.nix` took the whole
   flake source as an input (`src = self`, for a store-path fallback ref),
