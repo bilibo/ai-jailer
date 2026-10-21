@@ -141,13 +141,13 @@ assert managed -> marketplaceDir != null;
 
   includeCoAuthoredBy = false;
 
-  # Any scope (project and local after the folder is trusted). Strips
-  # credential-shaped variables (by name or value) from every subprocess:
-  # Bash commands, hooks, stdio MCP servers; the session keeps its own API
-  # credentials. Also pins filesystem isolation on and, on Linux, runs Bash
-  # in its own PID namespace. GitHub tokens are kept by the scrub on purpose
-  # (gh needs them), hence the explicit `deny` entries below.
-  env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
+  # `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is user-or-managed scope: a repo file
+  # carrying it logs "ignored: project-scoped settings can't set this key"
+  # and scrubs nothing (measured 2026-10-22, `harness check` case 12). The
+  # managed copy sets it at the end of this file; on an unmanaged host
+  # `harness bootstrap` writes it into ~/.claude/settings.json next to the
+  # strict allowlist. GitHub tokens are kept by the scrub on purpose (gh
+  # needs them), hence the explicit `deny` entries below.
 
   hooks = {
     # One env hook only: all matching hooks run in parallel and would race on
@@ -239,7 +239,14 @@ assert managed -> marketplaceDir != null;
         "~/.ssh"
       ]
       ++ map (p: "**/${p}") repoProtected
-      ++ lib.optionals (repoRoot != null) (map (p: "${repoRoot}/${p}") repoProtected);
+      # Not devenv.local.*: a literal entry is masked as an unreadable device
+      # node whether or not the file exists, and devenv reads both files
+      # when they exist, so listing them stopped every shell evaluation
+      # inside the sandbox (`harness check` case 2, 2026-10-22). The hook
+      # still refuses shell writes to them by name.
+      ++ lib.optionals (repoRoot != null) (
+        map (p: "${repoRoot}/${p}") (lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected)
+      );
       denyRead = [
         "~/.azure"
         "~/.gnupg"
@@ -313,6 +320,12 @@ assert managed -> marketplaceDir != null;
   };
 }
 // lib.optionalAttrs managed {
+  # Strips credential-shaped variables (by name or value) from every
+  # subprocess: Bash commands, hooks, stdio MCP servers; the session keeps
+  # its own API credentials. Also pins filesystem isolation on and, on
+  # Linux, runs Bash in its own PID namespace. User-or-managed scope (the
+  # note above `hooks`); the bootstrap writes the unmanaged host's copy.
+  env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
   # The built-in guard only loads when managed settings exist and reads
   # `allowManagedModsOnly` from here only. With no mods listed the managed
   # marketplace is empty and unregistered, so the guard refuses every mod.

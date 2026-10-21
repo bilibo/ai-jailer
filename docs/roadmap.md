@@ -110,6 +110,11 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   hook-test 241 cases, project-settings-test 22 (23 fenced),
   harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
   green on the combined tree.
+- First live `harness check` (2026-10-22, Ubuntu, 9 of 12): the devenv
+  shell loads inside the sandbox again (`devenv.local.*` out of the literal
+  `denyWrite` list), the environment scrub lives in the managed copy and
+  the user-scope keys the bootstrap writes (a repo file's copy is ignored),
+  case 11 reads the sandbox's mask as the refusal it is (changelog).
 
 ## Target flow (2026-10-21)
 
@@ -128,9 +133,9 @@ What the pieces add up to, and what is missing for it:
    center; what their rules refuse, they propose to the command center
    instead of working around.
 
-Status against it: 1 runs end to end on Fedora 44 and, since 2026-10-22,
-through bootstrap on Ubuntu 26.10 (changelog; init by hand that day);
-nothing detects NixOS or WSL. 2 works by convention
+Status against it: 1 runs end to end on Fedora 44 and on Ubuntu 26.10
+(2026-10-22: install, bootstrap, `harness init` on the checkout, `harness
+check`, `ccmux`; changelog); nothing detects NixOS or WSL. 2 works by convention
 (CLAUDE.md contracts and `SendMessage`, as on 2026-10-21 when three
 sessions worked the audit board); the checkout is itself under the
 customer rules (the hook refuses its `devenv.nix`) until the tier split.
@@ -250,7 +255,9 @@ The gaps, in order:
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
    (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
    Left: a `ccmux` session in the test repo, the trust dialog accepted
-   once, hooks seen firing and the tmux window turning orange. The
+   once, hooks seen firing and the tmux window turning orange (`ccmux` on
+   the checkout runs on the Ubuntu laptop since 2026-10-22; the hook
+   firing and the orange window are still unobserved). The
    Notification matcher names are verified against the hooks reference;
    whether the event fires in tmux is not.
 2. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
@@ -288,7 +295,11 @@ The gaps, in order:
       session's own file (the worktree as `repoRoot`) still writes there;
       if the parent's deny wins, document sibling worktrees as an accepted
       gap.
-   5. `.envrc`, `devenv.nix`, `devenv.yaml` and `.env*` in `repoProtected`
+   5. Answered 2026-10-22, no: a literal `denyWrite` entry is masked as an
+      unreadable device node (changelog), so a file direnv or devenv reads
+      can never be one; `devenv.local.*` left the list that day and the
+      interpreter-write gap moved to item 2.7. As written: `.envrc`,
+      `devenv.nix`, `devenv.yaml` and `.env*` in `repoProtected`
       (`devenv.local.*` is in since 2026-10-21): closes the interpreter
       writes the hook cannot see. Check first that the preamble's `direnv
       export` and devenv's first evaluation write none of them;
@@ -298,6 +309,15 @@ The gaps, in order:
       sandbox, expecting a permission error on `.git/config`. If the write
       lands, the literal-path protection has a hole; else runbook section 8
       says the `-c` and `--global` forms are the accepted ones.
+   7. `devenv.local.nix` and `devenv.local.yaml` can be created by an
+      interpreter write the hook does not see, and devenv imports them on
+      the next evaluation without a `direnv allow` (the literal `denyWrite`
+      that closed this broke the shell, 2026-10-22). Candidate: the `.envrc`
+      the template writes fails the load when either file exists (a test
+      before `use devenv`), so a harness repo never carries them; the
+      checkout's own `.envrc` the same, by hand. `harness check`: a
+      `python3` write creating one gets the next command's preamble failing
+      loudly, not a silently imported file.
 3. **devenv-base repo with the `azure` module**: `az` pin, Terraform with
    azurerm/azuread/alz providers, tflint, trivy, and the `AZURE_CONFIG_DIR`
    task under `.git/devenv-base/azure` shared by worktrees.

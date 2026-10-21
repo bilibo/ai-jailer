@@ -79,8 +79,10 @@ hooks, skills and plugin manifests; `denyRead` `~/.azure`, `~/.gnupg`,
 `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET`, the GitHub tokens,
 `SSH_AUTH_SOCK` and `SSH_AGENT_PID` denied as env vars, and
 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` for the credential-shaped rest
-(2026-10-21). The repo copy adds its protected paths as literal `denyWrite`
-entries under `config.devenv.root`. `allowAllUnixSockets = true` (go-plugin,
+(managed and user scope only: the repo copy's was ignored, 2026-10-22). The
+repo copy adds its protected paths except `devenv.local.*` as literal
+`denyWrite` entries under `config.devenv.root` (a literal entry is masked
+unreadable, and devenv reads those two; 2026-10-22). `allowAllUnixSockets = true` (go-plugin,
 Nix daemon). `bubblewrap` and `socat` come from the host's system packages.
 `disableClaudeAiConnectors = true` since 2026-10-20 (`allowConnectors`
 option). What the sandbox does not do (open reads, every unix socket;

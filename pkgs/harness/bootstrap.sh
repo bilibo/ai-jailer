@@ -51,7 +51,10 @@
 #
 # The user-scope ~/.claude/settings.json gets the keys a repo file cannot
 # carry: sandbox.network.strictAllowlist = true (an unlisted host is refused
-# inside the sandbox instead of prompting; user-or-managed scope). With
+# inside the sandbox instead of prompting; user-or-managed scope) and
+# env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1" (credential-shaped variables
+# stripped from every subprocess; a repo file's copy is ignored, measured
+# 2026-10-22). With
 # --no-account-sync also syncClaudeAiSkills = false and
 # syncClaudeAiPlugins = false, so sessions load no skills or plugins from the
 # claude.ai account (the harness reviews none of them). Only `false` is
@@ -462,8 +465,8 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 
   # Claude Code user settings: the keys a repo file cannot carry (header).
   # Merged with jq so the rest of the file (theme, model, ...) stays.
-  local cs="$HOME/.claude/settings.json" want keys=('["sandbox","network","strictAllowlist"]')
-  want='{sandbox: {network: {strictAllowlist: true}}}'
+  local cs="$HOME/.claude/settings.json" want keys=('["sandbox","network","strictAllowlist"]' '["env","CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]')
+  want='{sandbox: {network: {strictAllowlist: true}}, env: {CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"}}'
   if [ "$NO_ACCOUNT_SYNC" = 1 ]; then
     want="$want + {syncClaudeAiSkills: false, syncClaudeAiPlugins: false}"
     keys+=('["syncClaudeAiSkills"]' '["syncClaudeAiPlugins"]')
@@ -697,6 +700,8 @@ report() {
   local cs="$HOME/.claude/settings.json"
   if jq -e '.sandbox.network.strictAllowlist == true' "$cs" >/dev/null 2>&1; then ok "strict network allowlist in $cs (unlisted hosts refused, not prompted)"
   else miss "sandbox.network.strictAllowlist is not true in $cs (user-or-managed scope; the repo file cannot set it)"; fi
+  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"' "$cs" >/dev/null 2>&1; then ok "subprocess environment scrub in $cs (credential-shaped variables stripped)"
+  else miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is not \"1\" in $cs (user-or-managed scope; a repo file's copy is ignored; harness bootstrap writes it)"; fi
   if jq -e '.syncClaudeAiSkills == false and .syncClaudeAiPlugins == false' "$cs" >/dev/null 2>&1; then ok "account-synced skills and plugins off in $cs"
   else warn "account-synced skills and plugins load (syncClaudeAiSkills, syncClaudeAiPlugins; --no-account-sync turns them off)"; fi
   [ -r /etc/claude-code/managed-settings.json ] && warn "/etc/claude-code/managed-settings.json exists: this host carries managed settings, the harness assumed none" || ok "no managed settings (unmanaged host: the repo file is the whole harness)"
