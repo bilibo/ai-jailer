@@ -128,8 +128,9 @@ What the pieces add up to, and what is missing for it:
    center; what their rules refuse, they propose to the command center
    instead of working around.
 
-Status against it: 1 runs end to end on Fedora 44; Ubuntu is
-stub-tested only; nothing detects NixOS or WSL. 2 works by convention
+Status against it: 1 runs end to end on Fedora 44 and, since 2026-10-22,
+through bootstrap on Ubuntu 26.10 (changelog; init by hand that day);
+nothing detects NixOS or WSL. 2 works by convention
 (CLAUDE.md contracts and `SendMessage`, as on 2026-10-21 when three
 sessions worked the audit board); the checkout is itself under the
 customer rules (the hook refuses its `devenv.nix`) until the tier split.
