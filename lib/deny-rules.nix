@@ -58,6 +58,8 @@ let
       "Read(~/.gnupg/**)"
       "Read(~/.aws/**)"
       "Read(~/.netrc)"
+      "Read(~/.git-credentials)"
+      "Read(~/.config/gh/**)"
       "Read(~/.npmrc)"
       "Read(~/.pypirc)"
       "Read(~/.claude/.credentials.json)"
@@ -134,6 +136,8 @@ let
     "Edit(~/.tmux.conf)"
     "Edit(~/.ssh/**)"
     "Edit(~/.config/**)"
+    "Edit(~/.bashrc.d/**)"
+    "Edit(~/.local/bin/**)"
   ];
 
   # ------------------------------------------------------------------ project
@@ -148,6 +152,18 @@ let
       "git revert"
       "git restore"
       "git checkout --"
+      # Discard uncommitted work or move a ref by force.
+      "git checkout -f"
+      "git checkout ."
+      "git switch -f"
+      "git switch --discard-changes"
+      "git branch -f"
+      "git branch --force"
+      "git tag -f"
+      "git worktree remove --force"
+      # Deny patterns keep case: these are not the harmless -c / -b.
+      "git switch -C"
+      "git checkout -B"
       "git clean"
       "git stash drop"
       "git stash clear"

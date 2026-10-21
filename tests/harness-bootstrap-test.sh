@@ -10,8 +10,9 @@
 # flakes line; the user-namespace sysctl offered, declined and accepted; dnf
 # on Fedora only), the user files per rc-file layout (none, Fedora's
 # ~/.bashrc.d, a plain ~/.bashrc, zsh only, an existing ~/.tmux.conf, a
-# foreign direnv.toml), idempotent re-runs, the receipt, and reset undoing
-# all of it. Assumes no controlling terminal and no getenforce or code on
+# foreign direnv.toml), idempotent re-runs, the receipt, reset undoing all of
+# it, upgrade building before it removes, and reset doing nothing without a
+# receipt. Assumes no controlling terminal and no getenforce or code on
 # PATH, which the Nix build sandbox guarantees.
 set -uo pipefail
 harness="${1:?usage: harness-bootstrap-test.sh <harness>}"
@@ -230,6 +231,25 @@ file_is "~/.bashrc without the block" "$h5/.bashrc" 'export EDITOR=vi'
 count_is "~/.zshrc without the block" "$h5/.zshrc" "$mark" 0
 file_has "the rest of ~/.zshrc kept" "$h5/.zshrc" '^# zsh$'
 called "profile removed without Nix going" '^nix profile remove direnv$'
+
+# 14. upgrade from another ref (the stub's entries carry no originalUrl): each
+# package is built before its profile entry is removed. The resets above
+# emptied the stub's profile.
+printf '%s\n' direnv devenv ccmux harness >"$tmp/profile"
+harness "$h7" upgrade --yes
+exits "upgrade" 0
+b=$(grep -n -m1 -x -F 'nix build --no-link github:bilibo/claude-nix-harness#direnv' "$log" | cut -d: -f1)
+r=$(grep -n -m1 -x -F 'nix profile remove direnv' "$log" | cut -d: -f1)
+if [ -n "$b" ] && [ -n "$r" ] && [ "$b" -lt "$r" ]; then ok; else bad "upgrade builds direnv before removing it (build at ${b:-none}, remove at ${r:-none}: $(tr '\n' ';' <"$log"))"; fi
+
+# 15. reset on a host that never ran bootstrap: no receipt, nothing touched.
+h10="$tmp/home10"; mkdir -p "$h10/.local/share/direnv/allow"; touch "$h10/.local/share/direnv/allow/x"
+harness "$h10" reset --yes
+exits "reset without a receipt" 0
+says "nothing recorded"            'no receipt at .*: nothing recorded, nothing to reset'
+uncalled "no sudo"                 '^sudo'
+uncalled "no profile remove"       'nix profile remove'
+file_is "direnv allow database kept" "$h10/.local/share/direnv/allow/x" ''
 
 echo "harness-bootstrap-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

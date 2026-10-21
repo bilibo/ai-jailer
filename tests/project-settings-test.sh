@@ -24,6 +24,7 @@ check "settings changes guarded"                '.hooks.ConfigChange[0].matcher 
 check "env preamble hooks present"              '.hooks | has("SessionStart") and has("CwdChanged") and has("FileChanged")'
 check "sandbox on and mandatory"                '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false'
 check "ssh key files hidden"                    '.sandbox.filesystem.denyRead | index("~/.ssh")'
+check "cloud and github credentials hidden"     '.sandbox.filesystem.denyRead | index("~/.aws") and index("~/.config/gh") and index("~/.git-credentials")'
 check "agent socket stripped"                   '[.sandbox.credentials.envVars[] | select(.name == "SSH_AUTH_SOCK" and .mode == "deny")] | length == 1'
 # The `**/` entries are asserted for presence only: Linux skips glob write
 # entries (lib/settings.nix); `~/.claude` is the one that holds there.

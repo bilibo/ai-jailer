@@ -245,6 +245,10 @@ assert managed -> marketplaceDir != null;
         "~/.gnupg"
         "~/.terraform.d"
         "~/.netrc"
+        "~/.aws"
+        # GitHub tokens on disk: gh without a keyring, git's store helper.
+        "~/.config/gh"
+        "~/.git-credentials"
       ]
       ++ lib.optionals readFence [ "~/" ]
       ++ lib.optionals everywhere sshSandbox.filesystem.denyRead

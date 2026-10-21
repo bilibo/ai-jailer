@@ -5,6 +5,37 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Whole-repo audit, twice (Opus, then Fable), every hook claim re-run
+  against the built hook; of the 13 findings, three idle sessions fixed
+  eleven the same evening, staged for review (roadmap Done; the rest and
+  what turned up are roadmap item 0).
+  What the hook missed: `git checkout .`, `checkout -f`, `switch -f` and
+  `--discard-changes`, `branch -f`, `tag -f`, `switch -C` and `checkout -B`
+  (the normaliser lowercases, so these needed a case-preserving copy of
+  the command, `nc`, from which `n` is now derived), `worktree remove -f`;
+  an Edit through a symlink in the repo (`realpath -s` kept the link, so a
+  link to `~/.bashrc` or `~/.claude/settings.json` was editable; the edit
+  cases now run on the resolved path too, as one function); `~/.bashrc.d`
+  and `~/.local/bin`; `file -b -f X` and `file --files-from X`, which
+  print each line of X; and three credential files that no layer hid:
+  `~/.aws`, `~/.config/gh`, `~/.git-credentials`, the last two being the
+  push credential the "agents never push" design assumed absent. All are
+  `denyRead`, `cred_files` and deny-rule entries now. hook-test 204 to
+  233, project-settings-test 21 to 22. `harness init` on an existing repo
+  approved and ran its `devenv.nix`, `.envrc` and `devenv.local.*` unread;
+  it prints them and asks (`--yes` answers, no terminal refuses).
+  `harness upgrade` builds the new package before removing the old entry.
+  The no-receipt `reset` branch and the profile-ccmux ref fallback are
+  gone: no receipt means nothing to undo. harness-bootstrap-test 94 to
+  101, init 19 to 24. `lib/project-settings.nix` deleted (a pass-through),
+  the direnv version check written once (`pkgs/direnv.nix`), the generated
+  settings byte-identical. Learned: the tree-copy recipe needs a
+  regular-file filter, the sandbox masks untracked dotfiles as device
+  nodes; `harness-bootstrap-test` run outside the Nix sandbox on this host
+  fails 29 cases (it assumes no `getenforce` or `code` on PATH), so the
+  check derivation is the number that counts. Left on the board: 9 (the
+  Fedora root steps in two files, a decision), 13 (`~/.kube`, `~/.docker`,
+  not planned), and the `devenv/devenv.nix` half of 10, applied by hand.
 - Broker mod, first validate and test run, by hand on the built mod
   (`nix build .#harness-broker`, `claude plugin validate --strict result`,
   `claude plugin test result`): validate passes, 5 tests pass. Strict
