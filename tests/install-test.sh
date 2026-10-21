@@ -30,7 +30,8 @@ stub "$tmp/bin" sudo 'exit 0'
 stub "$tmp/bin" rpm 'exit 1'
 stub "$tmp/bin" systemctl 'exit 1'
 # nix: logs what bootstrap and init would see.
-stub "$tmp/nixbin" nix 'echo "env HARNESS_REF=$HARNESS_REF HARNESS_ROOT_PACKAGES=[$HARNESS_ROOT_PACKAGES] HARNESS_ROOT_STEPS=[$HARNESS_ROOT_STEPS] NIX_CONFIG=[$NIX_CONFIG]" >>"$CALLS"'
+stub "$tmp/nixbin" nix 'echo "env HARNESS_REF=$HARNESS_REF HARNESS_ROOT_PACKAGES=[$HARNESS_ROOT_PACKAGES] HARNESS_ROOT_STEPS=[$HARNESS_ROOT_STEPS] NIX_CONFIG=[$NIX_CONFIG]" >>"$CALLS"
+case "$*" in *" bootstrap"*|*" bootstrap "*) exit "${BOOTSTRAP_RC:-0}" ;; esac'
 # What the installer route sources afterwards: puts nix on PATH.
 printf 'PATH=%s:$PATH\n' "$tmp/nixbin" >"$tmp/nix-daemon.sh"
 
@@ -43,6 +44,7 @@ run() {
   : >"$log"
   out=$(cd "$cwd" && env -i HOME="$tmp/home" PATH="$path" TMPDIR="$tmp" CALLS="$log" INSTALLER="$tmp/installer" \
     HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" ${HARNESS_REF:+HARNESS_REF="$HARNESS_REF"} \
+    ${BOOTSTRAP_RC:+BOOTSTRAP_RC="$BOOTSTRAP_RC"} \
     bash "$tmp/checkout/scripts/install.sh" "$@" 2>&1 </dev/null); rc=$?
 }
 called()   { if grep -q -E -e "$2" "$log"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/ not in the calls)"; sed 's/^/  /' "$log"; fi; }
@@ -64,6 +66,14 @@ called "flakes on for nix"         'NIX_CONFIG=\[extra-experimental-features = n
 called "init of the checkout"      "^nix run path:$tmp/checkout#harness -- init $tmp/checkout --yes$"
 uncalled "no dnf off fedora"       'dnf'
 uncalled "no sudo of our own"      '^sudo'
+
+# Bootstrap's report has a MISSING line (exit 1): init still runs on the
+# checkout and the exit code comes through (Ubuntu, 2026-10-21: tmux and
+# claude come from the shell init builds).
+BOOTSTRAP_RC=1 WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
+exits "bootstrap missing: exit kept" 1
+called "bootstrap missing: init still runs" "-- init $tmp/checkout --yes$"
+says "bootstrap missing: says so"   'init runs anyway'
 
 # nix present: no installer, nothing recorded.
 WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes

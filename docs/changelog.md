@@ -3,6 +3,21 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-22
+
+- First real Ubuntu run (26.10, the test laptop; roadmap gap B).
+  `scripts/install.sh --code-root ~/Code` installed Nix, bootstrap wrote
+  every user file and flipped `kernel.apparmor_restrict_unprivileged_userns`
+  on request. Found: bootstrap exits 1 on any MISSING line, and `set -e`
+  in install.sh then skipped `harness init` on the checkout without a
+  word; the two missing tools (tmux, claude) are the ones that shell
+  provides. install.sh now runs init anyway and keeps bootstrap's exit
+  code (install-test 44 to 47). Also seen: a `path:` harness ref reports
+  `harness: dirty` in the receipt, since a path flake carries no git
+  revision; cosmetic. Pre-install, by hand (the hook refuses them from a
+  session): the checkout's `devenv.nix` and `devenv/devenv.nix` edits
+  listed under 2026-10-21.
+
 ## 2026-10-21
 
 - Hook: `git checkout <ref> <path>...` is refused (roadmap item 0.7);

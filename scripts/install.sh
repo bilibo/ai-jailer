@@ -136,11 +136,18 @@ main() {
   [ "$DRY" = 1 ] && done_steps=()
   export HARNESS_REF="$ref" HARNESS_ROOT_PACKAGES="${need[*]}" HARNESS_ROOT_STEPS="${done_steps[*]}"
   printf '\n==> nix run %s#harness -- bootstrap %s\n' "$ref" "${pass[*]}"
-  nix run "$ref#harness" -- bootstrap "${pass[@]}"
+  # Bootstrap exits 1 when its report has a MISSING line. On a host that
+  # gets tmux and claude from the checkout's shell that is the expected
+  # state before init builds it (Ubuntu, 2026-10-21), so init still runs;
+  # the exit code is kept so a real gap is not hidden.
+  local rc=0
+  nix run "$ref#harness" -- bootstrap "${pass[@]}" || rc=$?
   if [ "$INIT" = 1 ] && [ -n "$here" ] && [ -e "$here/.envrc" ]; then
+    [ "$rc" = 0 ] || echo "(bootstrap reported missing items; the checkout's shell may provide them, init runs anyway)"
     printf '\n==> nix run %s#harness -- init %s   (this checkout: its shell, then the checks on its settings file and hook)\n' "$ref" "$here"
     nix run "$ref#harness" -- init "$here" "${init_flags[@]}"
   fi
+  return "$rc"
 }
 
 # One function, called on the last line: piped into bash, nothing runs before
