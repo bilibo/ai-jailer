@@ -84,19 +84,13 @@ pkgs.writeShellApplication {
     }
 
     # The flake `nix profile add` and devenv.yaml name: HARNESS_REF, else the
-    # receipt's, else the profile's ccmux entry (a host bootstrapped before
-    # receipts), else the published repo. --harness, parsed by the bodies,
+    # receipt's, else the published repo. --harness, parsed by the bodies,
     # wins over all of them.
     resolve_ref() {
       local r
       if [ -n "''${HARNESS_REF:-}" ]; then HARNESS_REF_FROM=HARNESS_REF; return; fi
       r=$(jq -r '.harness.ref // empty' "$HOME/.local/state/claude-nix-harness/receipt.json" 2>/dev/null || true)
       if [ -n "$r" ]; then HARNESS_REF=$r; HARNESS_REF_FROM=receipt; return; fi
-      if command -v nix >/dev/null 2>&1; then
-        r=$(nix profile list --json 2>/dev/null \
-          | jq -r '.elements | if type == "object" then .ccmux.originalUrl // empty else map(select((.attrPath // "") | endswith(".ccmux"))) | .[0].originalUrl // empty end' 2>/dev/null || true)
-        if [ -n "$r" ]; then HARNESS_REF=$r; HARNESS_REF_FROM="nix profile"; return; fi
-      fi
       HARNESS_REF="$HARNESS_DEFAULT_REF"; HARNESS_REF_FROM=default
     }
 

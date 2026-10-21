@@ -57,6 +57,27 @@ block 'direnv exec . git push'
 block 'git --git-dir=.git push origin main'
 block 'git --work-tree=. reset --hard'
 block '/usr/bin/git push origin main'
+# Discards of uncommitted work and forced ref moves.
+block 'git checkout .'
+block 'git checkout -f main'
+block 'git checkout --force main'
+block 'git switch -f main'
+block 'git switch --force main'
+block 'git switch --discard-changes main'
+block 'git branch -f main HEAD~3'
+block 'git branch --force main HEAD~3'
+block 'git tag -f v1'
+block 'git tag --force v1'
+block 'git worktree remove -f x'
+block 'git worktree remove --force x'
+block 'git switch -C main'
+block 'git checkout -B main'
+block 'git checkout ./src'
+block "git 'switch' -C main"
+block $'git\tswitch -C main'
+block 'git worktree remove wt --force'
+allow 'git checkout -b x'
+allow 'git worktree remove x'
 
 # --- 2. cloud / infra -----------------------------------------------------
 allow 'terraform plan -out tf.plan'
@@ -124,6 +145,11 @@ block 'file -f .env'
 block 'wc --files0-from=.env'
 block 'du --files0-from=.env'
 block 'git rm --pathspec-from-file=.env'
+block 'file -b -f .env'
+block 'file --files-from .env'
+block 'cat ~/.aws/credentials'
+block 'cat ~/.git-credentials'
+block 'cat ~/.config/gh/hosts.yml'
 allow 'ls -la .env'
 allow 'stat .env'
 allow 'rm .env.bak'
@@ -243,6 +269,16 @@ run 2 "$(edit_file $IN/.git/hooks/pre-commit)"
 run 2 "$(edit_file $IN/.git/config)"
 run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$IN/.claude/hooks/x.sh\",\"content\":\"x\"}}"
 run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"NotebookEdit\",\"cwd\":\"$IN\",\"tool_input\":{\"notebook_path\":\"$IN/.envrc\"}}"
+# The harness's own shell snippet and the user's bin directory run code too.
+run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$HOME/.bashrc.d/claude-nix-harness.sh\",\"content\":\"x\"}}"
+run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$HOME/.local/bin/claude\",\"content\":\"x\"}}"
+# An edit through a symlink is judged by its target as well.
+ln_dir=$(mktemp -d)
+ln -s "$HOME/.bashrc" "$ln_dir/notes.txt"; ln -s "$HOME/.claude/settings.json" "$ln_dir/s.json"
+cwd="$ln_dir"
+run 2 "$(edit_file notes.txt)"
+run 2 "$(edit_file s.json)"
+cwd="$IN"; rm -rf "$ln_dir"
 
 # --- Outside the enforcement roots: project rules off, universal rules on --
 if [ -n "$ROOTS" ]; then

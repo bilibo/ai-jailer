@@ -44,13 +44,7 @@
       packages = forAll (
         pkgs:
         let
-          # The same fallback as the modules: pkgs.direnv once nixpkgs ships
-          # >= 2.38, the override until then.
-          direnvPackage =
-            if pkgs.lib.versionOlder pkgs.direnv.version "2.38" then
-              import ./pkgs/direnv.nix { inherit pkgs; }
-            else
-              pkgs.direnv;
+          direnvPackage = import ./pkgs/direnv.nix { inherit pkgs; };
           hooks = import ./lib/hooks.nix {
             inherit pkgs direnvPackage;
             inherit (pkgs) lib;

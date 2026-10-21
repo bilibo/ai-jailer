@@ -109,34 +109,38 @@ ENV
       Edit|Write|NotebookEdit|MultiEdit)
         f=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"$input")
         # The patterns below are literal: make the path absolute and fold `.`
-        # and `..` first. `-s` keeps symlinks, so a home-manager ~/.bashrc (a
-        # link into the store) still matches its own name.
+        # and `..` first. Both the path as named (`-s`, so a home-manager
+        # ~/.bashrc, a link into the store, still matches its own name) and
+        # its target (a link in the repo to ~/.bashrc) must pass.
         [[ "$f" == /* ]] || f="$cwd/$f"
-        f=$(realpath -sm -- "$f")
-        [ "$in_scope" = 1 ] || { under_root "$f" && in_scope=1; }
-        # The one carve-out under ~/.claude is auto-memory, when the host allows it.
-        if [ "$ALLOW_MEMORY_EDITS" = 1 ]; then
-          case "$f" in
-            "$HOME"/.claude/projects/*/memory/*) exit 0 ;;
+        check_edit() { # check_edit <absolute path>
+          [ "$in_scope" = 1 ] || { under_root "$1" && in_scope=1; }
+          # The one carve-out under ~/.claude is auto-memory, when the host allows it.
+          if [ "$ALLOW_MEMORY_EDITS" = 1 ]; then
+            case "$1" in
+              "$HOME"/.claude/projects/*/memory/*) return 0 ;;
+            esac
+          fi
+          # The user's own Claude and Nix config, and every file that runs code
+          # at their next shell, git or tmux start, outside the sandbox.
+          case "$1" in
+            "$HOME"/.claude/*|"$HOME"/.claude.json|"$HOME"/.config/*|"$HOME"/.ssh/*|\
+            "$HOME"/.bashrc|"$HOME"/.bash_profile|"$HOME"/.bash_login|"$HOME"/.profile|\
+            "$HOME"/.zshrc|"$HOME"/.zprofile|"$HOME"/.zshenv|"$HOME"/.zlogin|\
+            "$HOME"/.gitconfig|"$HOME"/.tmux.conf|"$HOME"/.bashrc.d/*|"$HOME"/.local/bin/*)
+              deny "edit of $1 is forbidden (user config)" ;;
           esac
-        fi
-        # The user's own Claude and Nix config, and every file that runs code
-        # at their next shell, git or tmux start, outside the sandbox.
-        case "$f" in
-          "$HOME"/.claude/*|"$HOME"/.claude.json|"$HOME"/.config/*|"$HOME"/.ssh/*|\
-          "$HOME"/.bashrc|"$HOME"/.bash_profile|"$HOME"/.bash_login|"$HOME"/.profile|\
-          "$HOME"/.zshrc|"$HOME"/.zprofile|"$HOME"/.zshenv|"$HOME"/.zlogin|\
-          "$HOME"/.gitconfig|"$HOME"/.tmux.conf)
-            deny "edit of $f is forbidden (user config)" ;;
-        esac
-        if [ "$in_scope" = 1 ]; then
-          case "$f" in
-            */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude-plugin/*|\
-            */devenv.nix|*/devenv.yaml|*/devenv.lock|*/devenv.local.*|*/.envrc|*/.env|*/.env.*|*.tfvars|*.tfvars.json|*.tfstate|\
-            */.git/hooks/*|*/.git/config)
-              deny "edit of $f is forbidden (config/env/credentials/plugin)" ;;
-          esac
-        fi
+          if [ "$in_scope" = 1 ]; then
+            case "$1" in
+              */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude-plugin/*|\
+              */devenv.nix|*/devenv.yaml|*/devenv.lock|*/devenv.local.*|*/.envrc|*/.env|*/.env.*|*.tfvars|*.tfvars.json|*.tfstate|\
+              */.git/hooks/*|*/.git/config)
+                deny "edit of $1 is forbidden (config/env/credentials/plugin)" ;;
+            esac
+          fi
+        }
+        check_edit "$(realpath -sm -- "$f")"
+        check_edit "$(realpath -m -- "$f")"
         exit 0 ;;
 
       Bash)
@@ -144,18 +148,23 @@ ENV
         # Normalise: lowercase, strip backslashes, collapse whitespace, strip
         # quotes. Catches `bash -c '...'`, `env X=1 git push`, `git 'push'`,
         # `git -C . push`, `git pu\sh` and a backslash-newline continuation.
-        n=$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
+        # `nc` keeps case, for the few flags where case is the meaning.
+        nc=$(printf '%s' "$cmd" | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
+        n="${nc,,}"
         [ "$in_scope" = 1 ] || { mentions_root "$n" && in_scope=1; }
         b='(^|[ ;&|(])'       # start of a (sub)command
         e='( |$)'             # end of a word
 
         # 1. git history and index writes (project rule)
         if [ "$in_scope" = 1 ]; then
-        git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|tag +-d|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
+        git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|branch +(-f|--force)|tag +-d|tag +(-f|--force)|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|checkout +(-f|--force|\.[^ ]*)|switch +(-f|--force|--discard-changes)|worktree +remove( +[^ ;&|]+)* +(-f|--force)|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
         [ "$ALLOW_LOCAL_COMMITS" = 1 ] || git_ops="commit|$git_ops"
         # `/usr/bin/git`, `git -C . push`, `git --git-dir=.git push`.
         re="(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +($git_ops)$e"
         [[ "$n" =~ $re ]] && deny "git history/index write blocked"
+        # `-C`/`-B` reset an existing branch; lowercased they read as the harmless `-c`/`-b`.
+        re='(^|[^a-zA-Z0-9_.-])git( +[^ ;&|]+)* +(switch +-C|checkout +-B)( |$)'
+        [[ "$nc" =~ $re ]] && deny "git history/index write blocked"
         re='git_dir=|git_work_tree=|git_index_file=|git_config_global=|git_config_system='
         [[ "$n" =~ $re ]] && deny "git env redirect blocked"
         fi
@@ -183,9 +192,9 @@ ENV
         # each line (`file -f`, `--files0-from`, `--pathspec-from-file`). A
         # reader list cannot be completed (dd, tr, perl, `git show
         # <ref>:.env`, a bare `< .env`).
-        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.azure/|\.terraform\.d/|credentials\.json|\.claude\.json|\.credentials|/\.ssh/|id_(rsa|ed25519)|\.netrc|\.npmrc|\.pypirc)'
+        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.azure/|\.terraform\.d/|credentials\.json|\.claude\.json|\.credentials|/\.ssh/|id_(rsa|ed25519)|\.netrc|\.npmrc|\.pypirc|\.aws/|\.git-credentials|\.config/gh/)'
         harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch)( [^;&|<$`(]*)?$'
-        list_opts='--files0-from|--pathspec-from-file|(^| )file +-[a-z]*f'
+        list_opts='--files0-from|--files-from|--pathspec-from-file|(^| )file( +-[a-z]+)* +-[a-z]*f'
         if [[ "$n" =~ $cred_files ]]; then
           safe=0
           [[ "$cmd" != *$'\n'* ]] && [[ "$n" =~ $harmless ]] && ! [[ "$n" =~ $list_opts ]] && safe=1

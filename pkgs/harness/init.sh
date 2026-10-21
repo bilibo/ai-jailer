@@ -14,15 +14,16 @@
 # overwrites the harness-owned ones (devenv.yaml, .envrc). .gitignore and
 # .worktreeinclude only gain the lines they lack; CLAUDE.md gains the
 # contract block if it has none. --dry-run prints the files it would write
-# and creates nothing; --verbose traces the shell step; --yes is accepted for
-# symmetry (nothing here asks).
+# and creates nothing; --verbose traces the shell step. devenv.yaml,
+# devenv.nix, .envrc or a devenv.local.* that this run did not write are the
+# repo's own code, which the shell step approves and runs as you: they are
+# printed and need a y, or --yes.
 #
 # The harness input is the same ref bootstrap installs from: --harness, else
-# HARNESS_REF, else the receipt's, else the profile's ccmux entry. A `path:`
-# checkout is the form for developing the harness; a repo meant to outlive
-# the checkout pins a git URL instead: --harness
-# github:bilibo/claude-nix-harness, which is also the default when none of
-# them is set. A `path:/nix/store/...` ref makes init warn: garbage
+# HARNESS_REF, else the receipt's. A `path:` checkout is the form for
+# developing the harness; a repo meant to outlive the checkout pins a git URL
+# instead: --harness github:bilibo/claude-nix-harness, which is also the
+# default when none of them is set. A `path:/nix/store/...` ref makes init warn: garbage
 # collection removes it.
 # devenv.lock records the revision either way; `devenv update harness` moves
 # it.
@@ -34,7 +35,7 @@ HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
 HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
 HARNESS_TESTS="${HARNESS_TESTS:-$HARNESS_DIR/tests}"
-FORCE=0; DRY=0; NO_SHELL=0; VERBOSE=0; target=""
+FORCE=0; DRY=0; NO_SHELL=0; VERBOSE=0; YES=0; target=""
 usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,7 +44,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --no-shell) NO_SHELL=1 ;;
     --verbose) VERBOSE=1 ;;
-    --yes) ;;
+    --yes) YES=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "harness init: unknown argument $1 (see --help)" >&2; exit 64 ;;
     *) [ -z "$target" ] || { echo "harness init: one target only" >&2; exit 64; }; target="$1" ;;
@@ -78,13 +79,15 @@ if [ -z "${NIX_SSL_CERT_FILE:-}" ]; then
 fi
 
 # put <relpath> <content> [owned]: write a file that does not exist; report
-# one that does. `owned` files are overwritten with --force.
+# one that does. `owned` files are overwritten with --force. One left alone
+# goes in `foreign`, for the approval before the shell step.
+foreign=()
 put() {
   local f="$repo/$1" content="$2" owned="${3:-}"
   if [ -e "$f" ]; then
     if [ "$(cat "$f")" = "$content" ]; then note unchanged "$1"
     elif [ "$FORCE" = 1 ] && [ -n "$owned" ]; then write "$1" "$content" overwrite
-    else note differs "$1 (left alone${owned:+; --force overwrites})"; fi
+    else note differs "$1 (left alone${owned:+; --force overwrites})"; foreign+=("$1"); fi
   else write "$1" "$content" write; fi
 }
 write() { # write <relpath> <content> <verb>
@@ -183,6 +186,18 @@ if [ "$DRY" = 1 ] || [ "$NO_SHELL" = 1 ]; then echo "harness init: files done; s
 for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH: run harness bootstrap first (or --no-shell)" 69; done
 [ "$VERBOSE" = 0 ] || set -x
 v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.38 ] || die "direnv $v is older than 2.38 (require_allowed)" 69
+
+# `direnv allow` below approves the repo's files and the first load runs
+# them as you, outside any sandbox: one this run did not write is read first.
+for f in devenv.local.nix devenv.local.yaml; do if [ -e "$repo/$f" ]; then foreign+=("$f"); fi; done
+if [ ${#foreign[@]} -gt 0 ]; then
+  for f in "${foreign[@]}"; do printf '\n==> %s (not written by harness init)\n' "$repo/$f"; cat "$repo/$f"; done
+  if [ "$YES" = 0 ]; then
+    printf '\napprove and load these? [y/N] '; a=""
+    if [ -t 0 ]; then read -r a || a=""; else { read -r a </dev/tty; } 2>/dev/null || a=""; fi
+    [[ "$a" == [yY] ]] || die "not approved: ${foreign[*]}; read them, then re-run with --yes (or --no-shell to skip the shell step)"
+  fi
+fi
 
 echo
 echo "==> direnv allow (the .envrc), then the first load: devenv fetches its inputs and writes .claude/settings.json"

@@ -95,9 +95,69 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   for the script (both routes, 44 checks), `harness-bootstrap-test` new
   (94 checks: rc-file layouts, nix.conf, the sysctl, idempotency, reset). Run on nothing but the stubs so far; the runbook's
   fresh-distro list (section 5) is the verification, on Ubuntu 24.04.
+- Audit fixes (2026-10-21, staged; in once committed): two whole-repo
+  audits (Opus, then Fable), every hook claim re-run against the built
+  hook, worked by three sessions the same evening (changelog). The hook
+  refuses working-tree discards and force-moves (`checkout .`/`-f`,
+  `switch -f`/`-C`, `checkout -B`, `branch -f`, `tag -f`, `worktree
+  remove -f`), checks edits on the link target as well as the name, and
+  covers `~/.bashrc.d`, `~/.local/bin` and every `file -f` spelling;
+  `~/.aws`, `~/.config/gh` and `~/.git-credentials` are hidden by every
+  layer. `harness init` asks before loading repo files it did not write;
+  `harness upgrade` builds before it removes; the no-receipt `reset`
+  branch, the profile-ccmux ref fallback and `lib/project-settings.nix`
+  are gone; the direnv version check lives in `pkgs/direnv.nix` only.
+  hook-test 233 cases, project-settings-test 22 (23 fenced),
+  harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
+  green on the combined tree.
 
 ## Next, in order
 
+0. **Audit follow-ups (2026-10-21).** What the audit fixes left open or
+   turned up. The human's, in this order:
+   1. Review and commit the staged set (17 files). One choice inside it:
+      `~/.config/gh` in `denyRead` (`lib/settings.nix`) ends `gh` reads
+      in sessions as well as the token leak; drop that line to keep them,
+      and accept that `gh auth login` without a keyring puts a push token
+      in reach again.
+   2. `devenv/devenv.nix` lines 33-37 (the hook refuses it from a
+      session): `direnvPackage = import ../pkgs/direnv.nix { inherit pkgs;
+      };` in place of the `versionOlder` if/else, as `flake.nix` now has.
+   3. Decide: the Fedora root steps (dnf list, SELinux label, daemon
+      socket) are in both `scripts/install.sh` and
+      `pkgs/harness/bootstrap.sh`, the package list written four times
+      (two scripts, two tests). Drop them from bootstrap, since install.sh
+      always runs first, or keep both and say why in bootstrap's header.
+   4. `CLAUDE.md`'s check recipe: `git archive` misses untracked files
+      the flake references, and the `git ls-files -co` copy that works
+      needs a regular-file filter (the sandbox masks untracked dotfiles as
+      device nodes, and `tar` stops on them):
+      `git ls-files -co --exclude-standard -z | while IFS= read -r -d ''
+      f; do [ -f "$f" ] && printf '%s\0' "$f"; done | tar --null -T - -cf
+      - | tar -xf - -C <dir>`. The session memory note on the same recipe
+      needs the filter too; a session here cannot write `~/.claude`.
+   5. `harness-bootstrap-test` is not hermetic: it inherits the host PATH,
+      so outside the Nix sandbox on this laptop (`getenforce`, `code`
+      present) 29 cases fail. Give its runs a PATH of the stubs plus the
+      store tools, as `harness-doctor-test` does, so a session can run it
+      directly.
+   6. `harness init`: a foreign `devenv.lock` is approved by the second
+      `direnv allow` without being shown, and it pins every input,
+      nixpkgs included. When `devenv.yaml` or `devenv.lock` is foreign,
+      print the lock's locked input URLs and revisions (jq over `.nodes`)
+      with the other files, or suggest `devenv update` before the first
+      load.
+   7. Hook gap, decide: `git checkout <path>` and `git checkout <branch>
+      <path>` without `.` or `--` discard edits, and text cannot tell a
+      path from a branch name. Either fail closed on `git checkout` with
+      two or more non-flag words, or list it in runbook section 8 next to
+      the `git -c alias.x=reset` case already there.
+   8. `harness check`: one live case for the new `denyRead` entries (a
+      fake `~/.config/gh/hosts.yml`, read inside the sandbox, expecting a
+      sandbox refusal rather than the hook's), so the sandbox layer is
+      seen to hold on its own.
+   Not planned: `~/.kube/config` and `~/.docker/config.json` the same way
+   as `~/.aws`, until a harness host holds them.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
    (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
    Left: a `ccmux` session in the test repo, the trust dialog accepted

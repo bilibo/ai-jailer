@@ -355,7 +355,8 @@ The README's "Lockdown level today" table summarises them; the roadmap's
 
 - Reads are open. A sandboxed command reads the whole machine except the
   `denyRead` paths (`~/.azure`, `~/.gnupg`, `~/.terraform.d`, `~/.netrc`,
-  `~/.ssh`). `~/.claude/.credentials.json`, `~/.claude.json`, `~/.aws`,
+  `~/.ssh`, and since 2026-10-21 `~/.aws`, `~/.config/gh` and
+  `~/.git-credentials`). `~/.claude/.credentials.json`, `~/.claude.json`,
   `~/.config` and every sibling repo under the code root are readable by
   any command the hook's secret-path rule lets through (one harmless verb,
   no pipe), and the Read tool

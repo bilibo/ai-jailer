@@ -40,8 +40,7 @@
 # prints each command first.
 #
 # The harness ref (what `nix profile add` installs from): --harness, else
-# HARNESS_REF, else the receipt's, else the profile's ccmux entry, else
-# github:bilibo/claude-nix-harness. A `path:/nix/store/...` ref warns: a
+# HARNESS_REF, else the receipt's, else github:bilibo/claude-nix-harness. A `path:/nix/store/...` ref warns: a
 # later upgrade cannot move it.
 #
 # --trusted-user adds you to Nix's trusted-users. Not needed: the devenv
@@ -64,11 +63,9 @@
 # blocks, merged keys), dnf packages and root steps, the VS Code extension,
 # the harness ref and revision. Each bootstrap and upgrade adds to it.
 #
-# `reset` reverses what the receipt lists (without one, the built-in lists:
-# the harness block in nix.conf, the SELinux rule, the daemon socket, the
-# profile packages, every user file above, the VS Code pieces; Nix itself is
-# left, since nothing says who installed it) and removes the receipt last.
-# With a receipt that says scripts/install.sh ran the nix-installer, Nix goes
+# `reset` reverses what the receipt lists and removes the receipt last;
+# without a receipt nothing is recorded and it does nothing. When the
+# receipt says scripts/install.sh ran the nix-installer, Nix goes
 # too (/nix/nix-installer uninstall); the dnf packages likewise. It asks
 # before it starts unless --yes; it never touches the code root, so delete a
 # test repo by hand.
@@ -111,8 +108,8 @@ MIN_CLAUDE="2.1.295"   # onFailure: block in hook registrations
 MIN_DIRENV="2.38"      # require_allowed in .envrc
 MIN_TMUX="3.2"         # extended-keys
 RECEIPT="$HOME/.local/state/claude-nix-harness/receipt.json"
-# The built-in lists: what bootstrap installs, and what reset and upgrade fall
-# back to on a host without a receipt.
+# The built-in lists: what bootstrap installs, and what upgrade falls back to
+# on a host without a receipt.
 PROFILE_PKGS=(direnv devenv ccmux harness)
 ROOT_RPMS=(nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils)
 # The host files pkgs/ ships; pkgs/harness.nix points these at the store.
@@ -268,30 +265,9 @@ write_receipt() {
   put_file "$RECEIPT" "$new"
 }
 
-# What reset used before there was a receipt.
-legacy_receipt() {
-  jq -n --arg h "$HOME" --argjson profile "$(json_list "${PROFILE_PKGS[@]}")" '
-    { version: 1, profile: $profile,
-      root: {packages: [], steps: ["nix.conf", "selinux", "nix-daemon.socket"]},
-      files: [
-        {kind: "file",  path: "\($h)/.config/direnv/direnv.toml"},
-        {kind: "block", path: "\($h)/.config/tmux/tmux.conf"},
-        {kind: "file",  path: "\($h)/.bashrc.d/claude-nix-harness.sh"},
-        {kind: "file",  path: "\($h)/.config/environment.d/50-claude-nix-harness.conf"},
-        {kind: "keys",  path: "\($h)/.claude/settings.json", keys: [["sandbox", "network", "strictAllowlist"], ["syncClaudeAiSkills"], ["syncClaudeAiPlugins"]]},
-        {kind: "keys",  path: "\($h)/.config/Code/User/settings.json", keys: [["direnv.path.executable"], ["direnv.extraEnv", "NIX_SSL_CERT_FILE"]]}
-      ],
-      vscodeExtensions: ["mkhl.direnv"] }'
-}
-
 RECEIPT_JSON=""; HAVE_RECEIPT=0
 load_receipt() {
-  if jq -e '.version == 1' "$RECEIPT" >/dev/null 2>&1; then
-    RECEIPT_JSON=$(cat "$RECEIPT"); HAVE_RECEIPT=1
-  else
-    RECEIPT_JSON=$(legacy_receipt)
-    echo "no receipt at $RECEIPT: $CMD uses the built-in lists"
-  fi
+  if jq -e '.version == 1' "$RECEIPT" >/dev/null 2>&1; then RECEIPT_JSON=$(cat "$RECEIPT"); HAVE_RECEIPT=1; fi
 }
 rq() { jq -r "$1" <<<"$RECEIPT_JSON"; }  # rq <filter>: from the receipt, one value per line
 
@@ -414,6 +390,8 @@ profile_steps() {
         if [ "$url" = "$HARNESS_REF" ]; then step "nix profile upgrade $name"; run nix profile upgrade "$name"
         else
           step "nix profile: $name from $HARNESS_REF (was ${url:-unknown})"
+          # Built first: a bad ref or no network then fails here, with the old entry still in place.
+          run nix build --no-link "$HARNESS_REF#$name"
           run nix profile remove "$name"; run nix profile "$sub" "$HARNESS_REF#$name"
         fi
       fi
@@ -541,6 +519,7 @@ strip_keys() {
 reset_steps() {
   local pkgs=() steps=() profile=() exts=() nix_from="" i p f kind keys answer key
   load_receipt
+  [ "$HAVE_RECEIPT" = 1 ] || { echo "no receipt at $RECEIPT: nothing recorded, nothing to reset"; exit 0; }
   mapfile -t pkgs < <(rq '.root.packages[]?')
   mapfile -t steps < <(rq '.root.steps[]?')
   mapfile -t profile < <(rq '.profile[]?')
@@ -549,7 +528,7 @@ reset_steps() {
   in_list nix "${pkgs[@]}" && nix_from=dnf
   in_list nix-installer "${steps[@]}" && nix_from=installer
 
-  echo "This removes, on this host ($([ "$HAVE_RECEIPT" = 1 ] && echo "from the receipt" || echo "the built-in lists")):"
+  echo "This removes, on this host (from the receipt):"
   if [ "$NO_ROOT" = 1 ]; then echo "  root:  nothing (--no-root)"
   else
     [ ${#pkgs[@]} -eq 0 ] || echo "  root:  the packages ${pkgs[*]} (and the dependencies dnf pulled in with them)"
@@ -572,7 +551,7 @@ reset_steps() {
   fi
   rq '.files[] | "  \(.kind | . + " " * (6 - length)) \(.path)\(if .keys then " (" + (.keys | map(join(".")) | join(", ")) + ")" else "" end)"'
   [ ${#exts[@]} -eq 0 ] || echo "  VS Code extension ${exts[*]} and its settings"
-  [ "$HAVE_RECEIPT" = 0 ] || echo "  the receipt, last"
+  echo "  the receipt, last"
   echo "Not touched: $CODE_ROOT (delete a test repo by hand), the rest of Claude Code's own files."
   if [ "$YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
     printf "Type 'reset' to continue: "; read -r answer; [ "$answer" = reset ] || die "aborted"
@@ -673,7 +652,7 @@ report() {
   echo "host: ${PRETTY_NAME:-unknown} ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
-  else warn "no receipt at $RECEIPT: reset and upgrade use the built-in lists (harness bootstrap writes one)"; fi
+  else warn "no receipt at $RECEIPT: reset has nothing to undo, upgrade uses the built-in package list (harness bootstrap writes one)"; fi
 
   if command -v nix >/dev/null 2>&1; then
     v=$(nix --version | awk '{print $NF}')
