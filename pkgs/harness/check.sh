@@ -138,9 +138,14 @@ else verdict hooks-registered 1 "no hook line names env-guard in $out/debug.txt"
 fi
 
 # 11. Literal denyWrite under the repo (Linux skips the `**/` globs): a
-# plugin directory cannot be created from the shell, by any layer.
-run_cmd repo-write 'mkdir .claude-plugin' "$blocked"
-if [ -d .claude-plugin ]; then rmdir .claude-plugin; verdict repo-write-state 1 ".claude-plugin was created"; fi
+# plugin directory cannot be created from the shell, by any layer. A denied
+# path is masked as a device node whether or not it exists, so the sandbox's
+# answer for a path the host does not have is "File exists" (2026-10-22).
+if [ "$DRY_RUN" = 0 ] && [ -e .claude-plugin ]; then verdict repo-write 1 ".claude-plugin exists on the host; the case needs a repo without one"
+else
+  run_cmd repo-write 'mkdir .claude-plugin' "$blocked|File exists"
+  if [ -d .claude-plugin ]; then rmdir .claude-plugin; verdict repo-write-state 1 ".claude-plugin was created"; fi
+fi
 
 # 12. Environment scrub: a credential-shaped variable (the scrub, by name)
 # and a GitHub token (the explicit deny entry; the scrub keeps it) are both

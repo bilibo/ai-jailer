@@ -5,6 +5,26 @@ happened and what was learned on the day.
 
 ## 2026-10-22
 
+- First `harness check` on the checkout (Ubuntu 26.10, from a terminal; the
+  first run of cases 11 and 12 anywhere): 9 of 12 passed, and the three
+  failures were two findings and one test bug. (1) The per-command devenv
+  shell had not loaded inside the sandbox since 2026-10-21: a literal
+  `denyWrite` path is masked as an unreadable device node whether or not
+  the file exists, devenv reads `devenv.local.yaml` when it exists, so
+  listing `devenv.local.*` there made every evaluation fail with
+  "Permission denied" (`DEVENV_ROOT` empty, case 2). The two are out of the
+  literal list and stay in the hook's refusals; the `**/` globs keep them
+  for macOS. This also answers roadmap item 2.5: `.envrc`, `devenv.nix`
+  and `devenv.yaml` can never be literal entries, direnv and devenv must
+  read them. (2) `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` in the repo file is
+  ignored: the debug log says "project-scoped settings can't set this key"
+  and `DB_PASSWORD` reached the shell (case 12; the GitHub token deny
+  entry held). It moves to the managed copy and to the user-scope keys
+  `harness bootstrap` writes; `harness doctor` reports it. (3) Case 11's
+  probe got "File exists" from the mask, which is the deny working; the
+  case accepts that when the host has no such path. project-settings-test
+  22 to 23 (fenced 24), harness-bootstrap-test 101 to 102. Also that day:
+  `harness init` on the checkout from a terminal, and `ccmux` on it.
 - First real Ubuntu run (26.10, the test laptop; roadmap gap B).
   `scripts/install.sh --code-root ~/Code` installed Nix, bootstrap wrote
   every user file and flipped `kernel.apparmor_restrict_unprivileged_userns`

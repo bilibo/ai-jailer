@@ -387,7 +387,8 @@ The README's "Lockdown level today" table summarises them; the roadmap's
   but `/run/user/<uid>/gcr/ssh` is guessable and answers from inside the
   sandbox, so what holds is that no plain key is loaded in the agent
   (README, "Git over SSH"). Roadmap item 2.3 hides the socket directories.
-- The environment: since 2026-10-21 the repo file sets
+- The environment: since 2026-10-22 the user-scope `~/.claude/settings.json`
+  (written by `harness bootstrap`; a repo file's copy is ignored) sets
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which removes credential-shaped
   variables (by name or by value shape; `ANTHROPIC_API_KEY`,
   `AWS_SECRET_ACCESS_KEY`, `*_PASSWORD`, URLs with passwords) from Bash

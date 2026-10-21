@@ -102,6 +102,7 @@ count_is "tmux block" "$h/.config/tmux/tmux.conf" "$mark" 1
 absent "no ~/.tmux.conf made up" "$h/.tmux.conf"
 file_has "environment.d" "$h/.config/environment.d/50-claude-nix-harness.conf" '^PATH='
 in_json "strict allowlist" "$h/.claude/settings.json" '.sandbox.network.strictAllowlist == true'
+in_json "env scrub key" "$h/.claude/settings.json" '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"'
 in_json "receipt steps" "$receipt" '.root.steps | index("sysctl") and index("nix.conf") and index("nix-installer")'
 in_json "bashrc recorded as a block" "$receipt" '[.files[] | select(.path | endswith("/.bashrc")) | .kind] == ["block"]'
 in_json "profile recorded" "$receipt" '(.profile | sort) == ["ccmux","devenv","direnv","harness"]'
@@ -221,7 +222,7 @@ absent "bashrc.d file removed" "$h/.bashrc.d/claude-nix-harness.sh"
 absent "direnv.toml removed" "$h/.config/direnv/direnv.toml"
 absent "tmux.conf removed" "$h/.config/tmux/tmux.conf"
 absent "environment.d removed" "$h/.config/environment.d/50-claude-nix-harness.conf"
-in_json "user settings keys stripped" "$h/.claude/settings.json" '.sandbox == null'
+in_json "user settings keys stripped" "$h/.claude/settings.json" '.sandbox == null and .env == null'
 absent "receipt removed" "$receipt"
 rm -f "$tmp/restricted"
 
