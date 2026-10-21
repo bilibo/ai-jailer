@@ -5,6 +5,15 @@ happened and what was learned on the day.
 
 ## 2026-10-21
 
+- Hook: `git checkout <ref> <path>...` is refused (roadmap item 0.7);
+  `-b`, `-t`, `--track` and `--orphan` with a start point pass, one-word
+  `git checkout <path>` stays open (runbook section 8). hook-test 233 to
+  241. `devenv/devenv.nix` imports `pkgs/direnv.nix` like `flake.nix`
+  (item 0.2). The checkout's own `devenv.nix` and the `harness init`
+  template list every harness option, commented out; the checkout turns
+  `allowMemoryEdits` on. Learned: the rendered hook runs the suite on a
+  host without Nix with bash, jq and sed alone; only the store-path direnv
+  case needs the built hook.
 - Decided: one installer. `scripts/install.sh` owns every root and
   pre-Nix step and `harness bootstrap` the user side, so the Fedora root
   steps leave bootstrap (roadmap item 0.3). The target flow (installer,

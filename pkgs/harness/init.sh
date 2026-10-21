@@ -120,7 +120,8 @@ imports:
 
 put devenv.nix "# Project tools and harness options. Allow rules for this project go in
 # harness.settings here, proposed as a diff by an agent and committed by you,
-# never in .claude/settings.local.json (the hook refuses it).
+# never in .claude/settings.local.json (the hook refuses it). Every harness
+# option is listed, the unused ones commented out.
 { pkgs, ... }:
 {
   name = \"$name\";
@@ -128,8 +129,17 @@ put devenv.nix "# Project tools and harness options. Allow rules for this projec
     pkgs.git
     pkgs.jq
   ];
-  # harness.settings.permissions.allow = [ \"Bash(terraform plan *)\" ];
-  # harness.extraAllowedDomains = [ \"dev.azure.com\" ];   # sandbox allowlist, unmanaged host
+  harness = {
+    # allowMemoryEdits = true;         # Claude keeps its auto-memory under ~/.claude/projects
+    # allowLocalCommits = true;        # commits on the worktree branch; push stays impossible
+    # readFence = true;                # hide the rest of \$HOME from sandboxed commands
+    # extraAllowRead = [ \"~/.cargo\" ]; # with readFence: what the project reads under \$HOME
+    # allowConnectors = true;          # claude.ai connectors, MCP servers outside the sandbox
+    # platform = \"wsl\";                # hides /mnt/c and /run/WSL from the sandbox
+    # extraDeny = [ \"Bash(az devops *)\" ];
+    # extraAllowedDomains = [ \"dev.azure.com\" ];              # sandbox allowlist, unmanaged host only
+    # settings.permissions.allow = [ \"Bash(terraform plan *)\" ];
+  };
 }"
 
 # require_allowed last: on the first load `use devenv` creates devenv.lock,

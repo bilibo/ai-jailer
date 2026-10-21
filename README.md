@@ -204,6 +204,7 @@ imports:
 # the repo's devenv.nix
 harness.settings.permissions.allow = [ "Bash(terraform plan *)" ];  # project allow rules
 harness.extraAllowedDomains = [ "dev.azure.com" ];                   # sandbox allowlist, unmanaged host only (see below)
+harness.allowMemoryEdits = true;                                     # Claude keeps its auto-memory (off by default)
 ```
 
 ```

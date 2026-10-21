@@ -30,11 +30,7 @@ let
 
   # The hook calls `direnv status` and `direnv allow`; any version does, but
   # the same override as the home module keeps the two in step.
-  direnvPackage =
-    if lib.versionOlder pkgs.direnv.version "2.38" then
-      import ../pkgs/direnv.nix { inherit pkgs; }
-    else
-      pkgs.direnv;
+  direnvPackage = import ../pkgs/direnv.nix { inherit pkgs; };
 
   # Roots empty: this file only loads in sessions started inside the repo.
   hooks = import ../lib/hooks.nix {

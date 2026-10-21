@@ -165,6 +165,11 @@ ENV
         # `-C`/`-B` reset an existing branch; lowercased they read as the harmless `-c`/`-b`.
         re='(^|[^a-zA-Z0-9_.-])git( +[^ ;&|]+)* +(switch +-C|checkout +-B)( |$)'
         [[ "$nc" =~ $re ]] && deny "git history/index write blocked"
+        # `git checkout <ref> <path>...` discards edits to those paths; the
+        # branch-creating forms take a start point and are the exception.
+        re='(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +checkout( +-[^ ;&|]+)* +[^- ;&|][^ ;&|]* +[^- ;&|][^ ;&|]*'
+        creates='checkout( +[^ ;&|]+)* +(-b|--orphan|-t|--track)( |$)'
+        [[ "$n" =~ $re ]] && ! [[ "$n" =~ $creates ]] && deny "git history/index write blocked"
         re='git_dir=|git_work_tree=|git_index_file=|git_config_global=|git_config_system='
         [[ "$n" =~ $re ]] && deny "git env redirect blocked"
         fi
