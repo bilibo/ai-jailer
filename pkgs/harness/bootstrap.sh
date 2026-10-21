@@ -15,8 +15,9 @@
 # HARNESS_CODE_ROOT, the session PATH for GUI-launched VS Code, mkhl.direnv.
 # No harness module and no managed settings: repos that import
 # `harness/devenv` carry the rules (`harness init` sets one up).
-# scripts/install.sh does the root steps before Nix exists, then runs
-# `harness bootstrap --no-root`.
+# scripts/install.sh does the root steps `nix run` needs (dnf, the SELinux
+# label, the daemon socket), then runs `harness bootstrap`, which finds them
+# done and does the rest.
 #
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
@@ -183,9 +184,8 @@ without_block() {
 
 # ---------------------------------------------------------------- receipt
 # What this run put on the host, or found there in the harness's shape;
-# write_receipt adds it to the receipt. scripts/install.sh hands over the
-# packages its dnf step installed in HARNESS_ROOT_PACKAGES; HARNESS_ROOT_STEPS
-# is for root steps done by other means before a --no-root run.
+# write_receipt adds it to the receipt. scripts/install.sh hands over its own
+# root steps in HARNESS_ROOT_PACKAGES and HARNESS_ROOT_STEPS.
 R_PROFILE=(); R_FILES=(); R_EXT=()
 read -r -a R_ROOT_PKGS <<<"${HARNESS_ROOT_PACKAGES:-}"
 read -r -a R_ROOT_STEPS <<<"${HARNESS_ROOT_STEPS:-}"
@@ -462,13 +462,19 @@ reset_steps() {
   else
     [ ${#pkgs[@]} -eq 0 ] || echo "  root:  the packages ${pkgs[*]} (and the dependencies dnf pulled in with them)"
     if [ "$nix_ours" = 1 ]; then echo "  root:  nix-daemon.socket, /nix and /etc/nix, the nixbld build users"
-    elif in_list nix.conf "${steps[@]}"; then echo "  root:  the harness block in /etc/nix/nix.conf"; fi
+    else
+      in_list nix-daemon.socket "${steps[@]}" && echo "  root:  nix-daemon.socket disabled (Nix stays; install.sh enables it again)"
+      in_list nix.conf "${steps[@]}" && echo "  root:  the harness block in /etc/nix/nix.conf"
+    fi
     in_list selinux "${steps[@]}" && echo "  root:  the SELinux rule for the daemon socket"
   fi
   if [ "$nix_ours" = 1 ]; then
     echo "  user:  the nix profile and state (~/.nix-profile, ~/.local/state/nix), ~/.cache/nix,"
     echo "         ~/.cache/devenv, the direnv allow database (~/.local/share/direnv)"
-  elif [ ${#profile[@]} -gt 0 ]; then echo "  user:  the profile packages ${profile[*]}"; fi
+  elif [ ${#profile[@]} -gt 0 ]; then
+    echo "  user:  the profile packages ${profile[*]}"
+    in_list direnv "${profile[@]}" && echo "  user:  the direnv allow database (~/.local/share/direnv)"
+  fi
   rq '.files[] | "  \(.kind | . + " " * (6 - length)) \(.path)\(if .keys then " (" + (.keys | map(join(".")) | join(", ")) + ")" else "" end)"'
   [ ${#exts[@]} -eq 0 ] || echo "  VS Code extension ${exts[*]} and its settings"
   [ "$HAVE_RECEIPT" = 0 ] || echo "  the receipt, last"

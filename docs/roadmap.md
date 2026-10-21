@@ -44,8 +44,8 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
 - One CLI instead of three scripts (2026-10-21): `harness` (`pkgs/harness.nix`)
   with `bootstrap`, `upgrade`, `doctor`, `init`, `check`, `reset` and shared
   `--dry-run`, `--yes`, `--verbose`; the script bodies under `pkgs/harness/`,
-  shellchecked at build time; `scripts/install.sh` does the pre-Nix root
-  steps and hands over to `harness bootstrap --no-root`; a receipt at
+  shellchecked at build time; `scripts/install.sh` does the root steps
+  `nix run` needs and hands over to `harness bootstrap`; a receipt at
   `~/.local/state/claude-nix-harness/receipt.json` drives `reset` and
   `upgrade`; `harness doctor` and `harness init --dry-run` run in
   `nix flake check`.
@@ -61,8 +61,9 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   file devenv auto-imports without any re-approval cannot be created from
   the sandbox. Bootstrap appends `pkgs/direnv.toml` and `pkgs/tmux.conf`
   instead of its own copies; `reset` without a receipt leaves Nix alone;
-  `scripts/install.sh` does the dnf step only and hands the rest to
-  `harness bootstrap`; `ccode` is gone.
+  `scripts/install.sh` does dnf, the SELinux label and the daemon socket
+  (what `nix run` needs) and hands the rest to `harness bootstrap`; `ccode`
+  is gone.
 - Read fence prototype (2026-10-21): `harness.readFence` (off by default)
   hides the rest of `$HOME` from sandboxed commands; the hook's env preamble
   puts direnv and devenv on PATH by store path because `~/.nix-profile`, a

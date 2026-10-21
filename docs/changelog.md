@@ -17,7 +17,12 @@ happened and what was learned on the day.
   the tmux block only when no marker was there, so the `HARNESS_PROJECT`
   unsets never reached a host bootstrapped earlier; the block is replaced
   when it differs, on bootstrap and upgrade. The FileChanged matcher gained
-  `devenv.local.yaml`, which devenv's direnvrc watches. Stale `ccode` and
+  `devenv.local.yaml`, which devenv's direnvrc watches. `scripts/install.sh`
+  enables the daemon socket and its SELinux label again before `nix run`:
+  the nix-daemon package installs the socket disabled (no Fedora preset),
+  so the dnf-only version could not start bootstrap, which was to enable
+  it; reset's summary now lists the socket and the direnv database it
+  removes. Stale `ccode` and
   `--no-root` lines in the docs dropped; nixfmt, statix and deadnix clean
   over the whole tree (the root `devenv.nix` by hand, since the hook does
   not let a session edit it). Learned: inside a harnessed session `nix flake check` on
