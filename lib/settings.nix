@@ -127,6 +127,8 @@ assert managed -> marketplaceDir != null;
   # and still load: README, "What a repo cannot enforce on its own".
   disableClaudeAiConnectors = !allowConnectors;
 
+  includeCoAuthoredBy = false;
+
   # Any scope (project and local after the folder is trusted). Strips
   # credential-shaped variables (by name or value) from every subprocess:
   # Bash commands, hooks, stdio MCP servers; the session keeps its own API

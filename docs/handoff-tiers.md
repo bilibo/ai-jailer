@@ -91,7 +91,7 @@ the read-fence part of it.
 **devenv-base.** Does not exist. There is one devenv module,
 `devenv/devenv.nix`, imported as `harness/devenv`. It exports options `harness.*`
 (allowLocalCommits, allowMemoryEdits, platform, extraDeny,
-extraAllowedDomains, settings, managedSettingsPath, container), writes the
+extraAllowedDomains, settings, managedSettingsPath, claudeCode.enable), writes the
 settings file, ships `ccmux` in the shell, exports `HARNESS_PROJECT`. No
 repo sets `AZURE_CONFIG_DIR`. The harness checkout itself lives outside the
 code root (`~/code/claude-nix-harness`) and has no `.envrc`, so a session

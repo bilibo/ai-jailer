@@ -49,6 +49,11 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   `~/.local/state/claude-nix-harness/receipt.json` drives `reset` and
   `upgrade`; `harness doctor` and `harness init --dry-run` run in
   `nix flake check`.
+- Install route for any Linux without Nix (2026-10-19): root `install.sh`
+  (nix-installer, profile packages, rc lines, direnv and tmux files), tested
+  with every command stubbed (`install-test`, `host-config-test`); not yet
+  run on a real distro. Overlaps with `scripts/install.sh` + `harness
+  bootstrap`; one of the two goes.
 - Read fence prototype (2026-10-21): `harness.readFence` (off by default)
   hides the rest of `$HOME` from sandboxed commands; the hook's env preamble
   puts direnv and devenv on PATH by store path because `~/.nix-profile`, a
@@ -59,6 +64,10 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
 
 ## Next, in order
 
+0. **One install route.** Decide between root `install.sh` (any Linux,
+   stub-tested) and `scripts/install.sh` + `harness bootstrap` (Fedora,
+   run end to end); fold the survivor's tests into the other, run it on a
+   fresh Ubuntu 24.04.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
    (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
    Left: a `ccmux` session in the test repo, the trust dialog accepted
