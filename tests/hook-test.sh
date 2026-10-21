@@ -77,6 +77,15 @@ block "git 'switch' -C main"
 block $'git\tswitch -C main'
 block 'git worktree remove wt --force'
 allow 'git checkout -b x'
+# A ref plus paths discards edits to those paths; a start point after -b/-t/--orphan does not.
+block 'git checkout main src/a.ts'
+block 'git checkout -q main src/a.ts'
+block 'git -c x=y checkout main a b'
+allow 'git checkout main'
+allow 'git checkout -b x origin/x'
+allow 'git checkout -t origin/x'
+allow 'git checkout --orphan gh-pages'
+allow 'git checkout main && ls a b'
 allow 'git worktree remove x'
 
 # --- 2. cloud / infra -----------------------------------------------------

@@ -420,6 +420,9 @@ other layers are meant to catch; revisit when tightening:
 - Git config keys that run programs: `-c core.hooksPath=`, `core.sshCommand`,
   `credential.helper`, `--config-env`, `git log --output`. The `.git/hooks`
   write block does not cover a hooksPath pointing elsewhere.
+- `git checkout <path>` with one word (a path cannot be told from a branch
+  name) and `git -c alias.x=reset x`, which runs through the `-c` keys. A
+  ref followed by paths is refused since 2026-10-21.
 - `az storage blob upload` and other az upload or copy verbs: the az regex
   lists mutation verbs, not transfer verbs.
 - Shell writes to your own config (`echo >> ~/.bashrc`, `authorized_keys`,

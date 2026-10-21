@@ -107,7 +107,7 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   `harness upgrade` builds before it removes; the no-receipt `reset`
   branch, the profile-ccmux ref fallback and `lib/project-settings.nix`
   are gone; the direnv version check lives in `pkgs/direnv.nix` only.
-  hook-test 233 cases, project-settings-test 22 (23 fenced),
+  hook-test 241 cases, project-settings-test 22 (23 fenced),
   harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
   green on the combined tree.
 
@@ -168,7 +168,8 @@ The gaps, in order:
   and why (`require_allowed`); and the agent's side: it proposes the
   diff, the human applies it. The template gains one commented line per
   case pointing at the guide. Phase 3's `lang` option (handoff) shortens
-  it later; the guide comes first.
+  it later; the guide comes first. Since 2026-10-21 the template lists
+  every harness option commented out; the guide is still to write.
 - D. **Command center as a tier**: handoff phase 2 (tiers: the checkout
   and `~/nixos-config` as platform roots, `HARNESS_TIER` from `ccmux`),
   then the broker's stage B (item 8: `/propose`, the `/proposals` pane).
@@ -183,9 +184,7 @@ The gaps, in order:
       in sessions as well as the token leak; drop that line to keep them,
       and accept that `gh auth login` without a keyring puts a push token
       in reach again.
-   2. `devenv/devenv.nix` lines 33-37 (the hook refuses it from a
-      session): `direnvPackage = import ../pkgs/direnv.nix { inherit pkgs;
-      };` in place of the `versionOlder` if/else, as `flake.nix` now has.
+   2. Done 2026-10-21: `devenv/devenv.nix` imports `pkgs/direnv.nix`.
    3. One installer, decided 2026-10-21 (Target flow, below):
       `scripts/install.sh` owns every root and pre-Nix step, `harness
       bootstrap` the user side. In `pkgs/harness/bootstrap.sh`, from
@@ -234,25 +233,7 @@ The gaps, in order:
       one, which is the harness's own. Test in `tests/harness-init-test.sh` beside the
       existing foreign-file case: a repo with its own lock, its input
       line printed, no `direnv allow` without `--yes`.
-   7. Hook, `git checkout` with paths. `git checkout main src/a.ts`
-      discards edits to `src/a.ts` and passes today; one word (`git
-      checkout src/a.ts`) cannot be told from a branch name and stays
-      open. In `hooks/env-guard.sh` after the `-C`/`-B` check (line 166),
-      inside the same project-rule block:
-      ```
-      re='(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +checkout( +-[^ ;&|]+)* +[^- ;&|][^ ;&|]* +[^- ;&|][^ ;&|]*'
-      creates='checkout( +[^ ;&|]+)* +(-b|--orphan|-t|--track)( |$)'
-      [[ "$n" =~ $re ]] && ! [[ "$n" =~ $creates ]] && deny "git history/index write blocked"
-      ```
-      Checked against ten commands on 2026-10-21: blocks `git checkout
-      main src/a.ts`, `git checkout -q main src/a.ts`, `git -c x=y
-      checkout main a b`; allows `git checkout main`, `git checkout -b x
-      origin/x`, `--track`, `-t`, `--orphan gh-pages`, `git checkout main
-      && ls a b`. `tests/hook-test.sh`: those as `block`/`allow` lines
-      next to the other checkout cases (lines 48-79). `lib/deny-rules.nix`
-      cannot express it; leave it to the hook. Runbook section 8, under
-      the git items: one line that `git checkout <path>` (one word) and
-      `git -c alias.x=reset x` are open, the second with the `-c` keys.
+   7. Done 2026-10-21: hook refuses `git checkout <ref> <path>...` (changelog).
    8. `pkgs/harness/check.sh`, a case 14 before the dry-run cut (line
       151): the sandbox hides `~/.git-credentials` on its own. The hook
       refuses the path by name, so the command spells it around the
