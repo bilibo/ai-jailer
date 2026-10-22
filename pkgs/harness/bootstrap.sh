@@ -51,15 +51,15 @@
 #
 # The user-scope ~/.claude/settings.json gets the keys a repo file cannot
 # carry: sandbox.network.strictAllowlist = true (an unlisted host is refused
-# inside the sandbox instead of prompting; user-or-managed scope) and
-# env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1" (credential-shaped variables
-# stripped from every subprocess; a repo file's copy is ignored, measured
-# 2026-10-22). With
+# inside the sandbox instead of prompting; user-or-managed scope). With
 # --no-account-sync also syncClaudeAiSkills = false and
 # syncClaudeAiPlugins = false, so sessions load no skills or plugins from the
 # claude.ai account (the harness reviews none of them). Only `false` is
 # honoured, from user scope or above; the default leaves them alone. The
-# other keys of that file are kept as they are.
+# other keys of that file are kept as they are. Never
+# env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: in user scope it turns the sandbox's
+# Bash auto-allow off, so every command prompts (2026-10-22, changelog); a
+# copy an earlier bootstrap wrote is removed.
 #
 # The receipt, ~/.local/state/claude-nix-harness/receipt.json, lists what
 # bootstrap put on the host: profile packages, files (whole files, marker
@@ -83,6 +83,7 @@ HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
 HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
 usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
+ORIG_ARGS=("$@")   # upgrade hands them to the upgraded harness (handover_steps)
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
@@ -367,6 +368,24 @@ userns_steps() {
 }
 
 # ---------------------------------------------------------------- user steps
+# After `upgrade` has moved the profile, the user steps belong to the harness
+# now in the profile, not to the one running: this process is the old build,
+# and its user steps are the old ones. On 2026-10-22 that wrote the scrub key
+# back into ~/.claude/settings.json right after upgrading to the build that
+# removes it. The wrapper exports its own store path as HARNESS_SELF; when
+# the profile's differs, the rest of the run is the new wrapper's
+# `bootstrap --no-root --no-profile` with the original flags (the root and
+# profile steps are done). No profile entry, or the same path: carry on.
+handover_steps() {
+  [ "$CMD" = upgrade ] && [ "$NO_PROFILE" = 0 ] || return 0
+  local new
+  new=$(readlink -f "$HOME/.nix-profile/bin/harness" 2>/dev/null || true)
+  if [ "$DRY_RUN" = 1 ]; then echo "    would hand the user steps to the upgraded harness (${new:-$HOME/.nix-profile/bin/harness})"; return 0; fi
+  [ -n "$new" ] && [ "$new" != "${HARNESS_SELF:-}" ] || return 0
+  step "hand the user steps to the upgraded harness ($new)"
+  exec "$new" bootstrap --no-root --no-profile "${ORIG_ARGS[@]}"
+}
+
 profile_has() { # profile_has <name>
   nix profile list --json 2>/dev/null \
     | jq -e --arg n "$1" '.elements | if type == "object" then has($n) else map((.attrPath // "") | endswith("." + $n)) | any end' >/dev/null
@@ -465,8 +484,8 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 
   # Claude Code user settings: the keys a repo file cannot carry (header).
   # Merged with jq so the rest of the file (theme, model, ...) stays.
-  local cs="$HOME/.claude/settings.json" want keys=('["sandbox","network","strictAllowlist"]' '["env","CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]')
-  want='{sandbox: {network: {strictAllowlist: true}}, env: {CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"}}'
+  local cs="$HOME/.claude/settings.json" want keys=('["sandbox","network","strictAllowlist"]')
+  want='{sandbox: {network: {strictAllowlist: true}}}'
   if [ "$NO_ACCOUNT_SYNC" = 1 ]; then
     want="$want + {syncClaudeAiSkills: false, syncClaudeAiPlugins: false}"
     keys+=('["syncClaudeAiSkills"]' '["syncClaudeAiPlugins"]')
@@ -476,6 +495,12 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     jq_edit "$cs" --argjson w "$(jq -n "$want")" '. * $w'
   fi
   record_file keys "$cs" "${keys[@]}"
+  # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
+  # Code stops auto-allowing sandboxed Bash commands (header).
+  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
+    step "remove env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB from $cs (it turns the sandbox's Bash auto-allow off)"
+    jq_edit "$cs" 'del(.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB) | if .env == {} then del(.env) else . end'
+  fi
 
   # VS Code: mkhl.direnv loads the devenv shell into the window (runbook,
   # daily flow); direnv.path makes it work before the next login too.
@@ -700,8 +725,7 @@ report() {
   local cs="$HOME/.claude/settings.json"
   if jq -e '.sandbox.network.strictAllowlist == true' "$cs" >/dev/null 2>&1; then ok "strict network allowlist in $cs (unlisted hosts refused, not prompted)"
   else miss "sandbox.network.strictAllowlist is not true in $cs (user-or-managed scope; the repo file cannot set it)"; fi
-  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"' "$cs" >/dev/null 2>&1; then ok "subprocess environment scrub in $cs (credential-shaped variables stripped)"
-  else miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is not \"1\" in $cs (user-or-managed scope; a repo file's copy is ignored; harness bootstrap writes it)"; fi
+  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (harness bootstrap removes it)"; fi
   if jq -e '.syncClaudeAiSkills == false and .syncClaudeAiPlugins == false' "$cs" >/dev/null 2>&1; then ok "account-synced skills and plugins off in $cs"
   else warn "account-synced skills and plugins load (syncClaudeAiSkills, syncClaudeAiPlugins; --no-account-sync turns them off)"; fi
   [ -r /etc/claude-code/managed-settings.json ] && warn "/etc/claude-code/managed-settings.json exists: this host carries managed settings, the harness assumed none" || ok "no managed settings (unmanaged host: the repo file is the whole harness)"
@@ -793,6 +817,7 @@ case "$CMD" in
     fi
     [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for dnf, /etc/nix/nix.conf and the nix-daemon socket (or pass --no-root after doing those by hand)"; root_steps; }
     [ "$NO_PROFILE" = 1 ] || profile_steps
+    handover_steps
     user_steps
     write_receipt
     echo

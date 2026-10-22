@@ -37,8 +37,9 @@ check "own files denied by literal path"        '.sandbox.filesystem.denyWrite |
 # devenv.local.* when they exist: with them listed, no shell evaluated inside
 # the sandbox (2026-10-22). The hook refuses writes to them by name.
 check "devenv.local.* readable by devenv"       '.sandbox.filesystem.denyWrite | (index("/repo/devenv.local.nix") or index("/repo/devenv.local.yaml")) | not'
-# User-or-managed scope; a repo file's copy is ignored with a warning.
-check "scrub key left to the user settings"     '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == null'
+# In user scope it turns the sandbox's Bash auto-allow off (2026-10-22); in
+# a repo file it is ignored. Never written.
+check "no subprocess scrub key"                 '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == null'
 if [ "$fenced" = fenced ]; then
   check "home hidden from the shell"            '.sandbox.filesystem.denyRead | index("~/")'
   check "repo and shell entry paths readable"   '.sandbox.filesystem.allowRead | index("/repo") and index("~/.nix-profile") and index("~/.local/share/direnv") and index("~/.claude/shell-snapshots") and index("~/.cargo")'

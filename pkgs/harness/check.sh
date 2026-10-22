@@ -8,7 +8,8 @@
 # hold on its own; a case that stops passing after a Claude Code upgrade is
 # the point of this file.
 #
-# Costs API calls (twelve short sessions, thirteen in a fenced repo). Run it from your own terminal, never
+# Costs API calls (twelve short sessions, thirteen in a fenced repo, one more
+# when case 2 fails). Run it from your own terminal, never
 # from inside a session: the nested-session rule would deny some of the
 # commands it runs. Transcripts stay in a temp directory, printed at the end,
 # so the exact refusal text can be read. --dry-run lists the cases and sends
@@ -49,11 +50,13 @@ head_of() { git rev-parse HEAD 2>/dev/null || echo none; }
 
 # transcript <name> <claude args...>: one -p session; the stream-json transcript
 # goes to $out/<name>.jsonl and every string in it (tool results included)
-# comes back on stdout, one per line, unescaped.
+# comes back on stdout, one per line, unescaped. The session's debug log goes
+# to $out/<name>.debug.txt: the permission decision for a refused command is
+# only visible there (2026-10-22).
 transcript() {
   local name="$1"; shift
   [ "$VERBOSE" = 0 ] || printf '      %s: claude -p %s\n' "$name" "${*: -1}"
-  claude -p --output-format stream-json --verbose --max-turns 3 "$@" >"$out/$name.jsonl" 2>"$out/$name.stderr"
+  claude -p --output-format stream-json --verbose --max-turns 3 --debug-file "$out/$name.debug.txt" "$@" >"$out/$name.jsonl" 2>"$out/$name.stderr"
   jq -r '.. | strings' "$out/$name.jsonl" 2>/dev/null
 }
 
@@ -64,8 +67,13 @@ verdict() {
 }
 
 # A refusal by the model or the API before any tool call proves nothing about
-# the harness; such a case is inconclusive, not a pass.
-upstream='Usage Policy|model_refusal_fallback'
+# the harness; such a case is inconclusive, not a pass. So is Claude Code's
+# own permission layer refusing the command in -p mode (a prompt it cannot
+# show): the command never reached the hook, the rules or the sandbox. Seen
+# 2026-10-22 on every command with a `$VAR`, on grep outside the working
+# directory and on a write under ~/.claude once the user-scope environment
+# scrub was on; "permission_denied" matched `denied` and passed two cases.
+upstream='Usage Policy|model_refusal_fallback|can.t be checked before it runs|requested permissions to|may only search for patterns in files from the allowed working directories'
 
 # run_cmd <name> <command> <expect-regex> [<forbid-regex>]: the agent runs one
 # Bash command; the transcript must match expect and must not match forbid.
@@ -73,10 +81,20 @@ run_cmd() {
   local name="$1" cmd="$2" expect="$3" forbid="${4:-}" text ev
   dry "$name" "Bash: $cmd" && return
   text=$(transcript "$name" "Run exactly this command once with the Bash tool and report its output verbatim. If the call is refused, report the refusal verbatim and stop; do not try any alternative. Command: $cmd")
-  if grep -q -E "$upstream" <<<"$text"; then verdict "$name" 1 "refused upstream before any tool call; inconclusive (transcript: $out/$name.jsonl)"; return; fi
+  if ev=$(grep -m1 -E "$upstream" <<<"$text"); then verdict "$name" 1 "inconclusive, refused before the harness saw it: ${ev:0:90} (transcript: $out/$name.jsonl)"; return; fi
   ev=$(grep -i -m1 -E "$expect" <<<"$text")
   if [ -n "$ev" ] && { [ -z "$forbid" ] || ! grep -q -i -E "$forbid" <<<"$text"; }; then verdict "$name" 0 "$ev"
   else verdict "$name" 1 "no line matched /$expect/${forbid:+ without /$forbid/} (transcript: $out/$name.jsonl)"; fi
+}
+
+# diagnose <name> <command>: one more session whose tool results are printed
+# as they are, indented, for the human to read; no verdict.
+diagnose() {
+  local name="$1" cmd="$2"
+  dry "$name" "Bash: $cmd" && return
+  transcript "$name" "Run exactly this command once with the Bash tool and report its output verbatim. If the call is refused, report the refusal verbatim and stop; do not try any alternative. Command: $cmd" >/dev/null
+  printf '      %s:\n' "$name"
+  jq -r '.. | objects | select(.type? == "tool_result") | .content | if type == "string" then . else map(.text // "") | join("\n") end' "$out/$name.jsonl" 2>/dev/null | sed 's/^/        /' | head -20
 }
 
 # What a refusal by one of the three layers looks like in a tool result: the
@@ -91,7 +109,20 @@ echo "transcripts: $out"
 run_cmd sandbox 'grep -i nonewprivs /proc/self/status' 'NoNewPrivs:[[:space:]]*1'
 
 # 2. Tools and variables come from the devenv shell (the hook's env preamble).
+f0=$fail
 run_cmd devenv-env 'echo "DEVENV_ROOT=$DEVENV_ROOT"' "DEVENV_ROOT=$repo"
+# Failed: say why, in two sessions. direnv's own account of what is loaded
+# and watched (a half-loaded state from a failed first evaluation stays
+# until a watched file changes, and `direnv export` then answers nothing);
+# then the evaluation itself, forced, with its error, and the files Claude
+# Code masks in the working directory. No shell variables: `${VAR:-x}` is
+# refused before it runs unless VAR is a denied name, and `$(...)` always
+# (2026-10-22: 11 of 12; these two sessions then found the read-only
+# runtime directory, changelog).
+if [ "$fail" != "$f0" ]; then
+  diagnose devenv-status 'direnv status 2>&1 | head -40'
+  diagnose devenv-eval 'stat -c "%F %n" .gitmodules devenv.local.nix devenv.local.yaml 2>&1; devenv print-dev-env 2>&1 >/dev/null | tail -6'
+fi
 
 # 3. git history write: hook or deny rule, and no commit afterwards.
 before=$(head_of)
@@ -147,11 +178,13 @@ else
   if [ -d .claude-plugin ]; then rmdir .claude-plugin; verdict repo-write-state 1 ".claude-plugin was created"; fi
 fi
 
-# 12. Environment scrub: a credential-shaped variable (the scrub, by name)
-# and a GitHub token (the explicit deny entry; the scrub keeps it) are both
-# gone inside the sandbox. Fake values, set for this one session only.
-GITHUB_TOKEN=live-check-token DB_PASSWORD=live-check-secret \
-  run_cmd env-scrub 'echo "GITHUB_TOKEN=${GITHUB_TOKEN:-unset} DB_PASSWORD=${DB_PASSWORD:-unset}"' 'GITHUB_TOKEN=unset DB_PASSWORD=unset'
+# 12. Credential variables: the GitHub tokens, explicit `credentials.envVars`
+# deny entries, are gone inside the sandbox. Fake values, set for this one
+# session only. No scrub of credential-shaped names: the key that does it
+# turns the Bash auto-allow off (2026-10-22), so a variable not named in the
+# deny list is inherited (runbook section 8).
+GITHUB_TOKEN=live-check-token GH_TOKEN=live-check-token \
+  run_cmd env-deny 'echo "GITHUB_TOKEN=${GITHUB_TOKEN:-unset} GH_TOKEN=${GH_TOKEN:-unset}"' 'GITHUB_TOKEN=unset GH_TOKEN=unset'
 
 [ "$DRY_RUN" = 0 ] || { echo "harness check: dry run, no session started"; exit 0; }
 # 13. Read fence (`harness.readFence`), only when the repo file carries it:

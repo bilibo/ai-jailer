@@ -141,13 +141,13 @@ assert managed -> marketplaceDir != null;
 
   includeCoAuthoredBy = false;
 
-  # `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is user-or-managed scope: a repo file
-  # carrying it logs "ignored: project-scoped settings can't set this key"
-  # and scrubs nothing (measured 2026-10-22, `harness check` case 12). The
-  # managed copy sets it at the end of this file; on an unmanaged host
-  # `harness bootstrap` writes it into ~/.claude/settings.json next to the
-  # strict allowlist. GitHub tokens are kept by the scrub on purpose (gh
-  # needs them), hence the explicit `deny` entries below.
+  # No `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` anywhere (2026-10-22): a repo
+  # file carrying it is ignored ("project-scoped settings can't set this
+  # key"), and with it in user scope Claude Code 2.1.300 stops auto-allowing
+  # sandboxed Bash commands, so every command with a variable, every read
+  # outside the working directory and every write under ~/.claude prompts,
+  # which a -p session cannot answer (changelog). What strips secrets from
+  # the shell is the explicit `credentials.envVars` deny list below.
 
   hooks = {
     # One env hook only: all matching hooks run in parallel and would race on
@@ -320,12 +320,6 @@ assert managed -> marketplaceDir != null;
   };
 }
 // lib.optionalAttrs managed {
-  # Strips credential-shaped variables (by name or value) from every
-  # subprocess: Bash commands, hooks, stdio MCP servers; the session keeps
-  # its own API credentials. Also pins filesystem isolation on and, on
-  # Linux, runs Bash in its own PID namespace. User-or-managed scope (the
-  # note above `hooks`); the bootstrap writes the unmanaged host's copy.
-  env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
   # The built-in guard only loads when managed settings exist and reads
   # `allowManagedModsOnly` from here only. With no mods listed the managed
   # marketplace is empty and unregistered, so the guard refuses every mod.

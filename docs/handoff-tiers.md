@@ -78,8 +78,9 @@ hooks, skills and plugin manifests; `denyRead` `~/.azure`, `~/.gnupg`,
 `/run/WSL` and `/mnt/c` when `platform = "wsl"`. `WSL_INTEROP`,
 `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET`, the GitHub tokens,
 `SSH_AUTH_SOCK` and `SSH_AGENT_PID` denied as env vars, and
-`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` for the credential-shaped rest
-(managed and user scope only: the repo copy's was ignored, 2026-10-22). The
+no `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` for the rest (ignored in a repo
+file; in user scope it turns the sandbox's Bash auto-allow off,
+2026-10-22). The
 repo copy adds its protected paths except `devenv.local.*` as literal
 `denyWrite` entries under `config.devenv.root` (a literal entry is masked
 unreadable, and devenv reads those two; 2026-10-22). `allowAllUnixSockets = true` (go-plugin,

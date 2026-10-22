@@ -12,7 +12,7 @@ settings).
 | Host | Configuration | Status |
 |---|---|---|
 | Managed host (NixOS or NixOS-WSL) | NixOS + home module, `harness.enable = true`, nothing else: every rule everywhere, strict network allowlist | module ready, untested on WSL |
-| Unmanaged host, any Linux | no harness modules; harness repos import `harness/devenv` and carry their own rules; `scripts/install.sh` sets the host up, Nix included (see "Any Linux") | in use (Fedora 44 laptop); the nix-installer route for other distros is tested with stubbed hosts, unverified on a real one |
+| Unmanaged host, any Linux | no harness modules; harness repos import `harness/devenv` and carry their own rules; `scripts/install.sh` sets the host up, Nix included (see "Any Linux") | in use (Fedora 44 laptop; Ubuntu 26.10 laptop through the nix-installer route since 2026-10-22, `harness check` 12 of 12) |
 | Mixed host | NixOS module with `enforcementRoots = [ "~/code/git" ]`: managed rules only under the roots, sessions elsewhere keep `git commit` and friends | available, superseded by the unmanaged shape |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
@@ -176,9 +176,9 @@ human at the terminal decides; a `-p` session treats a prompt as a refusal.
 | | Unmanaged host (in use) | Mixed host | Managed host |
 |---|---|---|---|
 | Enforced | deny rules; the fail-closed hook on every writing tool and settings change; the Bash sandbox with no unsandboxed fallback; bypass mode off; `~/.ssh` and the agent socket hidden; account connectors off | the same inside the roots; plus mod policy and the built-in guard | the same everywhere; plus the strict network allowlist and immunity to user settings |
-| Enforced since 2026-10-21 | the strict network allowlist (user-scope key written by the bootstrap); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; the GitHub tokens stripped from every subprocess (`credentials.envVars`); credential-shaped variables stripped by `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, a user-scope key the bootstrap writes since 2026-10-22 (a repo file's copy is ignored) | the same | the same |
+| Enforced since 2026-10-21 | the strict network allowlist (user-scope key written by the bootstrap); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; the GitHub tokens stripped from every subprocess (`credentials.envVars`; the `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` scrub is off since 2026-10-22, in user scope it turns the sandbox's Bash auto-allow off) | the same | the same |
 | Prompted | edits outside the working directory | network hosts outside the allowlist (`sandboxStrictAllowlist = false`) | nothing in the sandbox: unknown hosts are refused |
-| Open | reads of the whole home and of sibling repos except the `denyRead` paths (`~/.azure`, `~/.gnupg`, `~/.terraform.d`, `~/.netrc`, `~/.ssh`, and since 2026-10-21 `~/.aws`, `~/.config/gh`, `~/.git-credentials`); every unix socket (D-Bus, the display, the secret service); account-synced skills and plugins unless the bootstrap ran with `--no-account-sync`; the user's own marketplace; `/add-dir` typed by the human; dynamic shell constructs (runbook section 8) | the same, minus the marketplace | the same, minus the marketplace and the synced skills |
+| Open | reads of the whole home and of sibling repos except the `denyRead` paths (`~/.azure`, `~/.gnupg`, `~/.terraform.d`, `~/.netrc`, `~/.ssh`, and since 2026-10-21 `~/.aws`, `~/.config/gh`, `~/.git-credentials`); every unix socket (D-Bus, the display, the secret service); account-synced skills and plugins unless the bootstrap ran with `--no-account-sync`; the user's own marketplace; `/add-dir`; environment variables not named in `credentials.envVars` typed by the human; dynamic shell constructs (runbook section 8) | the same, minus the marketplace | the same, minus the marketplace and the synced skills |
 
 The glob `denyWrite` entries (`**/...`) have no effect on Linux and stay
 for macOS; the repo copy repeats them as literal paths under the checkout

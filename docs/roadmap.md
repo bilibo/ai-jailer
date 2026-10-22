@@ -110,11 +110,13 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   hook-test 241 cases, project-settings-test 22 (23 fenced),
   harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
   green on the combined tree.
-- First live `harness check` (2026-10-22, Ubuntu, 9 of 12): the devenv
-  shell loads inside the sandbox again (`devenv.local.*` out of the literal
-  `denyWrite` list), the environment scrub lives in the managed copy and
-  the user-scope keys the bootstrap writes (a repo file's copy is ignored),
-  case 11 reads the sandbox's mask as the refusal it is (changelog).
+- First live `harness check` (2026-10-22, Ubuntu, 9 of 12): `devenv.local.*`
+  out of the literal `denyWrite` list so the devenv shell can load inside
+  the sandbox (unverified until the next run); the environment scrub gone
+  for good, a repo file's copy is ignored and a user-scope copy turns the
+  sandbox's Bash auto-allow off; case 11 reads the sandbox's mask as the
+  refusal it is; a `-p` permission refusal counts as inconclusive and
+  every case keeps its debug log (changelog).
 
 ## Target flow (2026-10-21)
 
@@ -250,10 +252,16 @@ The gaps, in order:
       or a permission error: confirm which on the first run), forbid
       `live-check`. Then the header count ("twelve" and "thirteen")
       goes up by one.
+   9. Done 2026-10-22, on the Ubuntu laptop itself: `harness upgrade`
+      removed the scrub key from `~/.claude/settings.json`, the hook's
+      preamble got devenv a writable runtime directory (changelog), and
+      `harness check` passed 12 of 12: case 2 the devenv shell inside the
+      sandbox, case 12 the two GitHub tokens.
    Not planned: `~/.kube/config` and `~/.docker/config.json` the same way
    as `~/.aws`, until a harness host holds them.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
-   (live-check 10/10 on 2026-10-20; cases 11 and 12 added since, unrun).
+   (live-check 10/10 on 2026-10-20; `harness check` 12 of 12 on the Ubuntu
+   laptop, 2026-10-22).
    Left: a `ccmux` session in the test repo, the trust dialog accepted
    once, hooks seen firing and the tmux window turning orange (`ccmux` on
    the checkout runs on the Ubuntu laptop since 2026-10-22; the hook
@@ -369,7 +377,13 @@ The gaps, in order:
   known risk; revisit if two sessions switch subscriptions under each
   other.
 - Per-command env evaluation cost: measure once the azure module is in;
-  the SessionStart-only variant is the fallback.
+  the SessionStart-only variant is the fallback. 2026-10-22: the case for
+  it is no longer cost alone. Five workarounds now exist for running
+  direnv and devenv inside the sandbox (changelog, case 2), and the
+  SessionStart hook runs outside it, so it could run `direnv export bash`
+  once and write the exports into the env file; the cwd-change and
+  file-change events would refresh it, if they fire as the hook assumes.
+  Deciding it reopens decision 7.3 with a dated entry here.
 - Account-synced skills on the work host: off (`syncClaudeAiSkills`,
   `syncClaudeAiPlugins`, user or managed scope; the bootstrap's
   `--no-account-sync` writes the `false`s) or on (the default). Today's

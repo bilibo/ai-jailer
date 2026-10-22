@@ -11,8 +11,8 @@
 # on Fedora only), the user files per rc-file layout (none, Fedora's
 # ~/.bashrc.d, a plain ~/.bashrc, zsh only, an existing ~/.tmux.conf, a
 # foreign direnv.toml), idempotent re-runs, the receipt, reset undoing all of
-# it, upgrade building before it removes, and reset doing nothing without a
-# receipt. Assumes no controlling terminal and no getenforce or code on
+# it, upgrade building before it removes and handing the user steps to the
+# upgraded harness, and reset doing nothing without a receipt. Assumes no controlling terminal and no getenforce or code on
 # PATH, which the Nix build sandbox guarantees.
 set -uo pipefail
 harness="${1:?usage: harness-bootstrap-test.sh <harness>}"
@@ -81,7 +81,9 @@ in_json()  { if jq -e "$3" "$2" >/dev/null 2>&1; then ok; else bad "$1 ($3 false
 
 # 1. A fresh host, user namespaces confined, --yes: every root and user step.
 touch "$tmp/restricted"
-h="$tmp/home1"; mkdir -p "$h"; receipt="$h/.local/state/claude-nix-harness/receipt.json"
+h="$tmp/home1"; mkdir -p "$h/.claude"; receipt="$h/.local/state/claude-nix-harness/receipt.json"
+# The scrub key an earlier bootstrap wrote (2026-10-22), next to a key of the user's own.
+echo '{"theme":"dark","env":{"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB":"1"}}' >"$h/.claude/settings.json"
 harness "$h" bootstrap --yes
 exits "fresh bootstrap" 0
 says "nothing missing"             'harness bootstrap: 0 missing'
@@ -102,7 +104,7 @@ count_is "tmux block" "$h/.config/tmux/tmux.conf" "$mark" 1
 absent "no ~/.tmux.conf made up" "$h/.tmux.conf"
 file_has "environment.d" "$h/.config/environment.d/50-claude-nix-harness.conf" '^PATH='
 in_json "strict allowlist" "$h/.claude/settings.json" '.sandbox.network.strictAllowlist == true'
-in_json "env scrub key" "$h/.claude/settings.json" '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == "1"'
+in_json "scrub key removed, the user's key kept" "$h/.claude/settings.json" '.env == null and .theme == "dark"'
 in_json "receipt steps" "$receipt" '.root.steps | index("sysctl") and index("nix.conf") and index("nix-installer")'
 in_json "bashrc recorded as a block" "$receipt" '[.files[] | select(.path | endswith("/.bashrc")) | .kind] == ["block"]'
 in_json "profile recorded" "$receipt" '(.profile | sort) == ["ccmux","devenv","direnv","harness"]'
@@ -235,10 +237,15 @@ called "profile removed without Nix going" '^nix profile remove direnv$'
 
 # 14. upgrade from another ref (the stub's entries carry no originalUrl): each
 # package is built before its profile entry is removed. The resets above
-# emptied the stub's profile.
+# emptied the stub's profile. The profile then holds a harness that is not
+# the running one (a stub under the fake home): the user steps go to it.
 printf '%s\n' direnv devenv ccmux harness >"$tmp/profile"
+mkdir -p "$h7/.nix-profile/bin"
+printf '#!/bin/sh\necho "new-harness $*" >>"$CALLS"\n' >"$h7/.nix-profile/bin/harness"; chmod +x "$h7/.nix-profile/bin/harness"
 harness "$h7" upgrade --yes
 exits "upgrade" 0
+called "user steps handed to the upgraded harness" '^new-harness bootstrap --no-root --no-profile --yes$'
+refutes "old user steps not run"   'harness upgrade: [0-9]+ missing'
 b=$(grep -n -m1 -x -F 'nix build --no-link github:bilibo/claude-nix-harness#direnv' "$log" | cut -d: -f1)
 r=$(grep -n -m1 -x -F 'nix profile remove direnv' "$log" | cut -d: -f1)
 if [ -n "$b" ] && [ -n "$r" ] && [ "$b" -lt "$r" ]; then ok; else bad "upgrade builds direnv before removing it (build at ${b:-none}, remove at ${r:-none}: $(tr '\n' ';' <"$log"))"; fi
