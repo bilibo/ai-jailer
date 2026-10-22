@@ -94,6 +94,11 @@ pkgs.writeShellApplication {
       HARNESS_REF="$HARNESS_DEFAULT_REF"; HARNESS_REF_FROM=default
     }
 
+    # This wrapper's store path: `upgrade` compares it with the profile's
+    # after the profile upgrade and hands the user steps to the new one.
+    export HARNESS_SELF
+    HARNESS_SELF=$(readlink -f "$0")
+
     # Shared flags may also come before the command.
     shared=()
     while [ $# -gt 0 ]; do

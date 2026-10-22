@@ -256,7 +256,10 @@ which is the dangerous direction.
   back on their own.
 - Host tools on an unmanaged host: `harness upgrade`
   after a `nix flake update` or a move of the checkout re-adds direnv,
-  devenv and ccmux from the current lock.
+  devenv and ccmux from the current lock, then hands the user steps to the
+  harness it just put in the profile (the running one is the old build;
+  2026-10-22). `harness bootstrap` alone reruns the user steps with
+  whatever harness is on PATH.
 - devenv from nixpkgs (2.4.0 at the time of writing). Each repo pins its own
   devenv inputs in `devenv.lock`; `devenv update harness` bumps the harness
   input in one repo.
@@ -387,16 +390,15 @@ The README's "Lockdown level today" table summarises them; the roadmap's
   but `/run/user/<uid>/gcr/ssh` is guessable and answers from inside the
   sandbox, so what holds is that no plain key is loaded in the agent
   (README, "Git over SSH"). Roadmap item 2.3 hides the socket directories.
-- The environment: since 2026-10-22 the user-scope `~/.claude/settings.json`
-  (written by `harness bootstrap`; a repo file's copy is ignored) sets
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which removes credential-shaped
-  variables (by name or by value shape; `ANTHROPIC_API_KEY`,
-  `AWS_SECRET_ACCESS_KEY`, `*_PASSWORD`, URLs with passwords) from Bash
-  commands, hooks and stdio MCP servers, and the sandbox's
-  `credentials.envVars` denies the Azure secrets, the SSH agent and the
-  GitHub tokens the scrub keeps on purpose. A secret whose name and value
-  look like neither is still inherited; name it in `extraDeny`'s sibling,
-  `sandbox.credentials.envVars`, through `harness.settings`.
+- The environment: the sandbox's `credentials.envVars` denies the Azure
+  secrets, the SSH agent and the GitHub tokens; every other variable of the
+  launching shell is inherited. `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, which
+  would strip credential-shaped names and values, is off since 2026-10-22:
+  in a repo file it is ignored, and in user scope it turns the sandbox's
+  Bash auto-allow off, so every command with a variable, every read outside
+  the working directory and every write under `~/.claude` prompts
+  (changelog). Name a secret in `sandbox.credentials.envVars` through
+  `harness.settings` instead.
 - The hook strips quotes before matching, so a quoted string that mentions
   a config path next to something that looks like a write is refused too:
   `echo "settings -> $(readlink .claude/settings.json)"` (the `->`) and

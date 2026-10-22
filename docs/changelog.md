@@ -5,6 +5,36 @@ happened and what was learned on the day.
 
 ## 2026-10-22
 
+- Case 2 of `harness check` again on the Ubuntu laptop, now with the scrub
+  key gone: the probe ran, `DEVENV_ROOT` was empty, and the two diagnose
+  sessions showed why. devenv 2.4.0 creates `$XDG_RUNTIME_DIR/devenv-<hash>`
+  before it evaluates, the sandbox mounts `/run/user/<uid>` read-only, so
+  every `direnv export` inside the sandbox failed, and direnv keeps a failed
+  load (`DIRENV_DIR` set, nothing exported) until a watched file changes.
+  Reproduced in a session on the checkout: with `XDG_RUNTIME_DIR` set to the
+  sandbox's `TMPDIR` for the direnv process alone, the same evaluation
+  exported `DEVENV_ROOT` and a runtime directory under `/tmp/claude-1000`;
+  `DEVENV_RUNTIME` is ignored by devenv. The hook's preamble now does that
+  (hook-test, one more assertion). Why it never showed before: most likely
+  the earlier hosts had no systemd user session, so `XDG_RUNTIME_DIR` was
+  unset and devenv fell back to the temp directory. Noted, not decided:
+  this is the fifth workaround for evaluating devenv inside the sandbox per
+  command (direnv and devenv on PATH by store path, the two cache write
+  entries, `devenv.local.*` out of the literal deny list, the `shell-*.sh`
+  litter, this); the SessionStart hook runs outside the sandbox and could
+  evaluate once and write the exports into the env file instead. A dated
+  roadmap entry reopens decision 7.3 if that is wanted; the roadmap's open
+  question on the evaluation cost carries the note. The run after the fix,
+  from a fresh terminal: 12 of 12, the first full pass of the twelve cases
+  (roadmap item 0.9 closed).
+- `harness upgrade` hands the user steps to the upgraded harness: after the
+  profile upgrade it execs the profile's new wrapper as `bootstrap --no-root
+  --no-profile` with the original flags, when that wrapper's store path
+  differs from its own (`HARNESS_SELF`, exported by the wrapper). The
+  running process is the old build, and its user steps are the old ones:
+  the same morning, `harness upgrade` to the build that removes the scrub
+  key wrote the key back, and the `harness check` after it failed the same
+  five cases. harness-bootstrap-test 102 to 104.
 - First `harness check` on the checkout (Ubuntu 26.10, from a terminal; the
   first run of cases 11 and 12 anywhere): 9 of 12 passed, and the three
   failures were two findings and one test bug. (1) The per-command devenv
@@ -19,12 +49,32 @@ happened and what was learned on the day.
   read them. (2) `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` in the repo file is
   ignored: the debug log says "project-scoped settings can't set this key"
   and `DB_PASSWORD` reached the shell (case 12; the GitHub token deny
-  entry held). It moves to the managed copy and to the user-scope keys
-  `harness bootstrap` writes; `harness doctor` reports it. (3) Case 11's
-  probe got "File exists" from the mask, which is the deny working; the
-  case accepts that when the host has no such path. project-settings-test
-  22 to 23 (fenced 24), harness-bootstrap-test 101 to 102. Also that day:
-  `harness init` on the checkout from a terminal, and `ccmux` on it.
+  entry held). Moved to user scope through the bootstrap, it did worse:
+  every later check run lost 4 to 5 cases to Claude Code's own permission
+  layer ("a variable in this command can't be checked before it runs",
+  grep on `/proc` "blocked: only the working directories", a write under
+  `~/.claude` "a sensitive file", `mkdir` plainly "denied"), which a `-p`
+  session cannot answer. Six session logs, three with the key and three
+  without, differ at startup in exactly one line, `settingsEnv keys:
+  CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` against `none`: with the key, 2.1.300
+  no longer auto-allows sandboxed Bash commands and runs its static path
+  analysis on every one. Interactively that is a prompt on every command
+  with a variable. The scrub is out everywhere (repo, managed, bootstrap,
+  doctor; the bootstrap removes the copy it wrote); what strips secrets is
+  the explicit `credentials.envVars` deny list, and case 12 now asserts
+  that (`env-deny`: both GitHub tokens). The wrong turn cost one round:
+  the "without the key" experiment ran after a `harness upgrade`, which
+  re-ran the bootstrap that wrote the key back. (3) Case 11's probe got
+  "File exists" from the mask, which is the deny working; the case accepts
+  that when the host has no such path. Also learned: a `-p` permission
+  refusal matched `denied` and passed two cases; the check now counts
+  every such refusal as inconclusive, prints it, and keeps a debug log per
+  case (`<name>.debug.txt`), where the decision lives. project-settings-test
+  22 to 23 (fenced 24), harness-bootstrap-test 101 to 102. Still
+  unverified: case 2 (the devenv shell inside the sandbox) and the rest of
+  the list on a host without the key; every run after the fix had it. Also
+  that day: `harness init` on the checkout from a terminal, and `ccmux` on
+  it.
 - First real Ubuntu run (26.10, the test laptop; roadmap gap B).
   `scripts/install.sh --code-root ~/Code` installed Nix, bootstrap wrote
   every user file and flipped `kernel.apparmor_restrict_unprivileged_userns`
