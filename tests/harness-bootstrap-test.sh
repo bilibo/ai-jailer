@@ -8,12 +8,15 @@
 # HARNESS_SYSCTL_DROPIN, HARNESS_NIX_INSTALLER, HARNESS_OS_RELEASE,
 # HARNESS_CA_BUNDLE; HARNESS_NIX_PROFILE_D empty, so the stub nix wins on a
 # nix-installer host). Asserts the root steps (nix.conf with and without a
-# flakes line; the user-namespace sysctl offered, declined and accepted; dnf
-# on Fedora only), the user files per rc-file layout (none, Fedora's
+# flakes line; the AppArmor bwrap profile offered, declined and accepted
+# where AppArmor confines user namespaces, the sysctl where an older kernel
+# does; dnf on Fedora only), the user files per rc-file layout (none, Fedora's
 # ~/.bashrc.d, a plain ~/.bashrc, zsh only, an existing ~/.tmux.conf, a
 # foreign direnv.toml), idempotent re-runs, the receipt, reset undoing all of
 # it, upgrade building before it removes and handing the user steps to the
-# upgraded harness, and reset doing nothing without a receipt. Assumes no
+# upgraded harness, reset doing nothing without a receipt, the store-symlink
+# guard on nix.conf, a NixOS host (no root step, the configuration.nix lines
+# printed, home-manager's files left alone) and a WSL host line. Assumes no
 # controlling terminal; the stub directory is the whole PATH.
 set -uo pipefail
 harness="${1:?usage: harness-bootstrap-test.sh <harness>}"
@@ -27,10 +30,14 @@ printf '#!/bin/sh\n' >"$tmp/nix/nix-installer"; chmod +x "$tmp/nix/nix-installer
 
 stub() { printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n%s\n' "$1" "$2" >"$tmp/bin/$1"; chmod +x "$tmp/bin/$1"; }
 # sudo: `install SRC DST` lands as a copy under $tmp; a sysctl flips the fake
-# restriction the way the kernel would; the rest is logged only.
+# restriction the way the kernel would (RESTRICTED: the AppArmor one,
+# CLONE_RESTRICTED: unprivileged_userns_clone); the rest is logged only.
 stub sudo 'case "$1" in
   install) shift; while [ $# -gt 2 ]; do shift; done; mkdir -p "$(dirname "$2")"; cp "$1" "$2" ;;
-  sysctl) case "$3" in *=0) rm -f "$RESTRICTED" ;; *=1) touch "$RESTRICTED" ;; esac ;;
+  sysctl) case "$3" in
+    kernel.apparmor_restrict_unprivileged_userns=0) rm -f "$RESTRICTED" ;; kernel.apparmor_restrict_unprivileged_userns=1) touch "$RESTRICTED" ;;
+    kernel.unprivileged_userns_clone=1) rm -f "$CLONE_RESTRICTED" ;; kernel.unprivileged_userns_clone=0) touch "$CLONE_RESTRICTED" ;;
+  esac ;;
 esac; exit 0'
 # nix: a profile that remembers what was added ($PROFILE_STATE, one name per line).
 stub nix 'case "$1" in
@@ -41,7 +48,10 @@ stub nix 'case "$1" in
     remove) grep -v -x -e "$3" "$PROFILE_STATE" >"$PROFILE_STATE.new" 2>/dev/null; mv "$PROFILE_STATE.new" "$PROFILE_STATE" ;;
   esac ;;
 esac; exit 0'
-stub sysctl 'case "$1 $2" in "-n kernel.apparmor_restrict_unprivileged_userns") if [ -e "$RESTRICTED" ]; then echo 1; else echo 0; fi; exit 0 ;; "-n "*) exit 1 ;; esac; exit 0'
+stub sysctl 'case "$1 $2" in
+  "-n kernel.apparmor_restrict_unprivileged_userns") if [ -e "$RESTRICTED" ]; then echo 1; else echo 0; fi; exit 0 ;;
+  "-n kernel.unprivileged_userns_clone") if [ -e "$CLONE_RESTRICTED" ]; then echo 0; else echo 1; fi; exit 0 ;;
+  "-n "*) exit 1 ;; esac; exit 0'
 stub systemctl 'exit 0'
 stub rpm 'exit 1'
 stub direnv 'echo 2.38.2'
@@ -61,10 +71,11 @@ ubuntu
 harness() {
   local home="$1" cmd="$2"; shift 2
   : >"$log"
-  out=$(cd "$tmp" && env -i HOME="$home" PATH="$tmp/bin" TMPDIR="$tmp" CALLS="$log" RESTRICTED="$tmp/restricted" USER=tester \
+  out=$(cd "$tmp" && env -i HOME="$home" PATH="$tmp/bin" TMPDIR="$tmp" CALLS="$log" RESTRICTED="$tmp/restricted" CLONE_RESTRICTED="$tmp/clone-restricted" USER=tester \
     PROFILE_STATE="$tmp/profile" HARNESS_REF=github:bilibo/claude-nix-harness HARNESS_ROOT_STEPS="${ROOT_STEPS-nix-installer}" \
-    HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_CONF="$tmp/etc/nix.conf" HARNESS_SYSCTL_DROPIN="$tmp/etc/99-userns.conf" \
+    HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_CONF="$tmp/etc/nix.conf" HARNESS_SYSCTL_DROPIN="$tmp/etc/99-userns.conf" HARNESS_APPARMOR_PROFILE="$tmp/etc/apparmor-bwrap" \
     HARNESS_NIX_INSTALLER="$tmp/nix/nix-installer" HARNESS_CA_BUNDLE="$tmp/ca.pem" HARNESS_NIX_PROFILE_D= \
+    HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
     "$harness" "$cmd" "$@" 2>&1 </dev/null); rc=$?
 }
 ok()   { pass=$((pass+1)); }
@@ -80,8 +91,9 @@ absent()   { if [ -e "$2" ]; then bad "$1 ($2 exists)"; else ok; fi; }
 count_is() { local n; n=$(grep -c -F -e "$3" "$2" 2>/dev/null); if [ "${n:-0}" = "$4" ]; then ok; else bad "$1 ($3 appears ${n:-0} times in $2, want $4)"; fi; }
 in_json()  { if jq -e "$3" "$2" >/dev/null 2>&1; then ok; else bad "$1 ($3 false in $2)"; fi; }
 
-# 1. A fresh host, user namespaces confined, --yes: every root and user step.
-touch "$tmp/restricted"
+# 1. A fresh host, user namespaces confined by AppArmor, --yes: every root
+# and user step; the bwrap profile, not the sysctl.
+touch "$tmp/restricted"; profile="$tmp/etc/apparmor-bwrap"
 h="$tmp/home1"; mkdir -p "$h/.claude"; receipt="$h/.local/state/claude-nix-harness/receipt.json"
 # The scrub key an earlier bootstrap wrote (2026-10-22), next to a key of the user's own.
 echo '{"theme":"dark","env":{"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB":"1"}}' >"$h/.claude/settings.json"
@@ -89,8 +101,13 @@ harness "$h" bootstrap --yes
 exits "fresh bootstrap" 0
 says "nothing missing"             'harness bootstrap: 0 missing'
 says "ran to the end"              'harness init <customer>/<repo>'
-called "sysctl applied"            '^sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0$'
-file_is "drop-in" "$tmp/etc/99-userns.conf" 'kernel.apparmor_restrict_unprivileged_userns = 0'
+uncalled "no sysctl for AppArmor"  'sysctl -w'
+absent "no sysctl drop-in" "$tmp/etc/99-userns.conf"
+file_has "profile header" "$profile" '^profile bwrap /usr/bin/bwrap flags=\(unconfined\) \{$'
+file_has "profile userns" "$profile" '^  userns,$'
+file_has "profile abi" "$profile" '^abi <abi/4.0>,$'
+count_is "profile marker" "$profile" "$mark" 1
+called "apparmor reloaded"         '^sudo systemctl reload apparmor$'
 file_has "flakes in nix.conf" "$tmp/etc/nix.conf" '^experimental-features = nix-command flakes$'
 file_has "devenv cache" "$tmp/etc/nix.conf" '^extra-substituters = https://devenv.cachix.org$'
 count_is "nix.conf block" "$tmp/etc/nix.conf" "$mark" 1
@@ -106,18 +123,18 @@ absent "no ~/.tmux.conf made up" "$h/.tmux.conf"
 file_has "environment.d" "$h/.config/environment.d/50-claude-nix-harness.conf" '^PATH='
 in_json "strict allowlist" "$h/.claude/settings.json" '.sandbox.network.strictAllowlist == true'
 in_json "scrub key removed, the user's key kept" "$h/.claude/settings.json" '.env == null and .theme == "dark"'
-in_json "receipt steps" "$receipt" '.root.steps | index("sysctl") and index("nix.conf") and index("nix-installer")'
+in_json "receipt steps" "$receipt" '.root.steps | index("apparmor") and index("nix.conf") and index("nix-installer") and (index("sysctl") | not)'
 in_json "bashrc recorded as a block" "$receipt" '[.files[] | select(.path | endswith("/.bashrc")) | .kind] == ["block"]'
 in_json "profile recorded" "$receipt" '(.profile | sort) == ["ccmux","devenv","direnv","harness"]'
 uncalled "no dnf off fedora"       'dnf'
-says "doctor sees the sysctl gone" 'ok    no sysctl confines'
+says "doctor sees the profile"     "ok    AppArmor confines unprivileged user namespaces; $profile lifts it for bwrap"
 says "doctor sees the rc wiring"   'ok    ~/.bashrc sources ~/.bashrc.d'
 says "doctor names the tmux file"  'ok    tmux harness block in ~/.config/tmux/tmux.conf'
 
-# 2. Again: nothing written twice, no second sysctl.
+# 2. Again: nothing written twice, no second profile.
 harness "$h" bootstrap --yes
 exits "re-run" 0
-uncalled "no second sysctl"        'sysctl -w'
+uncalled "no second profile"       'install .*apparmor-bwrap|systemctl reload apparmor'
 uncalled "nix.conf not rewritten"  'install .*nix.conf'
 refutes "rc file not rewritten"    "==> write $h/.bashrc"
 count_is "one block in ~/.bashrc" "$h/.bashrc" "$mark" 1
@@ -126,21 +143,21 @@ count_is "one block in nix.conf" "$tmp/etc/nix.conf" "$mark" 1
 
 # 3. Declined (no --yes, no terminal): reported, printed for later, not in
 # the receipt, offered again next time; doctor keeps naming it.
-touch "$tmp/restricted"; rm -f "$tmp/etc/99-userns.conf"
+touch "$tmp/restricted"; rm -f "$profile"
 h2="$tmp/home2"; mkdir -p "$h2"
 harness "$h2" bootstrap
 exits "declined leaves a MISSING" 1
 says "declined reported"           'warn  declined: every Claude command is refused'
-says "printed for later"           'Declined, run later.*sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 && echo'
-says "the report names it"         'MISSING AppArmor confines unprivileged user namespaces'
-uncalled "not applied"             'sysctl -w'
-absent "no drop-in" "$tmp/etc/99-userns.conf"
-in_json "not in the receipt" "$h2/.local/state/claude-nix-harness/receipt.json" '.root.steps | index("sysctl") | not'
+says "printed for later"           "Declined, run later.*printf .*'abi <abi/4.0>,' .*'  userns,' .*\| sudo tee $profile && sudo systemctl reload apparmor"
+says "the report names it"         "MISSING AppArmor confines unprivileged user namespaces \(kernel.apparmor_restrict_unprivileged_userns = 1\) and $profile is missing"
+uncalled "not applied"             'sysctl -w|install .*apparmor-bwrap|reload apparmor'
+absent "no profile" "$profile"
+in_json "not in the receipt" "$h2/.local/state/claude-nix-harness/receipt.json" '.root.steps | (index("sysctl") or index("apparmor")) | not'
 harness "$h2" bootstrap
-says "offered again"               'user namespaces: kernel.apparmor_restrict_unprivileged_userns is 1'
+says "offered again"               'user namespaces: AppArmor confines them \(kernel.apparmor_restrict_unprivileged_userns = 1\)'
 harness "$h2" doctor
 exits "doctor on the confined host" 1
-says "doctor names the sysctl"     'MISSING AppArmor confines unprivileged user namespaces'
+says "doctor names the profile"    "MISSING AppArmor confines unprivileged user namespaces .*$profile is missing.*harness bootstrap writes the profile"
 says "doctor host line"            'host: Ubuntu 24.04 .*nix from the nix-installer'
 rm -f "$tmp/restricted"
 
@@ -192,9 +209,11 @@ file_has "the rest of nix.conf kept" "$tmp/etc/nix.conf" '^build-users-group = n
 file_has "the cache added" "$tmp/etc/nix.conf" '^extra-substituters'
 
 # 10. --dry-run on a fresh home: the steps printed, nothing written, no sudo.
-touch "$tmp/restricted"; h8="$tmp/home8"; mkdir -p "$h8"
+touch "$tmp/restricted"; rm -f "$profile"; h8="$tmp/home8"; mkdir -p "$h8"
 harness "$h8" bootstrap --dry-run
-says "dry run shows the sysctl"    'would run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
+says "dry run shows the profile"   "would run: sudo install -m 0644 -o root -g root <new content> $profile"
+says "dry run shows the reload"    'would run: sudo systemctl reload apparmor'
+absent "dry run writes no profile" "$profile"
 absent "dry run writes no rc file" "$h8/.bashrc"
 absent "dry run writes no receipt" "$h8/.local/state/claude-nix-harness/receipt.json"
 uncalled "dry run calls no sudo"   '^sudo'
@@ -209,15 +228,16 @@ in_json "packages in the receipt" "$h9/.local/state/claude-nix-harness/receipt.j
 says "fedora host line"            "nix from Fedora's packages"
 ubuntu
 
-# 12. reset on the first host (installer route, sysctl applied): all undone.
-echo 'kernel.apparmor_restrict_unprivileged_userns = 0' >"$tmp/etc/99-userns.conf"
+# 12. reset on the first host (installer route, profile written): all undone.
+printf '%s\n' "$mark" 'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' >"$profile"
 harness "$h" reset --yes
 exits "reset" 0
 says "plan names the uninstaller"  "root:  Nix, by $tmp/nix/nix-installer uninstall"
-says "plan names the sysctl"       "root:  $tmp/etc/99-userns.conf, and the kernel's user-namespace restriction back on"
+says "plan names the profile"      "root:  $profile \(bwrap may no longer create user namespaces\), AppArmor reloaded"
 called "uninstall"                 "^sudo $tmp/nix/nix-installer uninstall --no-confirm$"
-called "restriction back"          '^sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1$'
-called "drop-in removed"           "^sudo rm -f $tmp/etc/99-userns.conf$"
+called "profile removed"           "^sudo rm -f $profile$"
+called "apparmor reloaded on reset" '^sudo systemctl reload apparmor$'
+uncalled "no sysctl on reset"      'sysctl -w'
 uncalled "no rm -rf /nix without dnf" 'rm -rf /nix'
 uncalled "no daemon stop: the uninstaller does it" 'systemctl disable'
 absent "~/.bashrc (only the block) removed" "$h/.bashrc"
@@ -259,6 +279,73 @@ says "nothing recorded"            'no receipt at .*: nothing recorded, nothing 
 uncalled "no sudo"                 '^sudo'
 uncalled "no profile remove"       'nix profile remove'
 file_is "direnv allow database kept" "$h10/.local/share/direnv/allow/x" ''
+
+# 16. nix.conf is a symlink into the store (a NixOS system file) on a host
+# that is not detected as NixOS: root_write refuses, nothing is installed.
+store=$(readlink -f "$harness")   # any real store path; its content does not matter
+rm -f "$tmp/etc/nix.conf"; ln -s "$store" "$tmp/etc/nix.conf"
+h11="$tmp/home11"; mkdir -p "$h11"
+harness "$h11" bootstrap --yes
+exits "store symlink refused" 1
+says "names the store and the option" "nix.conf is a symlink into the Nix store \($store\): the system configuration owns it; set nix.settings.substituters"
+uncalled "nothing installed over it" 'install .*nix.conf'
+if [ -L "$tmp/etc/nix.conf" ]; then ok; else bad "the symlink was replaced"; fi
+
+# 17. NixOS, home-manager owns ~/.bashrc, direnv.toml and tmux.conf: no sudo
+# at all, the configuration.nix lines printed, those three files untouched
+# and named in the host line, the rest written as on any host.
+printf 'ID=nixos\nVERSION_ID="26.11"\nPRETTY_NAME="NixOS 26.11 (Xantusia)"\n' >"$tmp/os-release"
+touch "$tmp/restricted"; rm -f "$profile"; : >"$tmp/profile"
+h12="$tmp/home12"; mkdir -p "$h12/.config/direnv" "$h12/.config/tmux"
+ln -s "$store" "$h12/.bashrc"; ln -s "$store" "$h12/.config/direnv/direnv.toml"; ln -s "$store" "$h12/.config/tmux/tmux.conf"
+harness "$h12" bootstrap --yes
+uncalled "no sudo on nixos"        '^sudo'
+says "nix.settings printed"        'NixOS: .*nix.conf is the system configuration.s and lacks flakes the devenv cache.*nix\.settings = \{.*experimental-features = \[ "nix-command" "flakes" \];'
+says "sysctl as a NixOS option"    'boot\.kernel\.sysctl\."kernel\.apparmor_restrict_unprivileged_userns" = 0;'
+says "bashrc skipped"              '~/\.bashrc is home-manager.s \(a store symlink\): left alone; it is set by programs\.direnv\.enableBashIntegration'
+says "direnv.toml skipped"         '~/\.config/direnv/direnv\.toml is home-manager.s .*programs\.direnv\.config\.global'
+says "tmux.conf skipped"           '~/\.config/tmux/tmux\.conf is home-manager.s .*programs\.tmux\.extraConfig'
+for f in .bashrc .config/direnv/direnv.toml .config/tmux/tmux.conf; do
+  if [ -L "$h12/$f" ] && [ "$(readlink "$h12/$f")" = "$store" ]; then ok; else bad "$f was changed"; fi
+done
+file_has "bashrc.d still written" "$h12/.bashrc.d/claude-nix-harness.sh" 'direnv hook bash'
+in_json "user settings still written" "$h12/.claude/settings.json" '.sandbox.network.strictAllowlist == true'
+in_json "no root step in the receipt" "$h12/.local/state/claude-nix-harness/receipt.json" '.root.steps == ["nix-installer"]'
+for p in direnv devenv ccmux harness; do called "profile add $p on nixos" "^nix profile add github:bilibo/claude-nix-harness#$p$"; done
+says "host line"                   'host: NixOS 26.11 \(Xantusia\) .*nix from the system configuration, 3 home-manager owned files skipped'
+says "doctor: hm bashrc ok"        'ok    ~/\.bashrc \(home-manager'
+says "doctor: hm direnv.toml ok"   'ok    direnv\.toml \(home-manager\)'
+says "doctor: hm tmux ok"          'ok    tmux config ~/\.config/tmux/tmux\.conf \(home-manager\)'
+says "doctor: nixos fix for flakes" 'MISSING flakes not enabled in .*nix.settings in configuration.nix'
+says "doctor: nixos fix for userns" 'MISSING AppArmor confines unprivileged user namespaces .*boot.kernel.sysctl in configuration.nix'
+refutes "no bootstrap sysctl offer" 'apply with sudo now|would run: sudo'
+harness "$h12" doctor
+says "doctor host line"            'host: NixOS 26.11 .*3 home-manager owned files skipped'
+rm -f "$tmp/restricted" "$tmp/etc/nix.conf"
+ubuntu
+
+# 18. WSL: the host line says so; nothing else changes here.
+touch "$tmp/wsl"
+WSL_MARKER="$tmp/wsl" harness "$h11" doctor
+says "wsl host line"               'host: WSL2 \(Ubuntu 24.04\) '
+
+# 19. An older Debian kernel (kernel.unprivileged_userns_clone = 0): the
+# sysctl path as before, no profile; reset puts the restriction back.
+rm -f "$tmp/restricted" "$profile"; touch "$tmp/clone-restricted"
+h13="$tmp/home13"; mkdir -p "$h13"
+harness "$h13" bootstrap --yes
+says "clone sysctl offered"        'user namespaces: kernel.unprivileged_userns_clone is 0'
+called "clone sysctl applied"      '^sudo sysctl -w kernel.unprivileged_userns_clone=1$'
+file_is "clone drop-in" "$tmp/etc/99-userns.conf" 'kernel.unprivileged_userns_clone = 1'
+absent "no profile for the clone sysctl" "$profile"
+uncalled "no apparmor reload"      'reload apparmor'
+in_json "sysctl in the receipt" "$h13/.local/state/claude-nix-harness/receipt.json" '.root.steps | index("sysctl") and (index("apparmor") | not)'
+says "doctor sees the sysctl gone" 'ok    no sysctl confines'
+harness "$h13" reset --yes
+says "plan names the sysctl"       "root:  $tmp/etc/99-userns.conf, and the kernel's user-namespace restriction back on"
+called "clone restriction back"    '^sudo sysctl -w kernel.unprivileged_userns_clone=0$'
+called "clone drop-in removed"     "^sudo rm -f $tmp/etc/99-userns.conf$"
+rm -f "$tmp/clone-restricted" "$tmp/etc/99-userns.conf"
 
 echo "harness-bootstrap-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

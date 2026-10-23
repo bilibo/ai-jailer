@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-#   project-settings-test.sh <settings.json> [fenced]
+#   project-settings-test.sh <settings.json> [fenced] [<repo-root>]
 #
 # `fenced`: the file was generated with `readFence = true`; the read fence
-# checks replace the default's "no fence" check.
+# checks replace the default's "no fence" check. `<repo-root>`: the path the
+# file was generated for, where its literal entries point; default /repo,
+# the flake fixtures' root. harness init passes the real repo.
 #
 # The repo's .claude/settings.json as the devenv module writes it. On a host
 # without managed settings this file is the whole harness, so every layer it
 # is supposed to carry is asserted here, and every hook it names must run.
+# shellcheck disable=SC2016  # the filters are jq, where $repo is a jq variable
 set -uo pipefail
-f="${1:?usage: project-settings-test.sh <settings.json> [fenced]}"
-fenced="${2:-}"
+f="${1:?usage: project-settings-test.sh <settings.json> [fenced] [<repo-root>]}"
+fenced=""; repo=/repo
+for a in "${@:2}"; do case "$a" in fenced) fenced=fenced ;; *) repo="$a" ;; esac; done
 pass=0; fail=0
 
-check() { # check <description> <jq filter that must be true>
-  if jq -e "$2" "$f" >/dev/null 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 ($2)"; fi
+check() { # check <description> <jq filter that must be true; $repo is the repo root>
+  if jq -e --arg repo "$repo" "$2" "$f" >/dev/null 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 ($2)"; fi
 }
 
-check "full deny set, not the universal subset" '.permissions.deny | index("Bash(git commit)") and index("Bash(terraform apply)") and index("Bash(sudo)")'
+check "full deny set, not the universal subset" '.permissions.deny | index("Bash(git commit)") and index("Bash(terraform apply)") and index("Bash(sudo)") and index("Bash(nh os switch)") and index("Bash(nh home switch *)")'
 check "bypass mode disabled"                    '.permissions.disableBypassPermissionsMode == "disable"'
 check "guard registered on every writing tool"  '.hooks.PreToolUse[0].matcher == "Bash|Edit|Write|NotebookEdit"'
 check "guard failure blocks"                    '.hooks.PreToolUse[0].hooks[0].onFailure == "block"'
@@ -32,17 +36,17 @@ check "own settings not writable from the shell" '.sandbox.filesystem.denyWrite 
 check "account connectors off"                  '.disableClaudeAiConnectors == true'
 check "no co-author trailer"                    '.includeCoAuthoredBy == false'
 # Linux honours literal write entries only: the repo's own files by absolute path.
-check "own files denied by literal path"        '.sandbox.filesystem.denyWrite | index("/repo/.claude/settings.json") and index("/repo/.claude/settings.local.json") and index("/repo/.git/hooks") and index("/repo/.git/config") and index("/repo/.claude-plugin")'
+check "own files denied by literal path"        '.sandbox.filesystem.denyWrite | index($repo + "/.claude/settings.json") and index($repo + "/.claude/settings.local.json") and index($repo + "/.git/hooks") and index($repo + "/.git/config") and index($repo + "/.claude-plugin")'
 # A literal entry is masked as an unreadable device node, and devenv reads
 # devenv.local.* when they exist: with them listed, no shell evaluated inside
 # the sandbox (2026-10-22). The hook refuses writes to them by name.
-check "devenv.local.* readable by devenv"       '.sandbox.filesystem.denyWrite | (index("/repo/devenv.local.nix") or index("/repo/devenv.local.yaml")) | not'
+check "devenv.local.* readable by devenv"       '.sandbox.filesystem.denyWrite | (index($repo + "/devenv.local.nix") or index($repo + "/devenv.local.yaml")) | not'
 # In user scope it turns the sandbox's Bash auto-allow off (2026-10-22); in
 # a repo file it is ignored. Never written.
 check "no subprocess scrub key"                 '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == null'
 if [ "$fenced" = fenced ]; then
   check "home hidden from the shell"            '.sandbox.filesystem.denyRead | index("~/")'
-  check "repo and shell entry paths readable"   '.sandbox.filesystem.allowRead | index("/repo") and index("~/.nix-profile") and index("~/.local/share/direnv") and index("~/.claude/shell-snapshots") and index("~/.cargo")'
+  check "repo and shell entry paths readable"   '.sandbox.filesystem.allowRead | index($repo) and index("~/.nix-profile") and index("~/.local/share/direnv") and index("~/.claude/shell-snapshots") and index("~/.cargo")'
   check "credentials stay hidden"               '.sandbox.filesystem.allowRead | index("~/.claude") or index("~/") | not'
 else
   check "no read fence by default"              '.sandbox.filesystem.denyRead | index("~/") | not'

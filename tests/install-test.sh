@@ -7,8 +7,9 @@
 # for its confirmation), the Fedora route (dnf, the socket, no installer),
 # what reaches bootstrap (the ref: this checkout, HARNESS_REF, or the
 # published repo when piped; the root steps; flakes on), the init of the
-# checkout, and the flags that stop it. Assumes no nix on the test's own PATH
-# and no controlling terminal, which the Nix build sandbox guarantees.
+# checkout, the NixOS route (no installer, the nix.settings block printed),
+# and the flags that stop it. Assumes no nix on the test's own PATH and no
+# controlling terminal, which the Nix build sandbox guarantees.
 set -uo pipefail
 script="${1:?usage: install-test.sh <scripts/install.sh>}"
 pass=0; fail=0
@@ -44,7 +45,7 @@ run() {
   : >"$log"
   out=$(cd "$cwd" && env -i HOME="$tmp/home" PATH="$path" TMPDIR="$tmp" CALLS="$log" INSTALLER="$tmp/installer" \
     HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" ${HARNESS_REF:+HARNESS_REF="$HARNESS_REF"} \
-    ${BOOTSTRAP_RC:+BOOTSTRAP_RC="$BOOTSTRAP_RC"} \
+    HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_NIX_CONF="$tmp/nix.conf" ${BOOTSTRAP_RC:+BOOTSTRAP_RC="$BOOTSTRAP_RC"} \
     bash "$tmp/checkout/scripts/install.sh" "$@" 2>&1 </dev/null); rc=$?
 }
 called()   { if grep -q -E -e "$2" "$log"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/ not in the calls)"; sed 's/^/  /' "$log"; fi; }
@@ -141,6 +142,28 @@ called "socket recorded"           'HARNESS_ROOT_STEPS=\[nix-daemon.socket\]'
 # Fedora 43 has no nix package: the installer route.
 WITH_NIX=1 run fedora 43 "$tmp/checkout" --yes
 uncalled "fedora 43 is the installer route" 'dnf'
+
+# NixOS: no installer, no dnf, no sudo; nix.conf is the system's, so the
+# nix.settings block is printed while it lacks the lines, then bootstrap.
+: >"$tmp/nix.conf"
+WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --yes
+exits "nixos" 0
+uncalled "no installer on nixos"   '^curl|^installer'
+uncalled "no dnf on nixos"         'dnf'
+uncalled "no sudo on nixos"        '^sudo'
+says "nixos named"                 'NixOS: nix from the system configuration, no installer'
+says "nix.settings printed"        'nix\.settings = \{.*experimental-features = \[ "nix-command" "flakes" \];.*substituters = \[ "https://devenv\.cachix\.org" \];'
+called "bootstrap on nixos"        "^nix run path:$tmp/checkout#harness -- bootstrap --yes$"
+called "nothing recorded on nixos" 'HARNESS_ROOT_STEPS=\[\]'
+printf 'experimental-features = nix-command flakes\nextra-substituters = https://devenv.cachix.org\n' >"$tmp/nix.conf"
+WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --yes
+says "nixos again"                 'NixOS: nix from the system configuration'
+if [[ "$out" =~ nix\.settings ]]; then fail=$((fail+1)); echo "FAIL: nix.settings printed although nix.conf has the lines"; else pass=$((pass+1)); fi
+# Without nix there is nothing to run: refused, nothing downloaded.
+run nixos 26.11 "$tmp/checkout" --yes
+exits "nixos without nix" 1
+says "says why"                    'NixOS without nix on PATH'
+uncalled "still no installer"      '^curl|^installer'
 
 echo "install-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

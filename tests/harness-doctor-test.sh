@@ -6,6 +6,8 @@
 # It must report MISSING lines, run to its summary and exit 1, never stop
 # early. Then the repo part, in three fake repos: the settings file as a
 # store symlink (its hooks must run), as a dangling symlink, as a plain file.
+# The host line for a NixOS and a WSL os-release (fake markers; the build
+# sandbox has no /etc/os-release, so the plain case has no host at all).
 set -uo pipefail
 harness="${1:?usage: harness-doctor-test.sh <harness> <project-settings.json>}"
 settings="${2:?usage: harness-doctor-test.sh <harness> <project-settings.json>}"
@@ -16,7 +18,9 @@ mkdir -p "$tmp/home"
 # doctor <dir> [<path>]: harness doctor in <dir> with nothing (or only <path>)
 # on PATH; sets out and rc.
 doctor() {
-  out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" "$harness" doctor 2>&1); rc=$?
+  out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" \
+    HARNESS_OS_RELEASE="${OS_RELEASE:-/var/empty/none}" HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
+    "$harness" doctor 2>&1); rc=$?
 }
 check() { # check <description> <want-regex>
   if [[ "$out" =~ $2 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/)"; printf '%s\n' "$out" | sed 's/^/  /'; fi
@@ -69,6 +73,15 @@ mkdir -p "$tmp/bin"; printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/code"; chmod +x "$t
 doctor "$tmp/empty" "$tmp/bin"
 check "silent code reported"    'warn  code is on PATH but answers nothing'
 refute "no extension verdict"   'VS Code extension'
+
+# The host line: NixOS from os-release alone (the /etc/NIXOS marker is not
+# visible from inside a session), WSL from its marker.
+printf 'ID=nixos\nPRETTY_NAME="NixOS 26.11 (Xantusia)"\n' >"$tmp/os-release"
+OS_RELEASE="$tmp/os-release" doctor "$tmp/empty"
+check "nixos host line"         'host: NixOS 26.11 \(Xantusia\) .*nix from the system configuration, 0 home-manager owned files skipped'
+printf 'ID=ubuntu\nPRETTY_NAME="Ubuntu 26.10"\n' >"$tmp/os-release"; touch "$tmp/wsl"
+OS_RELEASE="$tmp/os-release" WSL_MARKER="$tmp/wsl" doctor "$tmp/empty"
+check "wsl host line"           'host: WSL2 \(Ubuntu 26.10\) '
 
 out=$("$harness" --version 2>&1); rc=$?
 exits "--version" 0; check "--version prints the revision" '^harness .+'

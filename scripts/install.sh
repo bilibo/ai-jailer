@@ -20,7 +20,10 @@
 # terminal. That installer leaves flakes off, so the script turns them on for
 # its own nix calls and bootstrap writes them into nix.conf. The kernel's
 # user-namespace restriction (Ubuntu 23.10 and later) is bootstrap's: it
-# offers the sysctl and can be declined.
+# offers the sysctl and can be declined. NixOS (/etc/NIXOS, or ID=nixos in
+# os-release): Nix is the system's, nothing is downloaded, and nix.conf is a
+# store symlink the system configuration owns, so the nix.settings block it
+# needs is printed for configuration.nix; bootstrap does the user side.
 #
 # The harness ref (`nix run`, and what bootstrap puts in the profile):
 # HARNESS_REF, else this checkout when the script runs from one
@@ -37,6 +40,8 @@ CHECK=0; DRY=0; YES=0; INIT=1; pending=0
 need=(); done_steps=(); pass=(); init_flags=()
 # Tests point these at scratch files.
 os_release="${HARNESS_OS_RELEASE:-/etc/os-release}"
+nixos_marker="${HARNESS_NIXOS_MARKER:-/etc/NIXOS}"
+nix_conf="${HARNESS_NIX_CONF:-/etc/nix/nix.conf}"
 nix_profile_sh="${HARNESS_NIX_PROFILE_SH:-/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
 
 die() { echo "install.sh: $*" >&2; exit 1; }
@@ -70,6 +75,23 @@ fedora_steps() {
     printf '\n==> enable the nix-daemon socket\n'
     root systemctl enable --now nix-daemon.socket
     done_steps+=(nix-daemon.socket)
+  fi
+}
+
+# NixOS: Nix and nix.conf are the system configuration's. The block is
+# printed where nix.conf lacks it (bootstrap prints the same one).
+nixos_steps() {
+  command -v nix >/dev/null 2>&1 || die "NixOS without nix on PATH: run this from a login shell"
+  printf '\n==> NixOS: nix from the system configuration, no installer; %s is the system'"'"'s\n' "$nix_conf"
+  if ! grep -q -E '^experimental-features.*flakes' "$nix_conf" 2>/dev/null || ! grep -q -F devenv.cachix.org "$nix_conf" 2>/dev/null; then
+    cat <<'NIX'
+    flakes and the devenv cache are not both in it; add to configuration.nix and rebuild:
+      nix.settings = {
+        experimental-features = [ "nix-command" "flakes" ];
+        substituters = [ "https://devenv.cachix.org" ];
+        trusted-public-keys = [ "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=" ];
+      };
+NIX
   fi
 }
 
@@ -118,7 +140,9 @@ main() {
   # shellcheck disable=SC1090
   [ -r "$os_release" ] && . "$os_release"
   [ "$(id -u)" != 0 ] || die "run as your own user; sudo is used where root is needed"
-  if [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null; then fedora_steps; else installer_steps; fi
+  if [ -e "$nixos_marker" ] || [ "${ID:-}" = nixos ]; then nixos_steps
+  elif [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null; then fedora_steps
+  else installer_steps; fi
   if [ "$CHECK" = 1 ]; then echo; echo "install.sh --check: nothing changed; next would be: nix run $ref#harness -- bootstrap"; exit 0; fi
 
   # Nix-built tools look for the CA bundle at the NixOS and Debian paths or

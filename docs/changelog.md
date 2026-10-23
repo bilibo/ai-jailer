@@ -3,6 +3,87 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-23
+
+- Native NixOS recorded as a tested host, unmanaged shape: the NixOS 26.11
+  laptop runs harness repos, this checkout included, on the repo file
+  alone, with direnv 2.38.2 (the `pkgs/direnv.nix` override), devenv 2.4.0
+  and Claude Code 2.1.296 from its own home-manager configuration. The
+  install script has never run there and the README now says not to: the
+  bootstrap would write `/etc/nix/nix.conf`, a store symlink the next
+  rebuild restores (roadmap gap A, the NixOS branch, stays open). The
+  managed module has still not run on a live host. README reshaped for a
+  first-time reader: one paragraph on what the harness does, then a route
+  per host; the `harness check` case counts stay in this file.
+- Later the same day, a session on the NixOS laptop worked the brief's
+  seven items, every one proven by a flake check from the checkout
+  (`nix flake check .`, 14 checks, green); the README and runbook lines
+  above that said not to run the install script on NixOS are superseded
+  by the NixOS branch below.
+  - `harness init` ran the settings test with `/repo` literals against the
+    real repo's file, so it died with "fails the harness checks" on any
+    checkout. The test takes the repo root as an argument (default
+    `/repo` for the flake fixtures), init passes the real path, and a
+    fixture at `/home/acme/code/git/acme/demo` proves the test at a real
+    path (`project-settings-root-test`, 23). How the 2026-10-22 Ubuntu init
+    got past that check is not recorded.
+  - Host detection (roadmap gap A, the NixOS half): NixOS is `/etc/NIXOS`
+    or `ID=nixos` (the marker is invisible from inside a session, the
+    os-release line is not), WSL is the binfmt `WSLInterop` file or
+    `WSL_DISTRO_NAME`. `root_write` refuses any target that resolves into
+    `/nix/store` whether or not NixOS was detected, naming the
+    `nix.settings` or `boot.kernel.sysctl` option instead. On NixOS the
+    install script downloads nothing and bootstrap implies `--no-root`:
+    the `nix.settings` block is printed when `nix.conf` lacks flakes or
+    the devenv cache, the sysctl as a `boot.kernel.sysctl` line, and every
+    user file that is a store symlink (home-manager's) is left alone with
+    its option printed. Doctor opens with a host line (`host: NixOS 26.11
+    (Zokor) ..., 3 home-manager owned files skipped`, `host: WSL2 (Ubuntu
+    24.04)`) and reports home-manager files as ok. `harness init` on a WSL
+    host uncomments `platform = "wsl"` in the generated `devenv.nix`.
+    Stubs only (install-test 60, harness-bootstrap-test 151,
+    harness-doctor-test 29, harness-init-dry-run-test 31); on this laptop
+    `harness doctor` and `bootstrap --dry-run` print the NixOS lines and
+    call no sudo. Live WSL, the `[boot] systemd=true` check and the
+    `environment.d` skip stay open.
+  - `nh os switch|boot|test` and `nh home switch` denied by rule and by
+    the hook; `--add-dir` joins the nested-`claude` flags (hook-test 252,
+    scoped 279, worktree 271). `nixos-rebuild` stays denied whole.
+  - The env-file preamble was fail-open: `direnv export` errors were
+    discarded and the command ran without the repo's environment. The hook
+    now ends every Bash decision with `check_env`: `direnv status --json`
+    (3 ms) refuses a blocked or denied `.envrc`; otherwise `direnv export
+    json` runs with direnv's state variables unset, and a non-zero exit or
+    an `is blocked` line refuses the command with the first error line and
+    the fix. A good export is remembered under
+    `~/.cache/claude-nix-harness/direnv-ok` by the mtimes of `.envrc`,
+    `devenv.*`, the direnv and devenv binaries and the DEVENV_PROFILE path,
+    because the export costs 0.2 s warm and seconds after a change (4.5 s
+    on this checkout): a steady-state Bash call now costs 36 to 41 ms in
+    the hook, 26 ms without an `.envrc`. `require_allowed` does not fail
+    the load: an edited, unapproved `devenv.nix` exports with
+    `DIRENV_REQUIRED` set and passes this check.
+  - `harness check` judged verdicts on every string in the transcript, the
+    model's prose included. Verdicts now see tool results only; the
+    upstream-refusal patterns still read everything, since they can only
+    make a case inconclusive. `harness check --parse <jsonl>` prints what
+    the verdicts see; `check-parser-test` (9) runs it over two fixtures,
+    one where the prose claims a denial the tool result refutes.
+  - Ubuntu user namespaces: where AppArmor confines them, bootstrap
+    writes `/etc/apparmor.d/bwrap` (the profile from the Claude Code
+    sandboxing docs, marker line first) and reloads AppArmor instead of
+    flipping the machine-wide sysctl; `reset` removes it; doctor says
+    whether the profile is there and warns when `bwrap` on PATH is not
+    `/usr/bin/bwrap`. The `unprivileged_userns_clone` sysctl path stays
+    for older Debian kernels. Stubs only; the Ubuntu laptop verifies it.
+  - The NixOS module evaluates in `nix flake check`:
+    `nixos-module-eval` forces only the `/etc/claude-code` tree of a
+    `nixosSystem` with `harness.enable` and asserts the sandbox block, the
+    hook path and the deny rules; `nixos-module-assertion` reads
+    `config.assertions` with `allowUserNamespaces = false` and finds the
+    module's message, no toplevel built. `examples/nixos-host.nix` is the
+    import snippet. No generation was activated.
+
 ## 2026-10-22
 
 - Audit follow-ups 0.4 and 0.5 (roadmap). `CLAUDE.md` now says how to run

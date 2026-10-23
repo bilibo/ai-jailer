@@ -109,7 +109,7 @@ doing it by hand or for reading what the script wrote:
 | Host | Set |
 |---|---|
 | Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
-| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist`, and offers the user-namespace sysctl where the kernel confines them. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
+| Unmanaged host | No harness modules. Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing, Nix is the system's) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist`, and offers the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl where an older Debian kernel does. On NixOS (2026-10-23) nothing under `/etc` is written: `nix.conf` is the system configuration's, so the `nix.settings` block is printed when it lacks flakes or the devenv cache, and a user file that is a store symlink (home-manager's) is left alone with the option that sets it printed; `root_write` refuses any store symlink on every host. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
 | Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
 
 See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
@@ -231,7 +231,8 @@ every host command stubbed: `install-test`, `harness-bootstrap-test`):
 4. `scripts/install.sh` again: no installer, no duplicate rc lines, the
    same report.
 5. `harness reset`: Nix gone through `/nix/nix-installer uninstall`, the
-   sysctl drop-in gone, apt untouched, the repo intact.
+   AppArmor profile `/etc/apparmor.d/bwrap` gone, apt untouched, the repo
+   intact.
 
 After a Claude Code upgrade also re-read the settings reference for the
 keys in `lib/settings.nix`; the file header records the version they were
@@ -270,7 +271,10 @@ which is the dangerous direction.
   did not run or direnv is not allowed in that directory. Check
   `direnv status` in the repo, and `~/.claude/shell-snapshots/` is not the
   source of PATH any more: the preamble runs `direnv export bash` per
-  command.
+  command. Since 2026-10-23 the hook refuses the command instead when that
+  export would fail (`env-guard: direnv export failed in <dir>: ...`), with
+  the fix in the message; an edited `devenv.nix` that is not yet approved
+  loads anyway (`require_allowed` only flags it).
 - **"sandbox unavailable" at start.** `failIfUnavailable` is on, so the
   session refuses to start. bubblewrap needs user namespaces
   (`security.allowUserNamespaces`, asserted by the module) and works nested

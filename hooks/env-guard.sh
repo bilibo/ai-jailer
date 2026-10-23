@@ -6,7 +6,10 @@
 #
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
 # ConfigChange (together with onFailure = "block" in the hook registration).
-# Needs Claude Code >= 2.1.295. lib/hooks.nix puts jq, direnv, sed and
+# The same for the environment: the env-file preamble below discards what
+# `direnv export` says, so before every Bash command the hook checks that
+# the nearest .envrc can load (check_env) and refuses the command with the
+# reason when it cannot. Needs Claude Code >= 2.1.295. lib/hooks.nix puts jq, direnv, sed and
 # coreutils from the store first on PATH, so the guard never runs the
 # user's copies of them.
 #
@@ -28,6 +31,52 @@ event=$(jq -r '.hook_event_name // empty' <<<"$input")
 cwd=$(jq -r '.cwd // empty' <<<"$input")
 
 deny() { printf 'env-guard: %s\n' "$1" >&2; exit 2; }
+
+# check_env <cwd>: refuse the command unless direnv can load the .envrc
+# nearest to <cwd>; a directory without one passes. `direnv status` (3 ms)
+# says whether that .envrc is allowed without loading it, which covers an
+# edit since the last `direnv allow`. The export itself (0.2 s warm, seconds
+# after a change, measured 2026-10-23) runs only when the files direnv
+# watches in a harness repo, or the direnv and devenv binaries, differ from
+# the last good run, or when that run's DEVENV_PROFILE is gone from the
+# store; the record lives under ~/.cache/claude-nix-harness (no record, or
+# an unwritable cache, means the export runs every time). A refusal names
+# the first error line and what fixes it.
+check_env() {
+  local st rcpath dir fp cache key profile stored out err rc first fix
+  [ -d "$1" ] || return 0
+  st=$(cd "$1" && direnv status --json 2>/dev/null) || deny "direnv status failed in $1 (run: direnv status)"
+  rcpath=$(jq -r '.state.foundRC.path // empty' <<<"$st")
+  [ -n "$rcpath" ] || return 0
+  dir="${rcpath%/.envrc}"
+  [ "$(jq -r '.state.foundRC.allowed // 0' <<<"$st")" = 0 ] \
+    || deny "direnv export failed in $dir: $rcpath is blocked. Run \`direnv allow\` to approve its content (fix: direnv allow $dir)"
+  fp=$( (cd "$dir" && stat -c '%n %Y %s %i' .envrc devenv.nix devenv.yaml devenv.lock devenv.local.nix devenv.local.yaml 2>/dev/null; readlink -f "$(command -v direnv)" "$(command -v devenv 2>/dev/null || echo /dev/null)" 2>/dev/null) ) || true
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-nix-harness/direnv-ok"
+  key=$(printf '%s' "$dir" | sha256sum | cut -c1-16)
+  if [ -r "$cache/$key" ]; then
+    profile=$(head -n 1 "$cache/$key"); stored=$(tail -n +2 "$cache/$key")
+    if [ "$stored" = "$fp" ] && { [ -z "$profile" ] || [ -e "$profile" ]; }; then return 0; fi
+  fi
+  # direnv skips the load when its state variables say this .envrc is
+  # loaded and unchanged (a session started inside the devenv shell), so
+  # they are unset: the export then evaluates every time it runs.
+  out=$(mktemp)
+  if err=$(cd "$dir" && env -u DIRENV_DIR -u DIRENV_FILE -u DIRENV_DIFF -u DIRENV_WATCHES direnv export json 2>&1 >"$out"); then rc=0; else rc=$?; fi
+  if [ "$rc" != 0 ] || grep -q 'is blocked' <<<"$err"; then
+    rm -f "$out"
+    first=$(grep -i -m1 'error' <<<"$err" || grep -v '^$' <<<"$err" | tail -n 1 || true)
+    if grep -q 'is blocked' <<<"$err"; then fix="direnv allow $dir"; else fix="the devenv error (devenv shell in $dir shows it)"; fi
+    deny "direnv export failed in $dir: ${first:-exit $rc} (fix: $fix)"
+  fi
+  # The export lists what differs from this environment: a profile already
+  # in it (the session's own devenv shell) is the current one.
+  profile=$(jq -r '.DEVENV_PROFILE // empty' "$out" 2>/dev/null) || profile=""
+  [ -n "$profile" ] || profile="${DEVENV_PROFILE:-}"
+  rm -f "$out"
+  { mkdir -p "$cache" && printf '%s\n%s\n' "$profile" "$fp" > "$cache/$key"; } 2>/dev/null || true
+  return 0
+}
 
 # Project rules apply when there are no roots, when cwd is unknown (fail
 # closed), when cwd is under a root, or when the call names a path under a
@@ -214,7 +263,7 @@ ENV
         # 4. system and config (universal)
         re="(^|[^a-z])(sudo|doas|pkexec|su|run0)$e"
         [[ "$n" =~ $re ]] && deny "privilege escalation blocked"
-        re='(^|[^a-z])(nix +(profile|upgrade-nix|registry|store +(gc|delete|optimise))|nix-env|nix-collect-garbage|nixos-rebuild|nix-channel|home-manager +switch|systemctl|journalctl +--vacuum|wsl\.exe|wslconfig)'
+        re='(^|[^a-z])(nix +(profile|upgrade-nix|registry|store +(gc|delete|optimise))|nix-env|nix-collect-garbage|nixos-rebuild|nh +(os +(switch|boot|test)|home +switch)|nix-channel|home-manager +switch|systemctl|journalctl +--vacuum|wsl\.exe|wslconfig)'
         [[ "$n" =~ $re ]] && deny "system change blocked"
         re="$b(powershell|pwsh|cmd)(\.exe)?( |$)|$b[^ ]*\.exe( |$)|/mnt/c/"
         [[ "$n" =~ $re ]] && deny "Windows executable blocked"
@@ -239,13 +288,19 @@ ENV
         # 6. nested sessions that would skip the repo's rules (project rule).
         # Without managed settings the repo file is the only rule source, and
         # these flags replace or bypass it for the child session (`--bare`
-        # skips every hook). Arguments stop at a command separator so a flag
+        # skips every hook); `--add-dir` widens the child's working
+        # directories, which the sandbox lets it write. Arguments stop at a
+        # command separator so a flag
         # mentioned in a later command does not count. A renamed copy of the
         # binary gets past this; the sandbox is the layer for that.
         if [ "$in_scope" = 1 ]; then
-        re="(^|[^a-z])claude( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions)( |=|$)"
+        re="(^|[^a-z])claude( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions|add-dir)( |=|$)"
         [[ "$n" =~ $re ]] && deny "claude launch flag blocked"
         fi
+
+        # 7. the environment the command is about to run in must load
+        # (universal; the env-file preamble below is fail-open on its own).
+        check_env "$cwd"
         exit 0 ;;
     esac
     exit 0 ;;
