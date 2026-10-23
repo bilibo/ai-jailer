@@ -5,6 +5,23 @@ happened and what was learned on the day.
 
 ## 2026-10-22
 
+- Audit follow-ups 0.4 and 0.5 (roadmap). `CLAUDE.md` now says how to run
+  the flake checks from inside a session: a copy of the regular files,
+  then `nix flake check path:<dir>`. The `git archive` advice was wrong
+  twice over: the archive misses untracked files, and `path:` on the
+  checkout itself fails because the sandbox masks the untracked dotfiles
+  (`.bash_profile`, `.vscode`, ...) as device nodes, which the fetcher
+  refuses (found when the hook-test build for the case 2 fix hit
+  `.bash_profile`). `tests/harness-bootstrap-test.sh` runs the harness
+  with the stub directory as the whole PATH; the by-hand run on a host
+  with `getenforce` or `code` used to fail 34 cases. By hand on the
+  Ubuntu laptop it then failed 52 others: the bootstrap's `nix_path`
+  sources the nix-installer's profile.d, which puts the default profile's
+  real nix ahead of the stub, and the real nix wanted GitHub for the ref
+  (on Fedora the same file adds directories without a nix in them, which
+  is why the 2026-10-21 measurement passed). The profile.d files it
+  sources are now `HARNESS_NIX_PROFILE_D`, which the test sets empty. By
+  hand from inside a session and in the flake check: 104 of 104.
 - Case 2 of `harness check` again on the Ubuntu laptop, now with the scrub
   key gone: the probe ran, `DEVENV_ROOT` was empty, and the two diagnose
   sessions showed why. devenv 2.4.0 creates `$XDG_RUNTIME_DIR/devenv-<hash>`

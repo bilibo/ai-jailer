@@ -6,14 +6,15 @@
 # logs the rest), nix, sysctl, systemctl and the tools doctor looks for; a
 # fake HOME, and the system files under a scratch directory (HARNESS_NIX_CONF,
 # HARNESS_SYSCTL_DROPIN, HARNESS_NIX_INSTALLER, HARNESS_OS_RELEASE,
-# HARNESS_CA_BUNDLE). Asserts the root steps (nix.conf with and without a
+# HARNESS_CA_BUNDLE; HARNESS_NIX_PROFILE_D empty, so the stub nix wins on a
+# nix-installer host). Asserts the root steps (nix.conf with and without a
 # flakes line; the user-namespace sysctl offered, declined and accepted; dnf
 # on Fedora only), the user files per rc-file layout (none, Fedora's
 # ~/.bashrc.d, a plain ~/.bashrc, zsh only, an existing ~/.tmux.conf, a
 # foreign direnv.toml), idempotent re-runs, the receipt, reset undoing all of
 # it, upgrade building before it removes and handing the user steps to the
-# upgraded harness, and reset doing nothing without a receipt. Assumes no controlling terminal and no getenforce or code on
-# PATH, which the Nix build sandbox guarantees.
+# upgraded harness, and reset doing nothing without a receipt. Assumes no
+# controlling terminal; the stub directory is the whole PATH.
 set -uo pipefail
 harness="${1:?usage: harness-bootstrap-test.sh <harness>}"
 pass=0; fail=0
@@ -60,10 +61,10 @@ ubuntu
 harness() {
   local home="$1" cmd="$2"; shift 2
   : >"$log"
-  out=$(cd "$tmp" && env -i HOME="$home" PATH="$tmp/bin:$PATH" TMPDIR="$tmp" CALLS="$log" RESTRICTED="$tmp/restricted" USER=tester \
+  out=$(cd "$tmp" && env -i HOME="$home" PATH="$tmp/bin" TMPDIR="$tmp" CALLS="$log" RESTRICTED="$tmp/restricted" USER=tester \
     PROFILE_STATE="$tmp/profile" HARNESS_REF=github:bilibo/claude-nix-harness HARNESS_ROOT_STEPS="${ROOT_STEPS-nix-installer}" \
     HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_CONF="$tmp/etc/nix.conf" HARNESS_SYSCTL_DROPIN="$tmp/etc/99-userns.conf" \
-    HARNESS_NIX_INSTALLER="$tmp/nix/nix-installer" HARNESS_CA_BUNDLE="$tmp/ca.pem" \
+    HARNESS_NIX_INSTALLER="$tmp/nix/nix-installer" HARNESS_CA_BUNDLE="$tmp/ca.pem" HARNESS_NIX_PROFILE_D= \
     "$harness" "$cmd" "$@" 2>&1 </dev/null); rc=$?
 }
 ok()   { pass=$((pass+1)); }
