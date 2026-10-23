@@ -205,26 +205,17 @@ The gaps, in order:
       case 11 (dnf on Fedora) goes; the Fedora host line check moves to a
       doctor-only case. Fix the header (lines 9-35: "Root is needed for
       dnf (Fedora)...").
-   4. `CLAUDE.md`, section "Checks": the `git archive` copy misses
-      untracked files the flake references. Replace "run it on a `git
-      archive` copy" with a copy of the regular files only (the sandbox
-      masks untracked dotfiles as device nodes and `tar` stops on them):
-      ```
-      git ls-files -co --exclude-standard -z \
-        | while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\0' "$f"; done \
-        | tar --null -T - -cf - | tar -xf - -C <dir>
-      nix flake check path:<dir>
-      ```
-      The same filter goes into the memory note `nix-build-from-tree-copy`
-      (`~/.claude/projects/-home-raul-code-claude-nix-harness/memory/`),
-      which a session cannot write.
-   5. `tests/harness-bootstrap-test.sh` line 63: `PATH="$tmp/bin:$PATH"`
-      becomes `PATH="$tmp/bin"`; the harness wrapper prepends its own
-      store tools (`pkgs/harness.nix` runtimeInputs), so the stubs are all
-      it needs. Measured 2026-10-21 on this laptop: 67 passed, 34 failed
-      as is (the host's `getenforce` and `code`); 101 passed, 0 failed
-      with the change. Drop "and no getenforce or code on PATH, which the
-      Nix build sandbox guarantees" from the header (lines 14-16).
+   4. Done 2026-10-22: `CLAUDE.md`, section "Checks", carries the copy of
+      the regular files and `nix flake check path:<dir>` (changelog). No
+      memory note: `CLAUDE.md` is loaded into every session here.
+   5. Done 2026-10-22: `tests/harness-bootstrap-test.sh` runs the harness
+      with the stub directory as the whole PATH (the wrapper prepends its
+      own store tools), so a by-hand run no longer sees the host's
+      `getenforce` and `code`; the header no longer claims the Nix build
+      sandbox guarantees that. On a nix-installer host the bootstrap's
+      `nix_path` then put the default profile's real nix ahead of the stub
+      (52 cases, GitHub unreachable from a session): the profile.d files
+      it sources are `HARNESS_NIX_PROFILE_D`, empty in the test.
    6. `pkgs/harness/init.sh`, the foreign-file block (lines 192-199): a
       foreign `devenv.lock` is approved by the second `direnv allow`
       without being shown, and it pins every input, nixpkgs included.

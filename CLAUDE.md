@@ -22,8 +22,19 @@ entry, never by editing the old one. Dates are absolute, never relative.
 
 ## Checks
 
-A bare `nix flake check` fails inside a session (the sandbox masks
-`.gitmodules` as a device node): run it on a `git archive` copy, or as
-`nix flake check path:<checkout>` from the test repo. Before handing over
-Nix changes: `nix fmt`, `statix`, `deadnix`; never pass `self` into a
-package.
+A bare `nix flake check` fails inside a session, and so does `path:` on
+the checkout: the sandbox masks the checkout's untracked dotfiles
+(`.bashrc`, `.gitmodules`, `.vscode`, ...) as device nodes or empty files,
+which the `path:` fetcher refuses. Run it on a copy of the regular files
+only:
+
+```
+git ls-files -co --exclude-standard -z \
+  | while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\0' "$f"; done \
+  | tar --null -T - -cf - | tar -xf - -C <dir>
+nix flake check path:<dir>
+```
+
+One check at a time: `nix build path:<dir>#checks.x86_64-linux.<name>
+--no-link -L`. Before handing over Nix changes: `nix fmt`, `statix`,
+`deadnix`; never pass `self` into a package.

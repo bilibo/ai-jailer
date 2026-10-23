@@ -148,11 +148,19 @@ in_list() { local x="$1"; shift; printf '%s\n' "$@" | grep -q -x -F -e "$x"; }  
 json_list() { jq -n '$ARGS.positional' --args "$@"; }
 
 # Fedora's profile.d puts ~/.nix-profile/bin and the default profile on PATH
-# for new shells; this shell may predate the dnf step.
+# for new shells; this shell may predate the dnf step. Fedora's package
+# first, then the nix-installer's. The test sets the list empty: on a
+# nix-installer host the default profile's real nix would otherwise outrun
+# the stub (2026-10-22).
+NIX_PROFILE_D="${HARNESS_NIX_PROFILE_D-/etc/profile.d/nix-daemon.sh:/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
 nix_path() {
+  local -a files; local f
   unset __ETC_PROFILE_NIX_SOURCED
-  [ -r /etc/profile.d/nix-daemon.sh ] && . /etc/profile.d/nix-daemon.sh   # Fedora's package
-  [ -r /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ] && . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh   # the nix-installer
+  IFS=: read -r -a files <<<"$NIX_PROFILE_D"
+  for f in "${files[@]}"; do
+    # shellcheck disable=SC1090
+    [ -r "$f" ] && . "$f"
+  done
   [ -n "${NIX_SSL_CERT_FILE:-}" ] || [ -z "$CA_BUNDLE" ] || export NIX_SSL_CERT_FILE="$CA_BUNDLE"
   return 0
 }
