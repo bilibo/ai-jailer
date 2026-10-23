@@ -188,12 +188,13 @@ Each phase: file list first, approval, implement, tests as cases in
 
 ### Phase 1: housekeeping and `harness doctor`
 
-- `nh` into the system set of `lib/deny-rules.nix` and the hook's system
-  regex: `nh os switch|boot|test`, `nh home switch`, `nixos-rebuild
-  switch|boot|test`, `home-manager switch`. Leave `nh os build`,
-  `nixos-rebuild build`, `nix build`, `nix flake check` alone. Test cases
-  for each, both directions.
-- `--add-dir` into the hook's nested-`claude` flag list, with a test.
+- Done 2026-10-23: `nh` in the system set of `lib/deny-rules.nix` and the
+  hook's system regex (`nh os switch|boot|test`, `nh home switch`);
+  `nh os build`, `nix build`, `nix flake check` pass. `nixos-rebuild` stays
+  denied as a whole, `build` included, until Raul says otherwise. Test
+  cases both directions (hook-test).
+- Done 2026-10-23: `--add-dir` in the hook's nested-`claude` flag list,
+  with tests.
 - `harness doctor` exists since 2026-10-21: the host report, `claude
   doctor` (Claude Code's own read-only diagnostics), the cwd repo's
   `.claude/settings.json` symlink (present, dangling, which store path),

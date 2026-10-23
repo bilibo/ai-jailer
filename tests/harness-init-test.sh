@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-#   harness-init-test.sh <path-to-harness>
+#   harness-init-test.sh <path-to-harness> [<settings.json>]
 #
 # `harness init --dry-run` under a temp HOME and code root: it prints every
 # file a new repo gets and creates nothing, not even the repo directory. On
-# an existing repo with its own devenv.nix, the shell step stops for approval.
+# an existing repo with its own devenv.nix, the shell step stops for approval;
+# with --yes it reaches the checks, where the stub direnv has linked
+# <settings.json> (a store path; default: the harness itself) as the repo's
+# .claude/settings.json, and the settings test must get the repo's own path.
 set -uo pipefail
-harness="${1:?usage: harness-init-test.sh <harness>}"
+harness="${1:?usage: harness-init-test.sh <harness> [<settings.json>]}"
+settings="${2:-$harness}"
 pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/home"
@@ -14,7 +18,7 @@ check() { # check <description> <want-regex>
   if [[ "$out" =~ $2 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/)"; printf '%s\n' "$out" | sed 's/^/  /'; fi
 }
 init() { # init <args...>: sets out and rc
-  out=$(env -i HOME="$tmp/home" PATH=/var/empty HARNESS_CODE_ROOT="$tmp/code" "$harness" init "$@" 2>&1); rc=$?
+  out=$(env -i HOME="$tmp/home" PATH=/var/empty HARNESS_CODE_ROOT="$tmp/code" HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" "$harness" init "$@" 2>&1); rc=$?
 }
 
 init --dry-run acme/demo
@@ -51,19 +55,37 @@ check "check --help" 'harness check \[<repo>\]'
 # without --yes or a terminal, stops before any `direnv allow`. direnv and
 # devenv are stubs that log their calls.
 mkdir -p "$tmp/bin" "$tmp/foreign"; echo '{ pkgs, ... }: { enterShell = "foreign code"; }' >"$tmp/foreign/devenv.nix"
-printf '#!/bin/sh\necho "direnv $*" >>"$CALLS"\n[ "$1" = version ] && echo 2.38.2\nexit 0\n' >"$tmp/bin/direnv"
+printf '#!/bin/sh\necho "direnv $*" >>"$CALLS"\n[ "$1" = version ] && echo 2.38.2\n[ "$1" = allow ] && [ -n "${2:-}" ] && mkdir -p "$2/.claude" && ln -sfn "$SETTINGS" "$2/.claude/settings.json"\nexit 0\n' >"$tmp/bin/direnv"
 printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/devenv"; chmod +x "$tmp/bin/direnv" "$tmp/bin/devenv"
 shell_init() { # shell_init <args...>: init with the stubs, no terminal; sets out and rc
   : >"$tmp/calls"
-  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" HARNESS_CODE_ROOT="$tmp/code" "$harness" init "$@" "$tmp/foreign" 2>&1 </dev/null); rc=$?
+  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS="$settings" HARNESS_CODE_ROOT="$tmp/code" "$harness" init "$@" "$tmp/foreign" 2>&1 </dev/null); rc=$?
 }
 shell_init
 if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a foreign devenv.nix without --yes exits 0"; fi
 check "the foreign file printed" 'foreign/devenv\.nix \(not written by harness init\).*foreign code'
 check "refused, --yes named"     'not approved: devenv\.nix; .*re-run with --yes'
 if grep -q 'direnv allow' "$tmp/calls"; then fail=$((fail+1)); echo "FAIL: direnv allow ran without approval"; else pass=$((pass+1)); fi
-shell_init --yes
+shell_init --yes --verbose
 if grep -q "^direnv allow $tmp/foreign\$" "$tmp/calls"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: --yes did not reach direnv allow: $(tr '\n' ';' <"$tmp/calls")"; fi
+# The repo is not at /repo, the fixtures' root: the settings test gets the
+# repo's path (the --verbose trace shows the call), so its literal-path
+# checks are the only ones that can fail against the /repo fixture.
+check "settings test gets the repo path" "project-settings-test\.sh $tmp/foreign/\.claude/settings\.json $tmp/foreign[[:space:]]"
+check "settings linked from the store"   'ok +\.claude/settings\.json -> /nix/store/'
+if [[ "$out" =~ 'FAIL: full deny set' ]]; then fail=$((fail+1)); echo "FAIL: the settings test did not read the linked file"; else pass=$((pass+1)); fi
+
+# A WSL host (fake marker): the dry run says so, and a real write (no shell
+# step) puts harness.platform = "wsl" into devenv.nix; elsewhere the line
+# stays commented out.
+touch "$tmp/wsl"
+WSL_MARKER="$tmp/wsl" init --dry-run acme/demo
+check "wsl noted in the dry run" 'platform +wsl \(harness\.platform in devenv\.nix\)'
+WSL_MARKER="$tmp/wsl" init --no-shell acme/wsl
+if grep -q -E '^    platform = "wsl";' "$tmp/code/acme/wsl/devenv.nix"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: harness.platform not set on a WSL host"; fi
+init --no-shell acme/plain
+if grep -q -E '^    # platform = "wsl";' "$tmp/code/acme/plain/devenv.nix"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: platform line not commented out off WSL"; fi
+if [[ "$out" =~ 'platform   wsl' ]]; then fail=$((fail+1)); echo "FAIL: wsl noted off WSL"; else pass=$((pass+1)); fi
 
 echo "harness-init-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

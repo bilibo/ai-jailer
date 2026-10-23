@@ -19,16 +19,32 @@
 # needs, then runs `harness bootstrap`, which finds them done and does the
 # rest.
 #
+# NixOS (/etc/NIXOS, or ID=nixos in os-release: the marker is not visible
+# from inside a sandboxed session) is the unmanaged shape without root
+# steps: /etc/nix/nix.conf and the sysctls belong to the system
+# configuration, so --no-root is implied and the nix.settings and
+# boot.kernel.sysctl lines are printed where the host lacks them. A user file
+# that is a symlink into the Nix store is home-manager's: it is skipped and
+# the option that sets it is printed; the rest is written as on any host.
+# Independently of detection, root_write refuses any target that resolves
+# into the store. WSL (binfmt WSLInterop, or WSL_DISTRO_NAME) is reported in
+# the host line; `harness init` sets harness.platform = "wsl" there.
+#
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
 # harness ref's current flake.lock. Root is needed for dnf (Fedora),
 # /etc/nix/nix.conf (the devenv cache; flakes where the installer left them
 # off), the nix-daemon socket, and the one kernel setting the Claude Code
 # sandbox cannot run without: where the kernel confines unprivileged user
-# namespaces (Ubuntu 23.10 and later through AppArmor, older Debian through
-# kernel.unprivileged_userns_clone) a sysctl plus a drop-in under
-# /etc/sysctl.d, asked for on its own (--yes answers it); declined, the
-# command is printed for later and doctor keeps reporting it. Those steps go
+# namespaces. Ubuntu 23.10 and later do it through AppArmor
+# (kernel.apparmor_restrict_unprivileged_userns = 1): the fix is the
+# profile from the Claude Code sandboxing docs, /etc/apparmor.d/bwrap, an
+# unconfined profile for /usr/bin/bwrap with `userns`, then an AppArmor
+# reload; the machine-wide sysctl stays as it is. Older Debian kernels gate
+# them with kernel.unprivileged_userns_clone: a sysctl plus a drop-in under
+# /etc/sysctl.d. Either is asked for on its own (--yes answers it);
+# declined, the command is printed for later and doctor keeps reporting it.
+# Those steps go
 # through sudo and say what they do first. --no-root skips them; --no-profile
 # skips the `nix profile` step for a host that gets direnv, devenv and ccmux
 # some other way (the README's "your own configuration"). `doctor` changes
@@ -123,8 +139,11 @@ TMUX_CONF="${HARNESS_TMUX_CONF:-$HARNESS_DIR/pkgs/tmux.conf}"
 # os-release and CA bundle below, at a scratch directory.
 NIX_CONF="${HARNESS_NIX_CONF:-/etc/nix/nix.conf}"
 SYSCTL_DROPIN="${HARNESS_SYSCTL_DROPIN:-/etc/sysctl.d/99-claude-nix-harness.conf}"
+APPARMOR_PROFILE="${HARNESS_APPARMOR_PROFILE:-/etc/apparmor.d/bwrap}"
 NIX_INSTALLER="${HARNESS_NIX_INSTALLER:-/nix/nix-installer}"
 OS_RELEASE="${HARNESS_OS_RELEASE:-/etc/os-release}"
+NIXOS_MARKER="${HARNESS_NIXOS_MARKER:-/etc/NIXOS}"
+WSL_MARKER="${HARNESS_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 DEFERRED=()   # declined root steps, printed at the end as commands for later
 
 # Nix-built tools (devenv's fetcher included) look for the CA bundle at the
@@ -206,8 +225,12 @@ jq_edit() { # jq_edit <file> <jq args...>: rewrite a JSON file, the rest of it k
   jq "$@" "$f" >"$tmp" && mv "$tmp" "$f"
 }
 
-root_write() { # root_write <path> <content>: a root-owned 0644 file, through sudo
-  local tmp
+root_write() { # root_write <path> <content> [<NixOS option>]: a root-owned 0644 file, through sudo
+  local tmp real
+  # A store symlink is the NixOS configuration's: `install` would replace it
+  # with a plain file that the next rebuild silently restores.
+  real=$(readlink -f "$1" 2>/dev/null || true)
+  [[ "$real" != /nix/store/* ]] || die "$1 is a symlink into the Nix store ($real): the system configuration owns it; set ${3:-the matching option} in configuration.nix instead"
   if [ "$DRY_RUN" = 1 ]; then echo "    would run: sudo install -m 0644 -o root -g root <new content> $1"; return 0; fi
   tmp=$(mktemp); printf '%s\n' "$2" >"$tmp"
   run sudo install -m 0644 -o root -g root "$tmp" "$1"; rm -f "$tmp"
@@ -236,6 +259,24 @@ $MARK_END"
 # file it finds), else ~/.config/tmux/tmux.conf.
 tmux_file() { if [ -e "$HOME/.tmux.conf" ]; then echo "$HOME/.tmux.conf"; else echo "$HOME/.config/tmux/tmux.conf"; fi; }
 tilde() { printf '~/%s' "${1#"$HOME/"}"; }   # tilde <path under $HOME>: for messages
+
+# home-manager writes dotfiles as symlinks into the store; the bootstrap must
+# not replace them and doctor must not report them missing.
+hm_owned() { [[ "$(readlink -f "$1" 2>/dev/null)" == /nix/store/* ]]; }
+HM_SKIPPED=()
+hm_skip() { # hm_skip <file> <home-manager option that sets it>
+  HM_SKIPPED+=("$1")
+  step "$(tilde "$1") is home-manager's (a store symlink): left alone; it is set by $2"
+}
+# How many of the user files the bootstrap writes are home-manager's (the host line).
+hm_owned_count() {
+  local f n=0
+  for f in "$HOME/.config/direnv/direnv.toml" "$(tmux_file)" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.claude/settings.json" \
+           "$HOME/.config/environment.d/50-claude-nix-harness.conf" "$HOME/.config/Code/User/settings.json"; do
+    hm_owned "$f" && n=$((n+1))
+  done
+  echo "$n"
+}
 
 selinux_on() { command -v getenforce >/dev/null 2>&1 && command -v matchpathcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; }
 
@@ -289,8 +330,12 @@ rq() { jq -r "$1" <<<"$RECEIPT_JSON"; }  # rq <filter>: from the receipt, one va
 # Fedora 44 or newer packages Nix itself: the dnf route. Everything else got
 # Nix from the nix-installer (scripts/install.sh); from here on the steps
 # are the same, minus dnf.
-HOST=generic
+HOST=generic; WSL=0
 [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null && HOST=fedora
+{ [ -e "$NIXOS_MARKER" ] || [ "${ID:-}" = nixos ]; } && HOST=nixos
+{ [ -e "$WSL_MARKER" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; } && WSL=1
+# NixOS: the root files are the system configuration's (nixos_steps).
+[ "$HOST" != nixos ] || NO_ROOT=1
 [ "$CMD" = doctor ] || [ "$(id -u)" != 0 ] || die "run as your own user; sudo is used where root is needed"
 
 # ---------------------------------------------------------------- root steps
@@ -322,7 +367,7 @@ trusted-users = root $USER"
 $MARK_END"
   if [ "$(cat "$conf" 2>/dev/null)" != "$want" ]; then
     step "write $conf (harness block: devenv cache${flakes:+, flakes}$([ "$TRUSTED_USER" = 1 ] && echo ", trusted-users"))"
-    root_write "$conf" "$want"
+    root_write "$conf" "$want" "nix.settings.substituters, nix.settings.trusted-public-keys and nix.settings.experimental-features"
     systemctl is-active -q nix-daemon.service 2>/dev/null && run sudo systemctl restart nix-daemon.service
   fi
   R_ROOT_STEPS+=(nix.conf)
@@ -354,20 +399,80 @@ $MARK_END"
 # The Claude Code sandbox is bubblewrap, which needs unprivileged user
 # namespaces. Ubuntu 23.10 and later confine them through AppArmor, older
 # Debian kernels gate them with unprivileged_userns_clone; with either on,
-# `failIfUnavailable` refuses every Claude command. A kernel setting, so it
-# is asked for on its own: the command is shown, --yes answers it, and a
-# decline prints it for later (doctor keeps reporting the restriction).
+# `failIfUnavailable` refuses every Claude command. userns_restricted sets
+# USERNS_KEY and USERNS_VAL (the sysctl and the value that lifts it) and
+# fails when nothing confines them, or when the AppArmor restriction is on
+# but the bwrap profile already lifts it; APPARMOR_ON says the restriction
+# is on either way.
+USERNS_KEY=""; USERNS_VAL=""; APPARMOR_ON=0
+userns_restricted() {
+  USERNS_KEY=""; USERNS_VAL=""; APPARMOR_ON=0
+  command -v sysctl >/dev/null 2>&1 || return 1
+  if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
+    APPARMOR_ON=1; USERNS_KEY=kernel.apparmor_restrict_unprivileged_userns; USERNS_VAL=0
+    [ ! -e "$APPARMOR_PROFILE" ] || { USERNS_KEY=""; USERNS_VAL=""; return 1; }
+  elif [ "$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ]; then USERNS_KEY=kernel.unprivileged_userns_clone; USERNS_VAL=1
+  else return 1; fi
+}
+
+# The profile from the Claude Code sandboxing docs (section "Ubuntu 24.04
+# and later", read 2026-10-23), verbatim after the marker: bwrap alone may
+# create user namespaces, the sysctl stays on for everything else.
+APPARMOR_TEXT="$MARK_BEGIN
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}"
+
+# NixOS: what root_steps would write, printed as configuration.nix lines
+# where the host lacks it.
+NIXOS_NIX_SETTINGS='  nix.settings = {
+    experimental-features = [ "nix-command" "flakes" ];
+    substituters = [ "'$DEVENV_CACHE'" ];
+    trusted-public-keys = [ "'$DEVENV_KEY'" ];
+  };'
+nixos_steps() {
+  local lack=()
+  grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null || lack+=(flakes)
+  grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null || lack+=("the devenv cache")
+  if [ ${#lack[@]} -gt 0 ]; then
+    step "NixOS: $NIX_CONF is the system configuration's and lacks ${lack[*]}; add to configuration.nix and rebuild:"
+    printf '%s\n' "$NIXOS_NIX_SETTINGS"
+  fi
+  if userns_restricted; then
+    step "NixOS: user namespaces are confined ($USERNS_KEY = $((1 - USERNS_VAL))), and the Claude Code sandbox (bubblewrap) needs them; in configuration.nix:"
+    printf '  boot.kernel.sysctl."%s" = %s;\n' "$USERNS_KEY" "$USERNS_VAL"
+  fi
+}
+
+# A kernel setting, so it is asked for on its own: what runs is shown,
+# --yes answers it, and a decline prints it for later (doctor keeps
+# reporting the restriction).
 userns_steps() {
-  local key val
-  command -v sysctl >/dev/null 2>&1 || return 0
-  if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then key=kernel.apparmor_restrict_unprivileged_userns; val=0
-  elif [ "$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ]; then key=kernel.unprivileged_userns_clone; val=1
-  else return 0; fi
+  local key val l deferred
+  userns_restricted || return 0
+  key=$USERNS_KEY; val=$USERNS_VAL
+  if [ "$key" = kernel.apparmor_restrict_unprivileged_userns ]; then
+    step "user namespaces: AppArmor confines them ($key = 1), and the Claude Code sandbox (bubblewrap) needs them"
+    echo "    this writes $APPARMOR_PROFILE (the bwrap profile from the Claude Code sandboxing docs) and runs sudo systemctl reload apparmor"
+    if ask "    apply with sudo now?"; then
+      root_write "$APPARMOR_PROFILE" "$APPARMOR_TEXT" "security.apparmor.policies"
+      run sudo systemctl reload apparmor
+      R_ROOT_STEPS+=(apparmor)
+    else
+      deferred="printf '%s\\n'"; while IFS= read -r l; do deferred="$deferred '$l'"; done <<<"$APPARMOR_TEXT"
+      DEFERRED+=("$deferred | sudo tee $APPARMOR_PROFILE && sudo systemctl reload apparmor")
+      warn "declined: every Claude command is refused until it runs (harness doctor keeps reporting it)"
+    fi
+    return 0
+  fi
   step "user namespaces: $key is $((1 - val)), and the Claude Code sandbox (bubblewrap) needs them"
   echo "    this runs: sudo sysctl -w $key=$val, and writes $SYSCTL_DROPIN so it holds across reboots"
   if ask "    apply with sudo now?"; then
     run sudo sysctl -w "$key=$val"
-    root_write "$SYSCTL_DROPIN" "$key = $val"
+    root_write "$SYSCTL_DROPIN" "$key = $val" "boot.kernel.sysctl.\"$key\""
     R_ROOT_STEPS+=(sysctl)
   else
     DEFERRED+=("sudo sysctl -w $key=$val && echo '$key = $val' | sudo tee $SYSCTL_DROPIN")
@@ -439,7 +544,8 @@ user_steps() {
   local f="$HOME/.config/direnv/direnv.toml" direnv_toml
   direnv_toml="$MARK_BEGIN
 $(cat "$DIRENV_TOML")"
-  if [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
+  if hm_owned "$f"; then hm_skip "$f" "programs.direnv.config.global (pkgs/direnv.toml), or the harness home module"
+  elif [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
     warn "$f exists and is not the harness one; merge by hand: strict_env, warn_timeout = \"2m\", load_dotenv = false, no whitelist"
   else
     write_if_differs "$f" "$direnv_toml"; record_file file "$f"
@@ -449,7 +555,9 @@ $(cat "$DIRENV_TOML")"
   # whatever else the file tmux reads holds (tmux_file). An older block is
   # replaced, so a changed pkgs/tmux.conf reaches a bootstrapped host on the
   # next bootstrap or upgrade.
-  put_block "$(tmux_file)" "$(cat "$TMUX_CONF")"
+  local tf; tf=$(tmux_file)
+  if hm_owned "$tf"; then hm_skip "$tf" "programs.tmux.extraConfig = builtins.readFile pkgs/tmux.conf"
+  else put_block "$tf" "$(cat "$TMUX_CONF")"; fi
 
   # bash: the direnv hook and the code root (home.sessionVariables), in
   # ~/.bashrc.d, which Fedora's stock ~/.bashrc sources after /etc/bashrc has
@@ -470,10 +578,12 @@ if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook bash)\"; fi"
   # unless the person runs zsh (a ~/.zshrc and nothing else). A ~/.zshrc
   # gets the same three lines as a block of its own.
   local rc="$HOME/.bashrc" zrc="$HOME/.zshrc"
-  if { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
+  if hm_owned "$rc"; then hm_skip "$rc" "programs.direnv.enableBashIntegration (the hook) and home.sessionVariables.HARNESS_CODE_ROOT"
+  elif { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
     put_block "$rc" '[ -r ~/.bashrc.d/claude-nix-harness.sh ] && . ~/.bashrc.d/claude-nix-harness.sh'
   fi
-  if [ -e "$zrc" ]; then
+  if hm_owned "$zrc"; then hm_skip "$zrc" "programs.direnv.enableZshIntegration and home.sessionVariables.HARNESS_CODE_ROOT"
+  elif [ -e "$zrc" ]; then
     put_block "$zrc" "export HARNESS_CODE_ROOT=\"$root_expr\"
 [ -n \"\${NIX_SSL_CERT_FILE:-}\" ] || export NIX_SSL_CERT_FILE=\"${CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}\"
 if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook zsh)\"; fi"
@@ -483,10 +593,13 @@ if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook zsh)\"; fi"
   # otherwise never sees the nix profile. systemd user environment generator;
   # takes effect at the next login.
   f="$HOME/.config/environment.d/50-claude-nix-harness.conf"
-  write_if_differs "$f" "$MARK_BEGIN
+  if hm_owned "$f"; then hm_skip "$f" "home.sessionPath and home.sessionVariables"
+  else
+    write_if_differs "$f" "$MARK_BEGIN
 PATH=\$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:\$HOME/.local/bin:\$PATH
 NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem}"
-  record_file file "$f"
+    record_file file "$f"
+  fi
 
   [ -d "$CODE_ROOT" ] || { step "mkdir $CODE_ROOT"; run mkdir -p "$CODE_ROOT"; }
 
@@ -498,27 +611,30 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     want="$want + {syncClaudeAiSkills: false, syncClaudeAiPlugins: false}"
     keys+=('["syncClaudeAiSkills"]' '["syncClaudeAiPlugins"]')
   fi
-  if ! jq -e --argjson w "$(jq -n "$want")" '. as $s | ($s * $w) == $s' "$cs" >/dev/null 2>&1; then
+  if hm_owned "$cs"; then hm_skip "$cs" "programs.claude-code.settings (sandbox.network.strictAllowlist = true$([ "$NO_ACCOUNT_SYNC" = 1 ] && echo ", syncClaudeAiSkills and syncClaudeAiPlugins = false"))"
+  elif ! jq -e --argjson w "$(jq -n "$want")" '. as $s | ($s * $w) == $s' "$cs" >/dev/null 2>&1; then
     step "set the user-scope sandbox keys in $cs"
     jq_edit "$cs" --argjson w "$(jq -n "$want")" '. * $w'
   fi
   record_file keys "$cs" "${keys[@]}"
   # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
   # Code stops auto-allowing sandboxed Bash commands (header).
-  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
+  if ! hm_owned "$cs" && jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
     step "remove env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB from $cs (it turns the sandbox's Bash auto-allow off)"
     jq_edit "$cs" 'del(.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB) | if .env == {} then del(.env) else . end'
   fi
 
   # VS Code: mkhl.direnv loads the devenv shell into the window (runbook,
   # daily flow); direnv.path makes it work before the next login too.
-  if command -v code >/dev/null 2>&1; then
+  local vs="$HOME/.config/Code/User/settings.json"
+  if hm_owned "$vs"; then hm_skip "$vs" "programs.vscode.profiles.default: userSettings (direnv.path.executable) and extensions (mkhl.direnv)"
+  elif command -v code >/dev/null 2>&1; then
     if ! code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then
       step "code --install-extension mkhl.direnv"
       run -q code --install-extension mkhl.direnv
     fi
     R_EXT+=(mkhl.direnv)
-    local vs="$HOME/.config/Code/User/settings.json" direnv_bin
+    local direnv_bin
     nix_path; direnv_bin=$(command -v direnv 2>/dev/null || echo "$HOME/.nix-profile/bin/direnv")
     if ! jq -e --arg p "$direnv_bin" --arg c "$CA_BUNDLE" \
          '.["direnv.path.executable"] == $p and .["direnv.extraEnv"].NIX_SSL_CERT_FILE == $c' "$vs" >/dev/null 2>&1; then
@@ -577,6 +693,7 @@ reset_steps() {
     esac
     in_list selinux "${steps[@]}" && echo "  root:  the SELinux rule for the daemon socket"
     in_list sysctl "${steps[@]}" && echo "  root:  $SYSCTL_DROPIN, and the kernel's user-namespace restriction back on"
+    in_list apparmor "${steps[@]}" && echo "  root:  $APPARMOR_PROFILE (bwrap may no longer create user namespaces), AppArmor reloaded"
   fi
   if [ -n "$nix_from" ]; then
     echo "  user:  the nix profile and state (~/.nix-profile, ~/.local/state/nix), ~/.cache/nix,"
@@ -628,6 +745,12 @@ reset_steps() {
         kernel.unprivileged_userns_clone) run sudo sysctl -w "$key=0" ;;
       esac
       run sudo rm -f "$SYSCTL_DROPIN"
+    fi
+    if in_list apparmor "${steps[@]}"; then
+      if grep -q -F "$MARK_BEGIN" "$APPARMOR_PROFILE" 2>/dev/null; then
+        step "remove $APPARMOR_PROFILE and reload AppArmor"
+        run sudo rm -f "$APPARMOR_PROFILE"; run sudo systemctl reload apparmor
+      elif [ -e "$APPARMOR_PROFILE" ]; then warn "$APPARMOR_PROFILE no longer carries the harness marker: left alone"; fi
     fi
     if [ "$nix_from" = dnf ]; then
       step "remove the nixbld build users"
@@ -683,9 +806,14 @@ NEXT
 # ---------------------------------------------------------------- report
 report() {
   nix_path
-  local v route="" tf
-  if [ "$HOST" = fedora ]; then route="nix from Fedora's packages"; elif [ -x "$NIX_INSTALLER" ]; then route="nix from the nix-installer"; fi
-  echo "host: ${PRETTY_NAME:-unknown} ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
+  local v route="" tf fix host="${PRETTY_NAME:-unknown}" hm
+  case "$HOST" in
+    fedora) route="nix from Fedora's packages" ;;
+    nixos) hm=$(hm_owned_count); route="nix from the system configuration, $hm home-manager owned file$([ "$hm" = 1 ] || echo s) skipped" ;;
+    *) [ -x "$NIX_INSTALLER" ] && route="nix from the nix-installer" ;;
+  esac
+  [ "$WSL" = 0 ] || host="WSL2 ($host)"
+  echo "host: $host ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
   else warn "no receipt at $RECEIPT: reset has nothing to undo, upgrade uses the built-in package list (harness bootstrap writes one)"; fi
@@ -693,8 +821,9 @@ report() {
   if command -v nix >/dev/null 2>&1; then
     v=$(nix --version | awk '{print $NF}')
     if nix store info >/dev/null 2>&1 || nix store ping >/dev/null 2>&1; then ok "nix $v, daemon answers"; else miss "nix $v installed but the daemon does not answer (systemctl enable --now nix-daemon.socket)"; fi
-    grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null && ok "flakes enabled in $NIX_CONF" || miss "flakes not enabled in $NIX_CONF (harness bootstrap writes the line)"
-    grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null && ok "devenv cache in $NIX_CONF" || warn "devenv cache not in $NIX_CONF: devenv builds more from source"
+    fix="harness bootstrap writes the line"; [ "$HOST" != nixos ] || fix="nix.settings in configuration.nix; harness bootstrap prints the block"
+    grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null && ok "flakes enabled in $NIX_CONF" || miss "flakes not enabled in $NIX_CONF ($fix)"
+    grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null && ok "devenv cache in $NIX_CONF" || warn "devenv cache not in $NIX_CONF: devenv builds more from source ($fix)"
     if selinux_on; then
       if matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then ok "SELinux: daemon socket directory labeled var_run_t"
       else miss "SELinux: daemon socket directory labeled $(matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null), systemd cannot create the socket (sudo semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?'; sudo restorecon -RF /nix/var/nix/daemon-socket)"; fi
@@ -717,8 +846,15 @@ report() {
   v=$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 0)
   [ "$v" -gt 0 ] && ok "user namespaces enabled (max $v)" || miss "user namespaces disabled: bubblewrap cannot run"
   if command -v sysctl >/dev/null 2>&1; then
-    if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then miss "AppArmor confines unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns = 1): bubblewrap cannot run; harness bootstrap offers the sysctl"
-    elif [ "$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ]; then miss "kernel.unprivileged_userns_clone = 0: bubblewrap cannot run; harness bootstrap offers the sysctl"
+    fix="harness bootstrap offers the sysctl"; [ "$HOST" != nixos ] || fix="boot.kernel.sysctl in configuration.nix"
+    if userns_restricted; then
+      case "$USERNS_KEY" in
+        kernel.apparmor_restrict_unprivileged_userns) miss "AppArmor confines unprivileged user namespaces ($USERNS_KEY = 1) and $APPARMOR_PROFILE is missing: bubblewrap cannot run; ${fix/offers the sysctl/writes the profile}" ;;
+        *) miss "$USERNS_KEY = 0: bubblewrap cannot run; $fix" ;;
+      esac
+    elif [ "$APPARMOR_ON" = 1 ]; then
+      ok "AppArmor confines unprivileged user namespaces; $APPARMOR_PROFILE lifts it for bwrap"
+      [ "$(readlink -f "$(command -v bwrap 2>/dev/null || echo /usr/bin/bwrap)")" = /usr/bin/bwrap ] || warn "the profile is for /usr/bin/bwrap but bwrap on PATH is $(command -v bwrap): the sandbox may still be refused"
     else ok "no sysctl confines unprivileged user namespaces"; fi
   fi
   if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- /bin/true 2>/dev/null; then ok "bubblewrap works here"; else miss "bubblewrap cannot create a sandbox here"; fi
@@ -753,17 +889,24 @@ report() {
   fi
 
   [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ccmux resolves <customer>/<repo> under it)"
-  if grep -q -F "$MARK_BEGIN" "$HOME/.config/direnv/direnv.toml" 2>/dev/null; then ok "direnv.toml"
+  if hm_owned "$HOME/.config/direnv/direnv.toml"; then ok "direnv.toml (home-manager)"
+  elif grep -q -F "$MARK_BEGIN" "$HOME/.config/direnv/direnv.toml" 2>/dev/null; then ok "direnv.toml"
   elif [ -e "$HOME/.config/direnv/direnv.toml" ]; then warn "~/.config/direnv/direnv.toml exists and is not the harness one (strict_env, warn_timeout, load_dotenv = false)"
   else miss "~/.config/direnv/direnv.toml"; fi
   tf=$(tmux_file)
-  grep -q -F "$MARK_BEGIN" "$tf" 2>/dev/null && ok "tmux harness block in $(tilde "$tf")" || miss "tmux harness block in $(tilde "$tf")"
-  grep -q 'direnv hook bash' "$HOME/.bashrc.d/claude-nix-harness.sh" 2>/dev/null && ok "direnv hook and HARNESS_CODE_ROOT in ~/.bashrc.d" || miss "~/.bashrc.d/claude-nix-harness.sh"
-  if [ -e "$HOME/.bashrc" ] || [ ! -e "$HOME/.zshrc" ]; then
-    grep -q 'bashrc\.d' "$HOME/.bashrc" 2>/dev/null && ok "~/.bashrc sources ~/.bashrc.d" || miss "~/.bashrc does not source ~/.bashrc.d (harness bootstrap adds the line)"
+  if hm_owned "$tf"; then ok "tmux config $(tilde "$tf") (home-manager)"
+  else grep -q -F "$MARK_BEGIN" "$tf" 2>/dev/null && ok "tmux harness block in $(tilde "$tf")" || miss "tmux harness block in $(tilde "$tf")"; fi
+  if hm_owned "$HOME/.bashrc"; then ok "~/.bashrc (home-manager: the direnv hook and HARNESS_CODE_ROOT come from it)"
+  else
+    grep -q 'direnv hook bash' "$HOME/.bashrc.d/claude-nix-harness.sh" 2>/dev/null && ok "direnv hook and HARNESS_CODE_ROOT in ~/.bashrc.d" || miss "~/.bashrc.d/claude-nix-harness.sh"
+    if [ -e "$HOME/.bashrc" ] || [ ! -e "$HOME/.zshrc" ]; then
+      grep -q 'bashrc\.d' "$HOME/.bashrc" 2>/dev/null && ok "~/.bashrc sources ~/.bashrc.d" || miss "~/.bashrc does not source ~/.bashrc.d (harness bootstrap adds the line)"
+    fi
   fi
-  if [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (harness bootstrap adds it)"; fi
-  [ -r "$HOME/.config/environment.d/50-claude-nix-harness.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"
+  if hm_owned "$HOME/.zshrc"; then ok "~/.zshrc (home-manager)"
+  elif [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (harness bootstrap adds it)"; fi
+  if hm_owned "$HOME/.config/environment.d/50-claude-nix-harness.conf"; then ok "session PATH (home-manager)"
+  else [ -r "$HOME/.config/environment.d/50-claude-nix-harness.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"; fi
   [ -n "${HARNESS_EXPECT_MANAGED:-}" ] && warn "HARNESS_EXPECT_MANAGED is set but this host has no managed settings" || true
 }
 
@@ -824,6 +967,7 @@ case "$CMD" in
       [ "$HAVE_RECEIPT" = 0 ] || [ -z "$(rq '.profile[]?')" ] || mapfile -t PROFILE_PKGS < <(rq '.profile[]')
     fi
     [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for dnf, /etc/nix/nix.conf and the nix-daemon socket (or pass --no-root after doing those by hand)"; root_steps; }
+    [ "$HOST" != nixos ] || nixos_steps
     [ "$NO_PROFILE" = 1 ] || profile_steps
     handover_steps
     user_steps

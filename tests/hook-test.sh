@@ -179,7 +179,15 @@ block 'run0 ls'
 block 'nix profile install nixpkgs#hello'
 block 'nix-env -iA nixpkgs.hello'
 block 'nixos-rebuild switch'
+block 'nixos-rebuild build'               # denied as a whole, build included (handoff phase 1)
 block 'home-manager switch'
+block 'nh os switch'
+block 'nh os boot .'
+block 'nh os test'
+block 'nh home switch'
+block 'nh  os   switch ~/nixos-config'
+allow 'nh os build'
+allow 'nh search firefox'
 block 'systemctl restart foo'
 block 'cmd.exe /c dir'
 block '/mnt/c/Windows/System32/cmd.exe'
@@ -225,6 +233,9 @@ block 'claude --allow-dangerously-skip-permissions -p hi'
 block 'cd sub && claude -p hi --settings x.json'
 block 'bash -c "claude --dangerously-skip-permissions -p hi"'
 block 'claude --bare -p hi'
+# --add-dir widens the sandbox's write set and counts as a working directory.
+block 'claude --add-dir /tmp/x -p hi'
+block 'claude -p hi --add-dir=../other'
 allow 'claude -p "summarise the settings reference"'
 allow 'code --settings-file x'
 allow 'claude --version; echo --settings'
@@ -376,6 +387,44 @@ if [ "${2:-}" = --direnv-stub ]; then
   worktree_session 0 "with the main .envrc not allowed: left alone" "${allowed_main/allowed\":0/allowed\":1}"
   echo '# changed' >> "$w/.envrc"
   worktree_session 0 "that differs from main: left alone" "$allowed_main"
+
+  # --- The pre-command environment check (check_env) ---------------------
+  # A Bash command in a directory whose .envrc cannot load is refused with
+  # the reason; one without .envrc passes untouched; a good export is
+  # remembered until the watched files or the devenv profile change.
+  repo="$wt/repo"; mkdir -p "$repo"; echo 'use devenv' > "$repo/.envrc"; echo '{}' > "$repo/devenv.nix"
+  export XDG_CACHE_HOME="$wt/cache"
+  rc_ok='{"state":{"foundRC":{"path":"'"$repo/.envrc"'","allowed":0}}}'
+  env_cmd() { # env_cmd <want exit> <description> <want stderr regex> <status json> <export rc> <export stderr> [<export json>]
+    local got out
+    : > "$DIRENV_STUB_LOG"
+    out=$(cwd="$repo"; printf '%s' "$(bash_cmd 'echo hi')" | DIRENV_STUB_STATUS="$4" DIRENV_STUB_EXPORT_RC="$5" DIRENV_STUB_EXPORT_ERR="$6" DIRENV_STUB_EXPORT="${7:-}" "$hook" 2>&1 >/dev/null); got=$?
+    if [ "$got" = "$1" ] && [[ "$out" =~ $3 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: env check $2 (want $1 /$3/, got $got: $out)"; fi
+  }
+  exported() { # exported <want 0|1> <description>
+    local got=0; grep -q '^direnv export' "$DIRENV_STUB_LOG" && got=1
+    if [ "$got" = "$1" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: env check $2 (export ran: $got)"; fi
+  }
+  env_cmd 2 "export exits 1" "env-guard: direnv export failed in $repo: direnv: error evaluating devenv.nix: oops \(fix: the devenv error" "$rc_ok" 1 $'direnv: loading .envrc\ndirenv: error evaluating devenv.nix: oops'
+  exported 1 "export exits 1: export ran"
+  env_cmd 2 "export says blocked" "env-guard: direnv export failed in $repo: direnv: error $repo/.envrc is blocked\. Run .direnv allow. to approve its content \(fix: direnv allow $repo\)" "$rc_ok" 0 "direnv: error $repo/.envrc is blocked. Run \`direnv allow\` to approve its content"
+  env_cmd 2 "status says not allowed" "env-guard: direnv export failed in $repo: $repo/.envrc is blocked\. Run .direnv allow. to approve its content \(fix: direnv allow $repo\)" "${rc_ok/allowed\":0/allowed\":1}" 0 ""
+  exported 0 "status says not allowed: no export"
+  env_cmd 0 "no .envrc" '^$' '{"state":{"foundRC":null}}' 1 "never called"
+  exported 0 "no .envrc: no export"
+  touch "$wt/profile"
+  env_cmd 0 "good export" '^$' "$rc_ok" 0 "" "{\"DEVENV_PROFILE\":\"$wt/profile\"}"
+  exported 1 "good export: export ran"
+  env_cmd 0 "good export remembered" '^$' "$rc_ok" 1 "must not run"
+  exported 0 "good export remembered: no export"
+  touch -d 2020-01-01 "$repo/devenv.nix"
+  env_cmd 2 "devenv.nix changed: export again" "direnv export failed in $repo" "$rc_ok" 1 "direnv: error after the change"
+  exported 1 "devenv.nix changed: export ran"
+  env_cmd 0 "good again" '^$' "$rc_ok" 0 "" "{\"DEVENV_PROFILE\":\"$wt/profile\"}"
+  rm -f "$wt/profile"
+  env_cmd 2 "profile gone: export again" "direnv export failed in $repo" "$rc_ok" 1 "direnv: error profile collected"
+  exported 1 "profile gone: export ran"
+  unset XDG_CACHE_HOME
   rm -rf "$wt"
 fi
 

@@ -87,6 +87,14 @@
               extraAllowRead = [ "~/.cargo" ];
             }
           );
+          # The same at a real-looking path: harness init runs the test on the
+          # file devenv wrote for the actual repo, never at /repo.
+          project-settings-elsewhere = (pkgs.formats.json { }).generate "claude-settings-elsewhere.json" (
+            (harnessLib pkgs).projectSettings {
+              hookDir = "${hooks}";
+              repoRoot = "/home/acme/code/git/acme/demo";
+            }
+          );
           ccmux = import ./pkgs/ccmux.nix { inherit pkgs; };
           # bin/harness: bootstrap, upgrade, doctor, init, check, reset.
           harness = import ./pkgs/harness.nix {
@@ -116,17 +124,45 @@
         let
           system = pkgs.stdenv.hostPlatform.system;
           p = self.packages.${system};
-          # The worktree .envrc auto-allow calls direnv; this stand-in logs the
-          # calls and answers `status` from an env var (hook-test.sh --direnv-stub).
+          # The worktree .envrc auto-allow and the pre-command environment check
+          # call direnv; this stand-in logs the calls and answers `status` and
+          # `export` from env vars (hook-test.sh --direnv-stub).
           direnvStub = pkgs.writeShellScriptBin "direnv" ''
             echo "direnv $*" >> "''${DIRENV_STUB_LOG:-/dev/null}"
-            case "$1" in status) printf '%s' "''${DIRENV_STUB_STATUS:-}" ;; esac
+            case "$1" in
+              status) printf '%s' "''${DIRENV_STUB_STATUS:-}" ;;
+              export)
+                if [ -n "''${DIRENV_STUB_EXPORT:-}" ]; then printf '%s' "$DIRENV_STUB_EXPORT"; else printf '{}'; fi
+                [ -z "''${DIRENV_STUB_EXPORT_ERR:-}" ] || echo "''${DIRENV_STUB_EXPORT_ERR}" >&2
+                exit "''${DIRENV_STUB_EXPORT_RC:-0}" ;;
+            esac
           '';
           stubHooks = import ./lib/hooks.nix {
             inherit pkgs;
             inherit (pkgs) lib;
             direnvPackage = direnvStub;
           };
+          # The NixOS module evaluated, never built into a system: only the
+          # tree it links at /etc/claude-code is forced, and, for the
+          # assertion, config.assertions, which needs no toplevel either.
+          nixosConfig =
+            allowUserNamespaces:
+            (nixpkgs.lib.nixosSystem {
+              inherit system;
+              modules = [
+                self.nixosModules.harness
+                {
+                  nixpkgs.pkgs = pkgs;
+                  harness.enable = true;
+                  security.allowUserNamespaces = allowUserNamespaces;
+                  system.stateVersion = "26.05";
+                }
+              ];
+            }).config;
+          managedEtc = (nixosConfig true).environment.etc."claude-code".source;
+          harnessAssertion = pkgs.lib.findFirst (a: pkgs.lib.hasPrefix "harness:" a.message) null (
+            builtins.filter (a: !a.assertion) (nixosConfig false).assertions
+          );
           test =
             name: script: args:
             pkgs.runCommand name
@@ -152,6 +188,9 @@
           project-settings-fenced-test =
             test "project-settings-fenced-test" ./tests/project-settings-test.sh
               "${p.project-settings-fenced} fenced";
+          project-settings-root-test =
+            test "project-settings-root-test" ./tests/project-settings-test.sh
+              "${p.project-settings-elsewhere} /home/acme/code/git/acme/demo";
           ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
           hook-test-worktree =
             test "hook-test-worktree" ./tests/hook-test.sh
@@ -171,7 +210,27 @@
               "${p.harness}/bin/harness";
           harness-init-dry-run-test =
             test "harness-init-dry-run-test" ./tests/harness-init-test.sh
-              "${p.harness}/bin/harness";
+              "${p.harness}/bin/harness ${p.project-settings}";
+          # `harness check` judges tool results, never the model's prose.
+          check-parser-test =
+            test "check-parser-test" ./tests/check-parser-test.sh
+              "${p.harness}/bin/harness ${./tests/fixtures}";
+          # The module's managed tree: the sandbox block, the hook by its
+          # stable path, the deny rules; and the user-namespace assertion.
+          nixos-module-eval = pkgs.runCommand "nixos-module-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
+            s=${managedEtc}/managed-settings.json
+            jq -e '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and .sandbox.network.strictAllowlist == true' "$s"
+            jq -e '[.hooks[][].hooks[].command] | length > 0 and all(startswith("/etc/claude-code/hooks/"))' "$s"
+            jq -e '.permissions.deny | index("Bash(git push)") and index("Bash(nh os switch)")' "$s"
+            test -x ${managedEtc}/hooks/env-guard.sh
+            echo "nixos-module-eval: managed tree ${managedEtc}" | tee $out
+          '';
+          nixos-module-assertion = pkgs.runCommand "nixos-module-assertion" { } (
+            if harnessAssertion == null then
+              "echo 'security.allowUserNamespaces = false did not fire the harness assertion' >&2; exit 1"
+            else
+              "echo ${pkgs.lib.escapeShellArg harnessAssertion.message} | tee $out"
+          );
           # The managed tree's mod wiring, with and without a mod.
           managed-tree-test =
             test "managed-tree-test" ./tests/managed-tree-test.sh

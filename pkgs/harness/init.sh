@@ -26,7 +26,9 @@
 # default when none of them is set. A `path:/nix/store/...` ref makes init warn: garbage
 # collection removes it.
 # devenv.lock records the revision either way; `devenv update harness` moves
-# it.
+# it. On a WSL host (binfmt WSLInterop, or WSL_DISTRO_NAME) the devenv.nix
+# gets harness.platform = "wsl", which hides /mnt/c and /run/WSL from the
+# sandbox.
 # shellcheck disable=SC2016  # single quotes are deliberate where direnv or bash must see the `$`
 set -euo pipefail
 
@@ -35,6 +37,7 @@ HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
 HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
 HARNESS_TESTS="${HARNESS_TESTS:-$HARNESS_DIR/tests}"
+WSL_MARKER="${HARNESS_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 FORCE=0; DRY=0; NO_SHELL=0; VERBOSE=0; YES=0; target=""
 usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
@@ -104,6 +107,11 @@ ensure_lines() { # ensure_lines <relpath> <line>...
 
 echo "harness init: $repo ($(if [ -n "$project" ]; then echo "project $project"; else echo "outside $root: ccmux needs an explicit path"; fi))"
 echo "harness:   $HARNESS_REF ($HARNESS_REF_FROM)"
+platform_line='    # platform = "wsl";                # hides /mnt/c and /run/WSL from the sandbox'
+if [ -e "$WSL_MARKER" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; then
+  platform_line='    platform = "wsl";                  # this host is WSL: /mnt/c and /run/WSL hidden from the sandbox'
+  note platform 'wsl (harness.platform in devenv.nix)'
+fi
 if [[ "$HARNESS_REF" == path:/nix/store/* ]]; then
   note warn "devenv.yaml would pin a store path that garbage collection removes: pass --harness github:bilibo/claude-nix-harness or --harness path:<checkout>"
 fi
@@ -135,7 +143,7 @@ put devenv.nix "# Project tools and harness options. Allow rules for this projec
     # readFence = true;                # hide the rest of \$HOME from sandboxed commands
     # extraAllowRead = [ \"~/.cargo\" ]; # with readFence: what the project reads under \$HOME
     # allowConnectors = true;          # claude.ai connectors, MCP servers outside the sandbox
-    # platform = \"wsl\";                # hides /mnt/c and /run/WSL from the sandbox
+$platform_line
     # extraDeny = [ \"Bash(az devops *)\" ];
     # extraAllowedDomains = [ \"dev.azure.com\" ];              # sandbox allowlist, unmanaged host only
     # settings.permissions.allow = [ \"Bash(terraform plan *)\" ];
@@ -235,7 +243,7 @@ elif [ -L "$settings" ]; then
 else
   die ".claude/settings.json was not written: the devenv shell did not load (direnv status in $repo)"
 fi
-bash "$HARNESS_TESTS/project-settings-test.sh" "$settings" || die "the generated settings file fails the harness checks"
+bash "$HARNESS_TESTS/project-settings-test.sh" "$settings" "$repo" || die "the generated settings file fails the harness checks"
 hook=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")
 bash "$HARNESS_TESTS/hook-test.sh" "$hook" || die "the repo's hook fails the unit tests"
 if res=$(direnv exec "$repo" ccmux -n 2>/dev/null); then note ok "ccmux -n: $res"; else note warn "ccmux -n failed (run it in the repo shell to see why)"; fi

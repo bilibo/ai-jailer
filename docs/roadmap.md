@@ -110,6 +110,16 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   hook-test 241 cases, project-settings-test 22 (23 fenced),
   harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
   green on the combined tree.
+- The 2026-10-23 brief, all seven items (changelog): `harness init` runs
+  the settings test with the real repo path; NixOS and WSL detection in
+  install, bootstrap and doctor with the store-symlink guard on
+  `root_write`; `nh` and `--add-dir` denied; the hook refuses a Bash
+  command whose `.envrc` cannot load (`check_env`); `harness check`
+  verdicts from tool results only, with `--parse`; the AppArmor bwrap
+  profile instead of the sysctl on Ubuntu; the NixOS module evaluated in
+  `nix flake check` with `examples/nixos-host.nix`. Every piece has a
+  check; the AppArmor and WSL pieces are stub-tested only until the Ubuntu
+  laptop and a WSL host run them.
 - First live `harness check` (2026-10-22, Ubuntu, 9 of 12): `devenv.local.*`
   out of the literal `denyWrite` list so the devenv shell can load inside
   the sandbox (unverified until the next run); the environment scrub gone
@@ -137,7 +147,8 @@ What the pieces add up to, and what is missing for it:
 
 Status against it: 1 runs end to end on Fedora 44 and on Ubuntu 26.10
 (2026-10-22: install, bootstrap, `harness init` on the checkout, `harness
-check`, `ccmux`; changelog); nothing detects NixOS or WSL. 2 works by convention
+check`, `ccmux`; changelog); NixOS is detected since 2026-10-23 (gap A, the
+NixOS half), WSL detection is stubbed. 2 works by convention
 (CLAUDE.md contracts and `SendMessage`, as on 2026-10-21 when three
 sessions worked the audit board); the checkout is itself under the
 customer rules (the hook refuses its `devenv.nix`) until the tier split.
@@ -145,7 +156,9 @@ customer rules (the hook refuses its `devenv.nix`) until the tier split.
 
 The gaps, in order:
 
-- A. **Host detection** (`scripts/install.sh`, once; exported to bootstrap
+- A. **Host detection**: NixOS half done 2026-10-23, WSL detection
+  stubbed, live WSL pending (changelog). As written on 2026-10-21:
+  (`scripts/install.sh`, once; exported to bootstrap
   and init). Fedora 44+ as today. NixOS (`/etc/NIXOS` exists): no
   installer, and bootstrap must not write `/etc/nix/nix.conf` (a store
   symlink the next rebuild restores): print the `nix.settings` lines for
@@ -338,7 +351,10 @@ The gaps, in order:
    a native NixOS one) shipped with the harness, `harness.enable` on both
    modules and nothing else, with the WSL-specific checks (`/run/WSL` and
    `/mnt/c` empty inside the sandbox, `cmd.exe` fails). First time the
-   managed layer runs live.
+   managed layer runs live. 2026-10-23: the module evaluates in `nix
+   flake check` (`nixos-module-eval`, `nixos-module-assertion`) and
+   `examples/nixos-host.nix` is the import snippet; no generation has been
+   activated anywhere.
 8. **Broker mod** (`docs/sessions.md`): one mod, three stages, each boring
    before the next: observe (`/fleet` from `$.store`, tier in the status
    line, tier contract in the system prompt), propose (`/propose` and a
@@ -374,7 +390,10 @@ The gaps, in order:
   SessionStart hook runs outside it, so it could run `direnv export bash`
   once and write the exports into the env file; the cwd-change and
   file-change events would refresh it, if they fire as the hook assumes.
-  Deciding it reopens decision 7.3 with a dated entry here.
+  Deciding it reopens decision 7.3 with a dated entry here. Measured
+  2026-10-23 on the NixOS laptop in this checkout: `direnv export bash`
+  0.19 to 0.23 s warm, 4.5 s after a change; the hook's `check_env` adds
+  36 to 41 ms per Bash call in steady state (changelog).
 - Account-synced skills on the work host: off (`syncClaudeAiSkills`,
   `syncClaudeAiPlugins`, user or managed scope; the bootstrap's
   `--no-account-sync` writes the `false`s) or on (the default). Today's
