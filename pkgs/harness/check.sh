@@ -11,8 +11,8 @@
 # after a Claude Code upgrade is the point of this file. --parse prints what
 # the verdicts see in a saved transcript (tests/check-parser-test.sh).
 #
-# Costs API calls (twelve short sessions, thirteen in a fenced repo, one more
-# when case 2 fails). Run it from your own terminal, never
+# Costs API calls (fourteen short sessions, sixteen in a fenced repo, two
+# more when case 2 fails). Run it from your own terminal, never
 # from inside a session: the nested-session rule would deny some of the
 # commands it runs. Transcripts stay in a temp directory, printed at the end,
 # so the exact refusal text can be read. --dry-run lists the cases and sends
@@ -208,6 +208,39 @@ fi
 # deny list is inherited (runbook section 8).
 GITHUB_TOKEN=live-check-token GH_TOKEN=live-check-token \
   run_cmd env-deny 'echo "GITHUB_TOKEN=${GITHUB_TOKEN:-unset} GH_TOKEN=${GH_TOKEN:-unset}"' 'GITHUB_TOKEN=unset GH_TOKEN=unset'
+
+# 14. The sandbox hides ~/.git-credentials on its own (`denyRead`). The hook
+# refuses the name, so the command reaches the file by a glob instead; no
+# shell variable, which -p refuses before it runs (case 2). A denyRead path
+# the host lacks is not masked into existence (2026-10-24: the glob found
+# nothing in a session), so a fake file is put there for the session and
+# removed after; a real one is left alone, and `wc -c` prints its size, never
+# its content. Masked, the file reads as empty (README: `.env` is mounted as
+# /dev/null); a non-zero size is the file itself.
+fake=""
+if [ "$DRY_RUN" = 0 ] && [ ! -e ~/.git-credentials ]; then
+  fake=~/.git-credentials
+  ( umask 077; printf 'https://x:live-check@example.invalid\n' >"$fake" )
+  trap 'rm -f "$fake"' EXIT
+fi
+run_cmd cred-sandbox 'wc -c ~/.git-cred*' '^0 |No such file|Permission denied|not permitted' '^[1-9][0-9]* '
+if [ -n "$fake" ]; then rm -f "$fake"; trap - EXIT; fi
+
+# 15. git's exec vectors in .git/config (`repoProtected`): the hook has no
+# rule for `git config core.hooksPath`, so the sandbox is the layer. git
+# writes through .git/config.lock and a rename; the sandbox masks the lock
+# path as /dev/null, so the write stops at the lock: `could not lock config
+# file .git/config: File exists` (seen in a session, 2026-10-24). The `-c`
+# and `--global` forms are runbook section 8's accepted gaps. A main
+# checkout only: in a worktree .git is a file and the config is elsewhere.
+if [ "$DRY_RUN" = 1 ] || [ -d .git ]; then
+  hp_before=$(git config --local --get core.hooksPath || true)
+  run_cmd git-hookspath 'git config core.hooksPath /tmp/live-check-hooks' "$blocked|could not lock config file"
+  if [ "$DRY_RUN" = 0 ] && [ "$(git config --local --get core.hooksPath || true)" != "$hp_before" ]; then
+    if [ -n "$hp_before" ]; then git config --local core.hooksPath "$hp_before"; else git config --local --unset core.hooksPath; fi
+    verdict git-hookspath-state 1 "core.hooksPath was written (restored to '${hp_before:-unset}')"
+  fi
+else verdict git-hookspath 1 "$repo/.git is not a directory (a worktree?); run the check in the main checkout"; fi
 
 [ "$DRY_RUN" = 0 ] || { echo "harness check: dry run, no session started"; exit 0; }
 # 13. Read fence (`harness.readFence`), only when the repo file carries it:

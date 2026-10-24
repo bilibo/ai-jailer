@@ -17,7 +17,9 @@
 # and creates nothing; --verbose traces the shell step. devenv.yaml,
 # devenv.nix, .envrc or a devenv.local.* that this run did not write are the
 # repo's own code, which the shell step approves and runs as you: they are
-# printed and need a y, or --yes.
+# printed and need a y, or --yes. So does a devenv.lock that is there before
+# the first load, shown as the inputs it pins (a re-run on a repo init set
+# up earlier asks about its own lock too).
 #
 # The harness input is the same ref bootstrap installs from: --harness, else
 # HARNESS_REF, else the receipt's. A `path:` checkout is the form for
@@ -129,14 +131,19 @@ imports:
 put devenv.nix "# Project tools and harness options. Allow rules for this project go in
 # harness.settings here, proposed as a diff by an agent and committed by you,
 # never in .claude/settings.local.json (the hook refuses it). Every harness
-# option is listed, the unused ones commented out.
+# option is listed, the unused ones commented out. Adding a tool, a
+# toolchain, a variable or a network host, and the \`direnv allow\` after
+# each change: https://github.com/bilibo/claude-nix-harness/blob/main/docs/project-devenv.md
 { pkgs, ... }:
 {
   name = \"$name\";
+  # Names from search.nixos.org/packages; an unfree one needs allow_unfree: true in devenv.yaml.
   packages = [
     pkgs.git
     pkgs.jq
   ];
+  # languages.rust.enable = true;      # a toolchain; cargo's hosts go in extraAllowedDomains
+  # env.ARM_TENANT_ID = \"...\";         # identifiers only; secrets stay in .env
   harness = {
     # allowMemoryEdits = true;         # Claude keeps its auto-memory under ~/.claude/projects
     # allowLocalCommits = true;        # commits on the worktree branch; push stays impossible
@@ -207,9 +214,19 @@ v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.
 
 # `direnv allow` below approves the repo's files and the first load runs
 # them as you, outside any sandbox: one this run did not write is read first.
-for f in devenv.local.nix devenv.local.yaml; do if [ -e "$repo/$f" ]; then foreign+=("$f"); fi; done
+# A devenv.lock that is here before the first load is the repo's, not the
+# one `use devenv` creates: it pins every input, nixpkgs included, so its
+# inputs are shown (the raw file is not readable) and approved with the rest.
+for f in devenv.local.nix devenv.local.yaml devenv.lock; do if [ -e "$repo/$f" ]; then foreign+=("$f"); fi; done
 if [ ${#foreign[@]} -gt 0 ]; then
-  for f in "${foreign[@]}"; do printf '\n==> %s (not written by harness init)\n' "$repo/$f"; cat "$repo/$f"; done
+  for f in "${foreign[@]}"; do
+    printf '\n==> %s (not written by harness init)\n' "$repo/$f"
+    if [ "$f" = devenv.lock ]; then
+      jq -r '.nodes | to_entries[] | select(.value.locked) | .value.locked as $l
+        | "  \(.key): \($l.type):\($l.owner // "")\(if $l.owner then "/" else "" end)\($l.repo // $l.path // $l.url // "") @ \($l.rev // $l.narHash // "?")"' \
+        "$repo/$f" 2>/dev/null || echo "  (not a lock file jq can read)"
+    else cat "$repo/$f"; fi
+  done
   if [ "$YES" = 0 ]; then
     printf '\napprove and load these? [y/N] '; a=""
     if [ -t 0 ]; then read -r a || a=""; else { read -r a </dev/tty; } 2>/dev/null || a=""; fi

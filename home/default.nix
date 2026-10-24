@@ -32,6 +32,13 @@ in
       defaultText = lib.literalExpression "pkgs.direnv (>= 2.38, overridden while nixpkgs is older)";
       description = "direnv >= 2.38 for `require_allowed` in .envrc files.";
     };
+
+    claudeCodePackage = lib.mkOption {
+      type = lib.types.package;
+      default = import ../pkgs/claude-code.nix { inherit pkgs; };
+      defaultText = lib.literalExpression "pkgs.claude-code without LD_LIBRARY_PATH in its wrapper (pkgs/claude-code.nix)";
+      description = "The Claude Code package. The default carries alsa-lib as a RUNPATH instead of the LD_LIBRARY_PATH nixpkgs' wrapper exports into every hook, command and MCP server.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -43,7 +50,10 @@ in
       # `worktree.baseRef`, is in the managed settings and the repo file
       # (lib/settings.nix); on a managed host the user file has nothing to
       # hold that a session could use, and the sandbox denies writing it.
-      claude-code.enable = true;
+      claude-code = {
+        enable = true;
+        package = cfg.claudeCodePackage;
+      };
 
       direnv = {
         enable = true;

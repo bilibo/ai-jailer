@@ -5,6 +5,135 @@ happened and what was learned on the day.
 
 ## 2026-10-24
 
+- The `LD_LIBRARY_PATH` fix, staged: `pkgs/claude-code.nix` overrides
+  nixpkgs' claude-code to drop `--prefix LD_LIBRARY_PATH` from the
+  wrapper and put alsa-lib on the binary's RUNPATH instead (`patchelf
+  --add-rpath` in `postFixup`, after autoPatchelfHook), so a dlopen from
+  the binary still finds libasound and no child process sees the
+  variable. The override asserts the line is there to remove: when
+  nixpkgs stops setting it, the build says to delete the file, the exit
+  `pkgs/direnv.nix` has. The home module takes it through a new
+  `harness.claudeCodePackage` option (default the override), the flake
+  exports `packages.claude-code`, and `claude-code-test` (7 checks)
+  asserts the wrapper no longer names the variable and keeps its PATH
+  prefix, the binary carries the RUNPATH, and `claude --version` still
+  answers; unfree, so the package and the check exist only when the
+  evaluator allows it, as `mod-validate-test` already did. The devenv
+  module's one-identifier change (`pkgs.claude-code` to the override
+  under `claudeCode.enable`) is a diff for the human: the hook refuses
+  `devenv/devenv.nix` from a session. Not the hook preamble: it would
+  have covered the Bash tool only. Learned: `lib.hasInfix` is
+  `builtins.match` underneath and refuses a string carrying a store-path
+  context, so the assertion compares the `replaceStrings` result with
+  the original.
+- `docs/suggestion.md`, new: two ideas with a shape, neither a roadmap
+  item. Agents built on the Claude Agent SDK, on what its documentation
+  says (read the same day): a session loads project settings and hooks
+  by default, so an SDK program in a harness repo is governed like a
+  session; managed settings load whatever the program asks for; the
+  program's own `settings` and `sandbox` rank above project scope, so
+  on an unmanaged host an opt-out program escapes the repo file; and
+  whether `disableBypassPermissionsMode` stops the SDK's own bypass mode
+  is not documented, which is the test case (the SDK form of
+  `docs/sessions.md` section 7's question). A first draft had the
+  default backwards and called the broker an SDK candidate; it is a mod
+  inside the engine. And the agent's cloud identity (Entra Agent ID) as
+  a separate repository: the handoff's `azure-<actor>` split already
+  gives the agent its own `AZURE_CONFIG_DIR`, but with `agentAuth =
+  user` it holds the human's identity, so the tenant cannot tell the
+  two apart; a third `agentAuth` value, a doctor line comparing the two
+  principals, a detection pairing by app id and host, attestation
+  through a future `harness doctor --json`. The roadmap's Ideas and
+  `CLAUDE.md` point at it.
+- Traced the `LD_LIBRARY_PATH` open question (roadmap, 2026-10-21): it
+  comes from Claude Code's own nixpkgs package. `bin/claude` in
+  `claude-code-2.1.300` is a `makeBinaryWrapper` binary whose embedded
+  invocation has `--prefix 'LD_LIBRARY_PATH' ':'
+  '/nix/store/xlqm12gx...-alsa-lib-1.2.16.1/lib'`, next to `--set
+  USE_BUILTIN_RIPGREP 0` and a PATH prefix (procps, ripgrep, bubblewrap).
+  That path is the whole of `LD_LIBRARY_PATH` in this session. The
+  sandbox's own process (PID 2 in its namespace) already has it, and
+  neither the shell snapshot nor the devenv export sets it, so every
+  hook and Bash command inherits it from the `claude` process. It hits
+  every host where Claude Code comes from nixpkgs: the managed host (the
+  home module's package) and any repo with `harness.claudeCode.enable`,
+  this checkout included. A host binary linked against the distro's
+  glibc (VS Code's `code`) then loads Nix libraries and dies. Not
+  changed: whether the hook preamble should strip that one entry is
+  left open in the roadmap.
+- Roadmap 0.8, staged, not yet run live: `harness check` case 14
+  (`cred-sandbox`), the sandbox's own `denyRead` on `~/.git-credentials`
+  with the hook out of the way. Two departures from the roadmap's
+  sketch. First, the command is `wc -c ~/.git-cred*`, a glob, not
+  `${f}credentials`: case 2 records that `-p` refuses `${...}` before
+  it runs, which would leave the case inconclusive every time. Second,
+  the forbid is a non-zero size, not `live-check`: `wc -c` never prints
+  content, so a real file stays unread even if the sandbox fails. Seen
+  in this session, under the same sandbox: the glob matched nothing. A
+  masked file would still be listed, so the host evidently has none and
+  a `denyRead` path is not masked into existence (a `denyWrite` path is,
+  case 11). So the case creates
+  the fake file (mode 600) when there is none, removes it after, and
+  leaves an existing one alone. It passes on `0 <path>` (masked as
+  `/dev/null`, as the README says of `.env`), on no such file, or on a
+  permission error; the first live run says which. The header's session
+  counts were off before this: cases 1 to 12 are twelve sessions, a
+  fenced repo adds two (case 13 runs two), a failed case 2 adds two
+  diagnose sessions. With case 15 (next entry): fourteen, sixteen and
+  two, and the README and runbook say fourteen.
+- Roadmap 2.6 answered, staged as `harness check` case 15
+  (`git-hookspath`): the main checkout's `.git/config` holds against a
+  shell write. Run in this session, under the same sandbox,
+  `git config core.hooksPath /tmp/live-check-hooks` (and before it a
+  harmless `harness.livecheck` key) exits 255 with `could not lock
+  config file .git/config: File exists`, and the value stays unset. git
+  writes through `.git/config.lock` and a rename. `.git/config` itself
+  is a read-only bind of the real file, and the sandbox mounts
+  `/dev/null` at `.git/config.lock`: a character device, `nobody`, seen
+  only inside the sandbox. So the lock cannot be taken. The roadmap
+  expected a permission error; the case accepts either. The hook has no
+  rule for the command, so the sandbox is the only layer. Not covered:
+  `-c core.hooksPath=`, `--global` and a worktree's own config (runbook
+  section 8 now says so). The case saves and restores the key if the
+  write ever lands, and it fails when `.git` is not a directory.
+- Roadmap gap C, staged: `docs/project-devenv.md`, the project devenv for
+  a human who does not know Nix. The files and who edits them, the
+  four-step loop every change goes through, then tools, unfree packages,
+  toolchains, `env.` lines, allow rules, network hosts and the other
+  options, each with the lines to paste. Two things learned writing it.
+  First, a toolchain's package manager needs the network: cargo, pip and
+  npm reach hosts the default allowlist leaves out, while Nix fetches
+  `packages` outside the sandbox, so the guide names the hosts for
+  `extraAllowedDomains`. Second, `harness.settings` is merged with
+  `recursiveUpdate`, so a list there replaces the harness's own:
+  `settings.permissions.deny` or `settings.sandbox.network.allowedDomains`
+  would drop the full deny set or the allowlist. The guide says to use
+  `extraDeny` and `extraAllowedDomains`; nothing in the module stops it
+  yet. The guide repeats the 2026-10-23 finding that `require_allowed`
+  flags an edited `devenv.nix` without blocking it. The template
+  `harness init` writes links the guide in its header and gains
+  commented `packages`, `languages` and `env` lines (the rendered file
+  parses; harness-init-test 35). Linked from the README, runbook section
+  3 and `CLAUDE.md`.
+- Roadmap 0.3 and 0.6, staged. `harness bootstrap` no longer runs dnf,
+  labels the daemon socket for SELinux or enables the socket:
+  `scripts/install.sh` does all three before `nix run` exists, and the
+  bootstrap copies had been dead weight since the one-route decision
+  (2026-10-21). The SELinux explanation moved into `install.sh`, which
+  pointed at bootstrap for it. `reset` still undoes those steps from the
+  receipt and `doctor` still reports them. bootstrap-test case 11 is now
+  `doctor` on a Fedora 44 os-release: the host line, and no dnf call
+  (150 checks). `harness init` treats a `devenv.lock` that is there
+  before the first load as foreign and prints its pinned inputs (`name:
+  type:owner/repo @ rev`) instead of the raw file; harness-init-test has
+  a repo with only a lock (35 checks; 3 of them fail against the old
+  `init.sh`). Side effect: a re-run of `harness init` on a repo it set up
+  earlier now stops at the y/N for its own lock, which is the same
+  question as for any lock it did not write this run; `--yes` answers
+  it. `nix flake check` on a copy: green. The runbook follows: section 3
+  says what `harness init` prints and asks before the first `direnv
+  allow`, and the SELinux troubleshooting entry names `scripts/install.sh`
+  as the one that labels the socket directory.
 - First session in this checkout on the NixOS-WSL host, under the managed
   settings (231 deny rules, the strict allowlist, `/mnt/c` and `/run/WSL`
   hidden). The checkout and the copy brought over from the Windows side

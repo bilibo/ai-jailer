@@ -7,6 +7,7 @@
 # with --yes it reaches the checks, where the stub direnv has linked
 # <settings.json> (a store path; default: the harness itself) as the repo's
 # .claude/settings.json, and the settings test must get the repo's own path.
+# A repo's own devenv.lock is shown as the inputs it pins and stops the same.
 set -uo pipefail
 harness="${1:?usage: harness-init-test.sh <harness> [<settings.json>]}"
 settings="${2:-$harness}"
@@ -57,9 +58,9 @@ check "check --help" 'harness check \[<repo>\]'
 mkdir -p "$tmp/bin" "$tmp/foreign"; echo '{ pkgs, ... }: { enterShell = "foreign code"; }' >"$tmp/foreign/devenv.nix"
 printf '#!/bin/sh\necho "direnv $*" >>"$CALLS"\n[ "$1" = version ] && echo 2.38.2\n[ "$1" = allow ] && [ -n "${2:-}" ] && mkdir -p "$2/.claude" && ln -sfn "$SETTINGS" "$2/.claude/settings.json"\nexit 0\n' >"$tmp/bin/direnv"
 printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/devenv"; chmod +x "$tmp/bin/direnv" "$tmp/bin/devenv"
-shell_init() { # shell_init <args...>: init with the stubs, no terminal; sets out and rc
+shell_init() { # shell_init <args...>: init on $repo_dir (default: the foreign repo) with the stubs, no terminal; sets out and rc
   : >"$tmp/calls"
-  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS="$settings" HARNESS_CODE_ROOT="$tmp/code" "$harness" init "$@" "$tmp/foreign" 2>&1 </dev/null); rc=$?
+  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS="$settings" HARNESS_CODE_ROOT="$tmp/code" "$harness" init "$@" "${repo_dir:-$tmp/foreign}" 2>&1 </dev/null); rc=$?
 }
 shell_init
 if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a foreign devenv.nix without --yes exits 0"; fi
@@ -74,6 +75,16 @@ if grep -q "^direnv allow $tmp/foreign\$" "$tmp/calls"; then pass=$((pass+1)); e
 check "settings test gets the repo path" "project-settings-test\.sh $tmp/foreign/\.claude/settings\.json $tmp/foreign[[:space:]]"
 check "settings linked from the store"   'ok +\.claude/settings\.json -> /nix/store/'
 if [[ "$out" =~ 'FAIL: full deny set' ]]; then fail=$((fail+1)); echo "FAIL: the settings test did not read the linked file"; else pass=$((pass+1)); fi
+
+# A repo with its own devenv.lock and nothing else foreign: the inputs it
+# pins are printed, and without --yes no `direnv allow` runs.
+mkdir -p "$tmp/locked"
+echo '{"nodes":{"nixpkgs":{"locked":{"type":"github","owner":"NixOS","repo":"nixpkgs","rev":"0123abc"}},"root":{"inputs":{"nixpkgs":"nixpkgs"}}},"root":"root","version":7}' >"$tmp/locked/devenv.lock"
+repo_dir="$tmp/locked" shell_init
+if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a foreign devenv.lock without --yes exits 0"; fi
+check "the lock's inputs printed" 'locked/devenv\.lock \(not written by harness init\).*nixpkgs: github:NixOS/nixpkgs @ 0123abc'
+check "the lock refused"          'not approved: devenv\.lock;'
+if grep -q 'direnv allow' "$tmp/calls"; then fail=$((fail+1)); echo "FAIL: direnv allow ran with an unapproved lock"; else pass=$((pass+1)); fi
 
 # A WSL host (fake marker): the dry run says so, and a real write (no shell
 # step) puts harness.platform = "wsl" into devenv.nix; elsewhere the line

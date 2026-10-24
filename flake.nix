@@ -101,6 +101,14 @@
           };
           default = self.packages.${pkgs.stdenv.hostPlatform.system}.managed;
         }
+        # claude-code is unfree: exported, like the check below, only when the
+        # evaluator allows it. The home and devenv modules use the same file.
+        // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
+          # pkgs.claude-code without the LD_LIBRARY_PATH its wrapper leaks
+          # into every hook, command and MCP server (pkgs/claude-code.nix),
+          # for a host that installs Claude Code from this flake.
+          claude-code = import ./pkgs/claude-code.nix { inherit pkgs; };
+        }
       );
 
       # `nix fmt`: nixfmt over every .nix file (treefmt-wrapped).
@@ -239,6 +247,20 @@
         # with --impure, or allowUnfree in the nixpkgs config); otherwise run
         # tests/mod-validate-test.sh by hand with the host's claude.
         // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
+          # pkgs/claude-code.nix: no LD_LIBRARY_PATH in the wrapper, alsa-lib
+          # as a RUNPATH, and the binary still starts.
+          claude-code-test =
+            pkgs.runCommand "claude-code-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.patchelf
+                  pkgs.binutils
+                ];
+              }
+              ''
+                bash ${./tests/claude-code-test.sh} ${p.claude-code} | tee $out
+              '';
           mod-validate-test =
             pkgs.runCommand "mod-validate-test"
               {
