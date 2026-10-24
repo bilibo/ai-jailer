@@ -36,5 +36,10 @@ nix flake check path:<dir>
 ```
 
 One check at a time: `nix build path:<dir>#checks.x86_64-linux.<name>
---no-link -L`. Before handing over Nix changes: `nix fmt`, `statix`,
-`deadnix`; never pass `self` into a package.
+--no-link -L`. Before handing over Nix changes: format, `statix`,
+`deadnix`; never pass `self` into a package. From a session `nix fmt`
+finds no tree root in the copy and walks the whole visible filesystem
+(six minutes, nothing formatted, 2026-10-24), so run the tools on the
+files: `nixfmt --check $(git ls-files -- '*.nix')` (`nix shell
+nixpkgs#nixfmt`), `nix run nixpkgs#statix -- check <file>`, `nix run
+nixpkgs#deadnix -- --fail <file>`.

@@ -36,10 +36,14 @@ in
 
   config = lib.mkIf cfg.enable {
     programs = {
-      claude-code = {
-        enable = true;
-        settings.worktree.baseRef = "head";
-      };
+      # The package only, no `settings`: with any key there home-manager
+      # writes `~/.claude/settings.json` as a store symlink, and Claude Code
+      # writes that file itself (`/model` at user scope), which then fails
+      # with EROFS (changelog 2026-10-24). The one key this carried,
+      # `worktree.baseRef`, is in the managed settings and the repo file
+      # (lib/settings.nix); on a managed host the user file has nothing to
+      # hold that a session could use, and the sandbox denies writing it.
+      claude-code.enable = true;
 
       direnv = {
         enable = true;
