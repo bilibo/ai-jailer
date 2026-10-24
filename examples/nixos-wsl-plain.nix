@@ -3,11 +3,12 @@
 # harness home module; harness.enable = true in both.
 #
 # The plain NixOS-WSL host shape, the default Windows route of the README's
-# host table. scripts/install-wsl.ps1 installs NixOS-WSL, puts your
-# nixos-config flake at /etc/nixos and switches to its
-# nixosConfigurations.<name>; that flake imports NixOS-WSL and a file like
-# this one, and no harness module. The harness comes afterwards, inside the
-# distro, as the user:
+# host table. The host repo carries the installer (bilibo/nixos-wsl is the
+# reference one): its scripts/install-wsl.ps1, run from a checkout on
+# Windows, installs NixOS-WSL, puts that repo at /etc/nixos and switches to
+# its nixosConfigurations.<name>; that flake imports NixOS-WSL and a file
+# like this one, and no harness module. The harness starts afterwards, at
+# bootstrap, inside the distro, as the user:
 #   nix run github:bilibo/claude-nix-harness#harness -- bootstrap
 #   harness init <customer>/<repo>      # once per work repo
 # Its guard rails then apply inside those repos; a session elsewhere keeps
@@ -98,7 +99,7 @@ in
   users.users.${user}.extraGroups = [ "wheel" ];
 
   environment.systemPackages = with pkgs; [
-    git # wsl/update.sh pulls /etc/nixos with it
+    git # the host repo's scripts/wsl/update.sh pulls /etc/nixos with it
     # 2. The Claude Code sandbox and its network proxy.
     bubblewrap
     socat

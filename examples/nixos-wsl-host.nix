@@ -1,10 +1,11 @@
 # The default Windows route is the plain host, examples/nixos-wsl-plain.nix; this file is the stricter opt-in.
 #
 # The managed NixOS-WSL host shape, the managed Windows row of the README's
-# host table. scripts/install-wsl.ps1 installs NixOS-WSL, puts your nixos-config
-# flake at /etc/nixos and switches to its nixosConfigurations.<name>; that
-# flake imports NixOS-WSL, home-manager, this repository's two modules and
-# a file like this one. Build-only material, like nixos-host.nix; the
+# host table. The host repo carries the installer (bilibo/nixos-wsl is the
+# reference one): its scripts/install-wsl.ps1, run from a checkout on
+# Windows, installs NixOS-WSL, puts that repo at /etc/nixos and switches to
+# its nixosConfigurations.<name>; that flake imports NixOS-WSL,
+# home-manager, this repository's two modules and a file like this one. Build-only material, like nixos-host.nix; the
 # human (or the installer they run) switches generations.
 #
 #   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";  # the branch this flake is built against
@@ -114,7 +115,7 @@ in
   users.users.${user}.extraGroups = [ "wheel" ];
 
   environment.systemPackages = with pkgs; [
-    git # wsl/update.sh pulls /etc/nixos with it
+    git # the host repo's scripts/wsl/update.sh pulls /etc/nixos with it
     bubblewrap # the Claude Code sandbox
     socat # its network proxy
     curl

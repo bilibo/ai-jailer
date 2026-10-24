@@ -17,7 +17,7 @@ Pick the route for your host:
 | Fedora 44 or newer, Ubuntu, any other Linux, with or without Nix | `scripts/install.sh` ("Any Linux" below): Nix if missing, then `harness bootstrap` for the user side and `harness init` for each repo | Fedora 44 and Ubuntu 26.10 laptops, end to end through `harness check` (2026-10-22) |
 | NixOS, your own configuration | Your configuration provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv` and `programs.claude-code`, or `scripts/install.sh` adds this flake's packages to your profile: on NixOS it downloads nothing, writes nothing under `/etc` (it prints the `nix.settings` block when `nix.conf` lacks flakes or the devenv cache) and leaves home-manager's files alone, printing the option instead. Harness repos import `harness/devenv` as everywhere | NixOS 26.11 laptop, in daily use, this repo's own sessions included (2026-10-23); the install route only dry-run there |
 | NixOS or NixOS-WSL, managed | NixOS module and home module, `harness.enable = true` and nothing else: every rule everywhere, strict network allowlist (`examples/nixos-host.nix`) | module and its tests; the module evaluates in `nix flake check` (2026-10-23); live on the NixOS-WSL laptop from 2026-10-23 until it moved to the plain route (2026-10-24), no native NixOS host yet |
-| Windows 11, NixOS-WSL | `scripts/install-wsl.ps1 -HostRepo <your nixos-config>` from a checkout on Windows ("Windows" below): installs NixOS-WSL from the latest release, puts your flake at `/etc/nixos`, switches; rerun to pull and switch. The host is plain: `examples/nixos-wsl-plain.nix` carries only the sandbox prerequisites (user namespaces, bubblewrap and socat, flakes and the devenv cache, `allowUnfree`) plus tmux, and no `claude`. Then, inside the distro, `nix run github:bilibo/claude-nix-harness#harness -- bootstrap` and `harness init <customer>/<repo>` per work repo, as on any NixOS. The managed modules (previous row, `examples/nixos-wsl-host.nix`) are the stricter opt-in | Windows 11 Home 26H2, WSL 3.0.3 laptop: managed shape end to end through `scripts/wsl/verify.sh` (19 checks, 2026-10-23); plain shape evaluated (dry-run of both host outputs) and `verify.sh`'s unmanaged branch exercised, 2026-10-24; not yet switched in, bootstrap not yet run there |
+| Windows 11, NixOS-WSL | Your host repo carries the installer ("Windows" below): `bilibo/nixos-wsl` is the reference one, and its `scripts\install-wsl.ps1`, run from a checkout on Windows, installs NixOS-WSL from the latest release, puts that repo at `/etc/nixos`, switches; rerun to pull and switch. The host is plain: `examples/nixos-wsl-plain.nix` is its shape, only the sandbox prerequisites (user namespaces, bubblewrap and socat, flakes and the devenv cache, `allowUnfree`) plus tmux, and no `claude`. The harness starts at bootstrap: inside the distro, `nix run github:bilibo/claude-nix-harness#harness -- bootstrap` and `harness init <customer>/<repo>` per work repo, as on any NixOS. The managed modules (previous row, `examples/nixos-wsl-host.nix`) are the stricter opt-in | Windows 11 Home 26H2, WSL 3.0.3 laptop: managed shape end to end through the installer's `verify.sh` (19 checks, 2026-10-23); plain shape evaluated (dry-run of both host outputs) and `verify.sh`'s unmanaged branch exercised, 2026-10-24; not yet switched in, bootstrap not yet run there. The installer moved to the host repo on 2026-10-24 |
 | Mixed host | NixOS module with `enforcementRoots = [ "~/code/git" ]`: managed rules under the roots, your own settings elsewhere | available, superseded by the first two rows |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
@@ -63,7 +63,7 @@ nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json with deny rules, hooks and sandbox; `ccmux`
 pkgs/       ccmux launcher, direnv >= 2.38 override, claude-code override (alsa-lib as a RUNPATH instead of an `LD_LIBRARY_PATH` every command inherits), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
-scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap`, then `harness init` on the checkout. install-wsl.ps1: the Windows route (NixOS-WSL from PowerShell), with wsl/bootstrap.sh, wsl/update.sh and wsl/verify.sh run inside the distro
+scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap`, then `harness init` on the checkout. No Windows installer: a NixOS-WSL host repo carries its own (bilibo/nixos-wsl's scripts/install-wsl.ps1)
 examples/   nixos-host.nix (managed NixOS), nixos-wsl-plain.nix (plain NixOS-WSL, the default) and nixos-wsl-host.nix (managed NixOS-WSL): the host files a nixos-config flake imports
 tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, RUNPATH, `--version`; unfree, so only when the evaluator allows it)
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), project-devenv (a project's devenv.nix for non-Nix users), command-center (this checkout as the session that orchestrates the work repos), roadmap, changelog, handoff-tiers (tiers, read fence, customer module, phased), sessions (tiers, proposals), suggestion (ideas with a shape, not planned)
@@ -109,29 +109,36 @@ leaves both commented out.
 
 ## Windows: NixOS-WSL from PowerShell
 
-Windows 11 22H2 or newer with WSL 2.4 or newer from the Store
-(`wsl --install --no-distribution` once, then reboot). From a checkout of
-this repo on Windows:
+This repo keeps no Windows installer (since 2026-10-24): the host repo
+carries one, and the harness starts at `harness bootstrap`, the same as on
+any NixOS. `bilibo/nixos-wsl` is the reference host repo and
+`examples/nixos-wsl-plain.nix` is its shape: NixOS-WSL and the sandbox
+prerequisites, no harness module. Windows 11 22H2 or newer with WSL 2.4 or
+newer from the Store (`wsl --install --no-distribution` once, then reboot).
+Clone the host repo on Windows and run its installer from the checkout:
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-wsl.ps1 -HostRepo https://github.com/you/nixos-config
+git clone https://github.com/bilibo/nixos-wsl.git C:\code\nixos-wsl
+cd C:\code\nixos-wsl
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-wsl.ps1
 ```
 
-`-HostRepo` is your NixOS configuration flake (a git URL, or a folder on
-this machine for the first install). It imports NixOS-WSL and carries the
-sandbox prerequisites and no harness module; `examples/nixos-wsl-plain.nix`
-is the host file. The script downloads the latest NixOS-WSL release and
-checks it against the published sha256, registers the distro, makes
-`/etc/nixos` a git checkout of your flake owned by the default user, builds
-`nixosConfigurations.<name>` (`-Output`, default `nixos-wsl`) as that user
-and activates it as root, applies the host repo's `windows/wslconfig` as
-your `.wslconfig`, restarts WSL and runs `scripts/wsl/verify.sh` (on a plain
-host it skips the managed-layer checks, checks tmux, and reports direnv,
-devenv, ccmux and claude without judging them). Running it again is the update: `git pull
---ff-only` and switch, never a commit on the box. `-NoSwitch` builds and
-prints the activation commands instead; `-Tag` picks a NixOS-WSL release.
-The image only bootstraps; afterwards NixOS and NixOS-WSL move through your
-flake's inputs.
+The script downloads the latest NixOS-WSL release and checks it against
+the published sha256, registers the distro, makes `/etc/nixos` a git
+checkout of the host repo owned by the default user (a clone of the
+checkout's `origin`, so an update is a pull; without one, a copy of the
+folder; `-HostRepo` overrides), builds `nixosConfigurations.<name>`
+(`-Output`, default `nixos-wsl`) as that user and activates it as root,
+applies the host repo's `windows/wslconfig` as your `.wslconfig`, restarts
+WSL and runs the host repo's `scripts/wsl/verify.sh` (on a plain host it
+skips the managed-layer checks, checks tmux, and reports direnv, devenv,
+ccmux and claude without judging them). Running it again is the update:
+`git pull --ff-only` and switch, never a commit on the box. `-NoSwitch`
+builds and prints the activation commands instead; `-Tag` picks a
+NixOS-WSL release. The image only bootstraps; afterwards NixOS and
+NixOS-WSL move through the flake's inputs. Another host flake carries a
+copy of that repo's `scripts/install-wsl.ps1` and `scripts/wsl/`, or is
+handed to its installer with `-HostRepo <git URL or folder>`.
 
 Then, inside the distro, as yourself: `nix run
 github:bilibo/claude-nix-harness#harness -- bootstrap` (the NixOS path:

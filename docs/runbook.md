@@ -147,7 +147,7 @@ or for reading what the script wrote:
 | Host | Set |
 |---|---|
 | Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
-| Unmanaged host | No harness modules (NixOS-WSL from `install-wsl.ps1` is this shape since 2026-10-24). Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing, Nix is the system's) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist` and `syncClaudeAiSkills`/`syncClaudeAiPlugins = false` (account-synced skills and plugins off, the default since 2026-10-24; `--account-sync` leaves them on), and offers the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl where an older Debian kernel does. On NixOS (2026-10-23) nothing under `/etc` is written: `nix.conf` is the system configuration's, so the `nix.settings` block is printed when it lacks flakes or the devenv cache, and a user file that is a store symlink (home-manager's) is left alone with the option that sets it printed; `root_write` refuses any store symlink on every host. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
+| Unmanaged host | No harness modules (NixOS-WSL from the host repo's `install-wsl.ps1`, `bilibo/nixos-wsl`'s, is this shape since 2026-10-24). Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing, Nix is the system's) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist` and `syncClaudeAiSkills`/`syncClaudeAiPlugins = false` (account-synced skills and plugins off, the default since 2026-10-24; `--account-sync` leaves them on), and offers the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl where an older Debian kernel does. On NixOS (2026-10-23) nothing under `/etc` is written: `nix.conf` is the system configuration's, so the `nix.settings` block is printed when it lacks flakes or the devenv cache, and a user file that is a store symlink (home-manager's) is left alone with the option that sets it printed; `root_write` refuses any store symlink on every host. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
 | Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
 
 See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
@@ -197,16 +197,20 @@ The home-manager side (`home/`) is the same on every managed host: direnv
 config, tmux rules, `ccmux`, `programs.claude-code`. It never carries deny
 rules.
 
-Windows (2026-10-24): from a checkout of this repo on Windows 11,
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-wsl.ps1
--HostRepo <your nixos-config>` installs NixOS-WSL (the latest release,
-checksum verified), puts your flake at `/etc/nixos` as a git checkout owned
-by the default user and switches to `nixosConfigurations.<name>` (`-Output`,
-default `nixos-wsl`). The host is plain: `examples/nixos-wsl-plain.nix` is
-the host file, NixOS-WSL plus the four sandbox prerequisites
-(`security.allowUserNamespaces`, bubblewrap and socat, flakes and the
-devenv cache in `nix.settings`, `allowUnfree`) and no harness module. Then,
-inside the distro, as yourself:
+Windows (2026-10-24): the host repo carries the installer, not this repo;
+the harness starts at `harness bootstrap`, as on any NixOS. `bilibo/nixos-wsl`
+is the reference host repo: clone it on Windows 11 (`git clone
+https://github.com/bilibo/nixos-wsl.git C:\code\nixos-wsl`), then from the
+checkout `powershell -NoProfile -ExecutionPolicy Bypass -File
+.\scripts\install-wsl.ps1` installs NixOS-WSL (the latest release, checksum
+verified), puts the host repo at `/etc/nixos` as a git checkout owned by the
+default user (a clone of the checkout's `origin`, else a copy of the
+folder; `-HostRepo <git URL or folder>` overrides) and switches to
+`nixosConfigurations.<name>` (`-Output`, default `nixos-wsl`). The host is
+plain: `examples/nixos-wsl-plain.nix` is its shape, NixOS-WSL plus the four
+sandbox prerequisites (`security.allowUserNamespaces`, bubblewrap and
+socat, flakes and the devenv cache in `nix.settings`, `allowUnfree`) and no
+harness module. Then, inside the distro, as yourself:
 ```
 nix run github:bilibo/claude-nix-harness#harness -- bootstrap
 # new terminal: PATH, HARNESS_CODE_ROOT and the direnv hook come from ~/.bashrc.d
@@ -227,11 +231,12 @@ box, and a dirty `/etc/nixos` stops it. `-NoSwitch` builds and prints the
 two activation commands for a host where you switch by hand. The
 `.wslconfig` comes from the host repo's `windows/wslconfig` and applies on
 the `wsl --shutdown` the script does; after any `wsl.*` option change, run
-`wsl -t <distro>` from Windows. `scripts/wsl/verify.sh` prints what the
-host should look like afterwards: on a plain host it skips the
-managed-layer checks with one line, checks tmux, and reports direnv,
-devenv, ccmux and claude without failing on them. Inside the distro the update is
-`sudo sh <harness checkout>/scripts/wsl/update.sh <name>`. The managed
+`wsl -t <distro>` from Windows. The host repo's `scripts/wsl/verify.sh`
+prints what the host should look like afterwards: on a plain host it skips
+the managed-layer checks with one line, checks tmux, and reports direnv,
+devenv, ccmux and claude without failing on them. Inside the distro the
+update is `sudo sh /etc/nixos/scripts/wsl/update.sh <name>`, since the host
+repo is `/etc/nixos`. The managed
 layer stays available: `harness reset` first, then import both harness
 modules as well (`examples/nixos-wsl-host.nix`).
 

@@ -5,6 +5,40 @@ happened and what was learned on the day.
 
 ## 2026-10-24
 
+- The Windows route moved to the host repo (the user's decision), staged
+  in both repos. `scripts/install-wsl.ps1` and `scripts/wsl/bootstrap.sh`,
+  `update.sh` and `verify.sh` left this repo for `bilibo/nixos-wsl`'s
+  `scripts/` (`git rm` here, `git add` there, content kept as the starting
+  point). Why: a host provisions itself from its own checkout on Windows
+  and that checkout becomes `/etc/nixos`, while the harness is a user tool
+  whose part starts at `harness bootstrap`, the same as on any NixOS; so it
+  keeps no Windows installer. There, `-HostRepo` is optional and defaults
+  to the checkout's `origin` URL (`git -C <checkout> remote get-url
+  origin`), else the checkout folder; `-Output`, `-Tag`, `-NoSwitch` and
+  `-SkipVerify` are unchanged, and Done lists bootstrap, a new terminal,
+  `harness doctor`, the clone under `~/code/git/<customer>/` and `harness
+  init`. The in-distro update is `sudo sh
+  /etc/nixos/scripts/wsl/update.sh <name>`. The README (host table, the
+  Windows section, layout), runbook section 4, the roadmap's Done entry (a
+  dated note) and the comments in both `examples/nixos-wsl-*.nix` point at
+  the host repo's installer; nixfmt, statix and deadnix clean. No check
+  used the moved files: on copies of the tree before and after, every
+  `checks.x86_64-linux` drvPath (19) is the same, `nix flake check` on the
+  copy is green (every output already in the store), and `install-test`,
+  the one check that reads `scripts/`, passes forced with `--rebuild` (60
+  of 60). `verify.sh` from its new place on the still-managed
+  host: 18 ok, 1 failed (HTTPS to cache.nixos.org, which the session
+  sandbox blocks). Learned: the 2026-10-23 install took the host repo as a
+  Windows folder without `.git`, so `/etc/nixos` became one baseline commit
+  with no remote and `update.sh` had nothing to pull; and since the script
+  takes the update path whenever `/etc/nixos` is a checkout, a rerun
+  rebuilds that baseline, not the pushed repo. Defaulting to the origin URL
+  makes the first install a clone with a remote; the live host needs a
+  fresh install (`wsl --unregister`) or its `/etc/nixos` pointed at origin
+  once (nixos-wsl README). And a script kept in the repo it deploys
+  updates itself: `update.sh` run from `/etc/nixos` pulls over its own
+  file, which holds because git replaces a file (unlink, then create)
+  rather than rewriting it, so the running shell keeps reading the old one.
 - The command center is deliberately open (the user's decision): it is
   where new repos are set up, and locking it down is a choice
   (`harness.role = "work"` in its `devenv.nix`, or doing the work from a

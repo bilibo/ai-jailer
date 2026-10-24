@@ -135,7 +135,10 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   nixos-config flake; `scripts/wsl/{bootstrap,update,verify}.sh` do the
   work inside the distro, pull-only after the first install;
   `examples/nixos-wsl-host.nix` is the host file. First live managed host:
-  NixOS-WSL on a Windows 11 Home laptop (changelog).
+  NixOS-WSL on a Windows 11 Home laptop (changelog). 2026-10-24: the
+  installer and `scripts/wsl/` moved to the host repo (`bilibo/nixos-wsl`,
+  `scripts/install-wsl.ps1`), which provisions itself; this repo keeps no
+  Windows installer and starts at `harness bootstrap` (changelog).
 
 ## Target flow (2026-10-21)
 
