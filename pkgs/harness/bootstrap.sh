@@ -32,10 +32,11 @@
 #
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
-# harness ref's current flake.lock. Root is needed for dnf (Fedora),
-# /etc/nix/nix.conf (the devenv cache; flakes where the installer left them
-# off), the nix-daemon socket, and the one kernel setting the Claude Code
-# sandbox cannot run without: where the kernel confines unprivileged user
+# harness ref's current flake.lock. scripts/install.sh owns the root steps
+# that come before Nix (dnf on Fedora, the SELinux label, the nix-daemon
+# socket); root is needed here for /etc/nix/nix.conf (the devenv cache;
+# flakes where the installer left them off) and the one kernel setting the
+# Claude Code sandbox cannot run without: where the kernel confines unprivileged user
 # namespaces. Ubuntu 23.10 and later do it through AppArmor
 # (kernel.apparmor_restrict_unprivileged_userns = 1): the fix is the
 # profile from the Claude Code sandboxing docs, /etc/apparmor.d/bwrap, an
@@ -128,10 +129,9 @@ MIN_CLAUDE="2.1.295"   # onFailure: block in hook registrations
 MIN_DIRENV="2.38"      # require_allowed in .envrc
 MIN_TMUX="3.2"         # extended-keys
 RECEIPT="$HOME/.local/state/claude-nix-harness/receipt.json"
-# The built-in lists: what bootstrap installs, and what upgrade falls back to
+# The built-in list: what bootstrap installs, and what upgrade falls back to
 # on a host without a receipt.
 PROFILE_PKGS=(direnv devenv ccmux harness)
-ROOT_RPMS=(nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils)
 # The host files pkgs/ ships; pkgs/harness.nix points these at the store.
 DIRENV_TOML="${HARNESS_DIRENV_TOML:-$HARNESS_DIR/pkgs/direnv.toml}"
 TMUX_CONF="${HARNESS_TMUX_CONF:-$HARNESS_DIR/pkgs/tmux.conf}"
@@ -167,7 +167,7 @@ in_list() { local x="$1"; shift; printf '%s\n' "$@" | grep -q -x -F -e "$x"; }  
 json_list() { jq -n '$ARGS.positional' --args "$@"; }
 
 # Fedora's profile.d puts ~/.nix-profile/bin and the default profile on PATH
-# for new shells; this shell may predate the dnf step. Fedora's package
+# for new shells; this shell may predate install.sh's dnf step. Fedora's package
 # first, then the nix-installer's. The test sets the list empty: on a
 # nix-installer host the default profile's real nix would otherwise outrun
 # the stub (2026-10-22).
@@ -328,8 +328,8 @@ rq() { jq -r "$1" <<<"$RECEIPT_JSON"; }  # rq <filter>: from the receipt, one va
 # shellcheck disable=SC1090  # the tests point this at a fake os-release
 [ -r "$OS_RELEASE" ] && . "$OS_RELEASE"
 # Fedora 44 or newer packages Nix itself: the dnf route. Everything else got
-# Nix from the nix-installer (scripts/install.sh); from here on the steps
-# are the same, minus dnf.
+# Nix from the nix-installer (scripts/install.sh, which also did the dnf
+# step); from here on the steps are the same.
 HOST=generic; WSL=0
 [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null && HOST=fedora
 { [ -e "$NIXOS_MARKER" ] || [ "${ID:-}" = nixos ]; } && HOST=nixos
@@ -340,16 +340,7 @@ HOST=generic; WSL=0
 
 # ---------------------------------------------------------------- root steps
 root_steps() {
-  local need=() p conf="$NIX_CONF" want flakes=""
-  if [ "$HOST" = fedora ]; then
-    for p in "${ROOT_RPMS[@]}"; do rpm -q "$p" >/dev/null 2>&1 || need+=("$p"); done
-    if [ ${#need[@]} -gt 0 ]; then
-      step "dnf install ${need[*]}"
-      run sudo dnf install -y "${need[@]}"
-      R_ROOT_PKGS+=("${need[@]}")
-    fi
-  fi
-
+  local conf="$NIX_CONF" want flakes=""
   # The harness block in nix.conf: the devenv cache; flakes when nothing else
   # turns them on (Fedora's package does, the nix-installer leaves them off);
   # trusted-users only on request (header).
@@ -371,27 +362,6 @@ $MARK_END"
     systemctl is-active -q nix-daemon.service 2>/dev/null && run sudo systemctl restart nix-daemon.service
   fi
   R_ROOT_STEPS+=(nix.conf)
-
-  # SELinux: /nix gets default_t without a policy, and systemd (init_t) may
-  # not create a socket in a default_t directory ("Failed to create listening
-  # socket: Permission denied", no AVC in the journal when auditd runs). The
-  # Determinate installer's nix.fc labels the socket directory var_run_t, the
-  # type /run has; same here, as a persistent file-context rule.
-  if selinux_on && ! matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then
-    step "SELinux: label /nix/var/nix/daemon-socket as var_run_t so systemd can create the daemon socket"
-    run sudo semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?'
-    run sudo restorecon -RF /nix/var/nix/daemon-socket
-    R_ROOT_STEPS+=(selinux)
-  fi
-
-  # The nix-installer enables the socket itself; Fedora's package ships it
-  # disabled. No unit at all (a daemon run some other way) is left alone.
-  if systemctl cat nix-daemon.socket >/dev/null 2>&1 \
-     && { ! systemctl is-enabled -q nix-daemon.socket 2>/dev/null || ! systemctl is-active -q nix-daemon.socket 2>/dev/null; }; then
-    step "enable the nix-daemon socket"
-    run sudo systemctl enable --now nix-daemon.socket
-    R_ROOT_STEPS+=(nix-daemon.socket)
-  fi
 
   userns_steps
 }
@@ -966,7 +936,7 @@ case "$CMD" in
       load_receipt
       [ "$HAVE_RECEIPT" = 0 ] || [ -z "$(rq '.profile[]?')" ] || mapfile -t PROFILE_PKGS < <(rq '.profile[]')
     fi
-    [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for dnf, /etc/nix/nix.conf and the nix-daemon socket (or pass --no-root after doing those by hand)"; root_steps; }
+    [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for /etc/nix/nix.conf and the user-namespace setting (or pass --no-root after doing those by hand)"; root_steps; }
     [ "$HOST" != nixos ] || nixos_steps
     [ "$NO_PROFILE" = 1 ] || profile_steps
     handover_steps

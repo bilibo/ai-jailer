@@ -158,7 +158,7 @@ NixOS half), WSL detection is stubbed. 2 works by convention
 (CLAUDE.md contracts and `SendMessage`, as on 2026-10-21 when three
 sessions worked the audit board); the checkout is itself under the
 customer rules (the hook refuses its `devenv.nix`) until the tier split.
-3 works; the template has no guide. 4 works by hand.
+3 works, with a guide since 2026-10-24 (gap C). 4 works by hand.
 
 The gaps, in order:
 
@@ -182,7 +182,10 @@ The gaps, in order:
   WSL marker (`HARNESS_*` overrides, as the other system paths have).
 - B. **Ubuntu for real**: runbook section 5's fresh-distro list on Ubuntu
   24.04, done under WSL so it verifies A's WSL branch on the same run.
-- C. **A guide to the project devenv for non-Nix users**
+- C. **A guide to the project devenv for non-Nix users**: written
+  2026-10-24 (changelog), every case below; the template links it in its
+  header and gains the `packages`, `languages` and `env` lines. As written
+  on 2026-10-21:
   (`docs/project-devenv.md`, linked from the README and from the
   `devenv.nix` `harness init` writes): what the four files are and which
   ones a human edits; adding a tool (`packages = [ pkgs.terraform ];`,
@@ -212,18 +215,12 @@ The gaps, in order:
       and accept that `gh auth login` without a keyring puts a push token
       in reach again.
    2. Done 2026-10-21: `devenv/devenv.nix` imports `pkgs/direnv.nix`.
-   3. One installer, decided 2026-10-21 (Target flow, below):
-      `scripts/install.sh` owns every root and pre-Nix step, `harness
-      bootstrap` the user side. In `pkgs/harness/bootstrap.sh`, from
-      `root_steps`: delete the `ROOT_RPMS` dnf loop, the SELinux block and
-      the daemon-socket block, and the `ROOT_RPMS` array; keep the
-      nix.conf block (the devenv cache) and `userns_steps`. `reset` keeps
-      undoing them from the receipt (install.sh hands them over in
-      `HARNESS_ROOT_PACKAGES`/`HARNESS_ROOT_STEPS`); `doctor` keeps
-      reporting SELinux and the socket. `tests/harness-bootstrap-test.sh`
-      case 11 (dnf on Fedora) goes; the Fedora host line check moves to a
-      doctor-only case. Fix the header (lines 9-35: "Root is needed for
-      dnf (Fedora)...").
+   3. Done 2026-10-24: `root_steps` in `pkgs/harness/bootstrap.sh` keeps
+      only the nix.conf block and `userns_steps`; the dnf loop, the SELinux
+      block, the daemon-socket block and `ROOT_RPMS` are gone, `reset` and
+      `doctor` unchanged, bootstrap-test case 11 a doctor-only Fedora host
+      line (changelog). As written: `scripts/install.sh` owns every root
+      and pre-Nix step, `harness bootstrap` the user side.
    4. Done 2026-10-22: `CLAUDE.md`, section "Checks", carries the copy of
       the regular files and `nix flake check path:<dir>` (changelog). No
       memory note: `CLAUDE.md` is loaded into every session here.
@@ -235,33 +232,21 @@ The gaps, in order:
       `nix_path` then put the default profile's real nix ahead of the stub
       (52 cases, GitHub unreachable from a session): the profile.d files
       it sources are `HARNESS_NIX_PROFILE_D`, empty in the test.
-   6. `pkgs/harness/init.sh`, the foreign-file block (lines 192-199): a
-      foreign `devenv.lock` is approved by the second `direnv allow`
-      without being shown, and it pins every input, nixpkgs included.
-      When `devenv.lock` existed before this run, print its inputs under
-      the same `==>` header instead of the raw file (it is not readable),
-      and count it in `foreign` so the y/N covers it:
-      ```
-      jq -r '.nodes | to_entries[] | select(.value.locked) | .value.locked as $l
-        | "  \(.key): \($l.type):\($l.owner // "")\(if $l.owner then "/" else "" end)\($l.repo // $l.path // $l.url // "") @ \($l.rev // $l.narHash // "?")"' devenv.lock
-      ```
-      (on this repo's lock: `devenv: github:cachix/devenv @ a86a087…`,
-      `nixpkgs: github:NixOS/nixpkgs @ fe13242…`). Check for the lock in
-      that block, before the first `direnv allow`: the first load creates
-      one, which is the harness's own. Test in `tests/harness-init-test.sh` beside the
-      existing foreign-file case: a repo with its own lock, its input
-      line printed, no `direnv allow` without `--yes`.
+   6. Done 2026-10-24: `harness init` counts a `devenv.lock` that exists
+      before the first `direnv allow` as foreign and prints the inputs it
+      pins under the `==>` header, so the y/N covers it; harness-init-test
+      has the case (changelog). As written: a foreign lock was approved by
+      the second `direnv allow` without being shown, and it pins every
+      input, nixpkgs included.
    7. Done 2026-10-21: hook refuses `git checkout <ref> <path>...` (changelog).
-   8. `pkgs/harness/check.sh`, a case 14 before the dry-run cut (line
-      151): the sandbox hides `~/.git-credentials` on its own. The hook
-      refuses the path by name, so the command spells it around the
-      `cred_files` regex: `f=~/.git-; wc -c "${f}credentials"`. Create
-      the file with a fake line first when absent (`https://x:live-check@
-      example.invalid`) and remove it after; leave a real one alone.
-      Expect the sandbox's answer (a masked file reads as empty, `^0 `,
-      or a permission error: confirm which on the first run), forbid
-      `live-check`. Then the header count ("twelve" and "thirteen")
-      goes up by one.
+   8. Written 2026-10-24, not yet run live: `harness check` case 14
+      (`cred-sandbox`), the sandbox hiding `~/.git-credentials` on its
+      own, by `wc -c ~/.git-cred*` with a fake file when the host has
+      none; which of `0` or no-such-file the sandbox answers is for the
+      first run to say (changelog). As written: the command spells the
+      path around the hook's `cred_files` regex, create the fake line
+      first when absent (`https://x:live-check@example.invalid`), remove
+      it after, leave a real one alone.
    9. Done 2026-10-22, on the Ubuntu laptop itself: `harness upgrade`
       removed the scrub key from `~/.claude/settings.json`, the hook's
       preamble got devenv a writable runtime directory (changelog), and
@@ -332,10 +317,14 @@ The gaps, in order:
       export` and devenv's first evaluation write none of them;
       `devenv.lock` is the doubtful one. `harness check`: an interpreter
       write gets a permission error, not the hook's message.
-   6. `harness check`: `git config core.hooksPath /tmp/h` inside the
-      sandbox, expecting a permission error on `.git/config`. If the write
-      lands, the literal-path protection has a hole; else runbook section 8
-      says the `-c` and `--global` forms are the accepted ones.
+   6. Answered 2026-10-24, no hole: in a session in this checkout `git
+      config core.hooksPath` fails with `could not lock config file
+      .git/config: File exists` (the sandbox masks `.git/config.lock` as
+      `/dev/null`); `harness check` case 15 asserts it, not yet run by
+      `harness check` itself, and runbook section 8 names the `-c`,
+      `--global` and worktree forms as the accepted gaps (changelog). As
+      written: `git config core.hooksPath /tmp/h` inside the sandbox,
+      expecting a permission error on `.git/config`.
    7. `devenv.local.nix` and `devenv.local.yaml` can be created by an
       interpreter write the hook does not see, and devenv imports them on
       the next evaluation without a `direnv allow` (the literal `denyWrite`
@@ -418,10 +407,21 @@ The gaps, in order:
   neither devenv, direnv nor the harness exports (2026-10-21); the host's
   `code` loads `librt` from the Nix glibc through it and dies. Trace the
   exporter (the launcher, the terminal, Claude Code itself) before the
-  managed host, where more host binaries run from sessions.
+  managed host, where more host binaries run from sessions. Traced
+  2026-10-24 (changelog): nixpkgs' `claude-code` wrapper (`--prefix
+  LD_LIBRARY_PATH : <alsa-lib>/lib`), inherited by every hook and Bash
+  command. Closed the same day: `pkgs/claude-code.nix` drops the wrapper
+  line and puts alsa-lib on the binary's RUNPATH; the home module,
+  `packages.claude-code` and (once the human applies the diff) the
+  devenv module use it; `claude-code-test` checks it (changelog). Not the
+  hook preamble: that would have covered the Bash tool only.
 
 ## Ideas, not planned
 
+- `docs/suggestion.md` (2026-10-24): agents built on the Claude Agent SDK
+  (the harness's own jobs, headless agents on the managed host; three
+  test cases before any code), and the agent's cloud identity (Entra
+  Agent ID) as a separate repository with three seams into this one.
 - Tighten the hook with the gaps listed in the runbook's known-gaps section:
   gh and package publishing as project rules, git exec-vector config keys,
   az transfer verbs, and a fail-closed rule for dynamic shell constructs
@@ -460,3 +460,8 @@ The gaps, in order:
   not use it; NixOS-WSL builds its distro tarball from the NixOS module.
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook.
+- An assertion in `devenv/devenv.nix` that `harness.settings` sets no
+  `permissions.deny` and no list under `sandbox` (2026-10-24): merged
+  with `recursiveUpdate`, either replaces the harness's own list, and
+  only `harness init`'s settings test notices, once. Today
+  `docs/project-devenv.md` warns against it.

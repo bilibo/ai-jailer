@@ -61,9 +61,11 @@ fedora_steps() {
     printf '\n==> dnf install %s\n' "${need[*]}"
     root dnf install -y "${need[@]}"
   fi
-  # SELinux: /nix is default_t without a policy, and systemd may not create
-  # a socket there (bootstrap.sh has the detail); label the socket directory
-  # var_run_t, the type /run has.
+  # SELinux: /nix gets default_t without a policy, and systemd (init_t) may
+  # not create a socket in a default_t directory ("Failed to create listening
+  # socket: Permission denied", no AVC in the journal when auditd runs). The
+  # Determinate installer's nix.fc labels the socket directory var_run_t, the
+  # type /run has; same here, as a persistent file-context rule.
   if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ] \
      && ! matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then
     printf '\n==> SELinux: label /nix/var/nix/daemon-socket as var_run_t so systemd can create the daemon socket\n'

@@ -10,13 +10,14 @@
 # nix-installer host). Asserts the root steps (nix.conf with and without a
 # flakes line; the AppArmor bwrap profile offered, declined and accepted
 # where AppArmor confines user namespaces, the sysctl where an older kernel
-# does; dnf on Fedora only), the user files per rc-file layout (none, Fedora's
-# ~/.bashrc.d, a plain ~/.bashrc, zsh only, an existing ~/.tmux.conf, a
-# foreign direnv.toml), idempotent re-runs, the receipt, reset undoing all of
-# it, upgrade building before it removes and handing the user steps to the
-# upgraded harness, reset doing nothing without a receipt, the store-symlink
-# guard on nix.conf, a NixOS host (no root step, the configuration.nix lines
-# printed, home-manager's files left alone) and a WSL host line. Assumes no
+# does; never dnf, which is scripts/install.sh's), the user files per
+# rc-file layout (none, Fedora's ~/.bashrc.d, a plain ~/.bashrc, zsh only,
+# an existing ~/.tmux.conf, a foreign direnv.toml), idempotent re-runs, the
+# receipt, reset undoing all of it, upgrade building before it removes and
+# handing the user steps to the upgraded harness, reset doing nothing without
+# a receipt, the store-symlink guard on nix.conf, a NixOS host (no root step,
+# the configuration.nix lines printed, home-manager's files left alone), the
+# Fedora host line from doctor and a WSL host line. Assumes no
 # controlling terminal; the stub directory is the whole PATH.
 set -uo pipefail
 harness="${1:?usage: harness-bootstrap-test.sh <harness>}"
@@ -219,13 +220,13 @@ absent "dry run writes no receipt" "$h8/.local/state/claude-nix-harness/receipt.
 uncalled "dry run calls no sudo"   '^sudo'
 rm -f "$tmp/restricted"
 
-# 11. Fedora 44: dnf for what rpm lacks, recorded; the host line says so.
+# 11. Fedora 44: doctor's host line names the dnf route (scripts/install.sh
+# runs dnf; the harness never does).
 printf 'ID=fedora\nVERSION_ID=44\nPRETTY_NAME="Fedora Linux 44"\n' >"$tmp/os-release"
 h9="$tmp/home9"; mkdir -p "$h9"
-ROOT_STEPS=nix-daemon.socket harness "$h9" bootstrap --yes
-called "dnf on fedora"             '^sudo dnf install -y nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils$'
-in_json "packages in the receipt" "$h9/.local/state/claude-nix-harness/receipt.json" '.root.packages | index("nix")'
+harness "$h9" doctor
 says "fedora host line"            "nix from Fedora's packages"
+uncalled "no dnf from doctor"      'dnf'
 ubuntu
 
 # 12. reset on the first host (installer route, profile written): all undone.

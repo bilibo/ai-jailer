@@ -31,7 +31,9 @@ whose README has what works and what was never verified.
 Operating it: `docs/runbook.md`. What is next: `docs/roadmap.md`. What
 changed when: `docs/changelog.md`. The tier and customer-module plan:
 `docs/handoff-tiers.md`. How sessions coordinate without trusting each
-other (tiers, proposals, the broker mod): `docs/sessions.md`.
+other (tiers, proposals, the broker mod): `docs/sessions.md`. Changing a
+project's tools, variables and rules without knowing Nix:
+`docs/project-devenv.md`.
 
 ## Layout
 
@@ -42,11 +44,11 @@ hooks/      env-guard.sh (the guard hook), tmux-notify.sh
 nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json with deny rules, hooks and sandbox; `ccmux`
-pkgs/       ccmux launcher, direnv >= 2.38 override, the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
+pkgs/       ccmux launcher, direnv >= 2.38 override, claude-code override (alsa-lib as a RUNPATH instead of an `LD_LIBRARY_PATH` every command inherits), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
 scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap`, then `harness init` on the checkout. install-wsl.ps1: the Windows route (NixOS-WSL from PowerShell), with wsl/bootstrap.sh, wsl/update.sh and wsl/verify.sh run inside the distro
 examples/   nixos-host.nix (managed NixOS) and nixos-wsl-host.nix (managed NixOS-WSL): the host files a nixos-config flake imports
-tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod wiring), mod-validate-test.sh (`claude plugin validate` and `claude plugin test` over the built tree, needs a claude binary)
-docs/       runbook (daily flow, onboarding, verification, troubleshooting), roadmap, changelog, handoff-tiers (tiers, read fence, customer module, phased), sessions (tiers, proposals, broker mod)
+tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod wiring), claude-code-test.sh (the override: wrapper, RUNPATH, `--version`; unfree, so only when the evaluator allows it), mod-validate-test.sh (`claude plugin validate` and `claude plugin test` over the built tree, needs a claude binary)
+docs/       runbook (daily flow, onboarding, verification, troubleshooting), project-devenv (a project's devenv.nix for non-Nix users), roadmap, changelog, handoff-tiers (tiers, read fence, customer module, phased), sessions (tiers, proposals, broker mod), suggestion (ideas with a shape, not planned)
 ```
 
 ## Any Linux: the install script
@@ -237,7 +239,11 @@ and `bubblewrap` and `socat` with user namespaces enabled for the sandbox
 module below brings the first two; on an unmanaged host they come from
 your own configuration, or from this flake, pinned by its lock:
 `nix profile add path:<checkout>#direnv path:<checkout>#devenv
-path:<checkout>#ccmux`. `scripts/install.sh` does the root steps `nix
+path:<checkout>#ccmux`, and `path:<checkout>#claude-code` when Claude
+Code itself comes from Nix: nixpkgs' wrapper exports an `LD_LIBRARY_PATH`
+that every hook, command and MCP server inherits and that kills a distro
+binary loading libasound (`pkgs/claude-code.nix` carries the library as a
+RUNPATH instead; the home and devenv modules use it). `scripts/install.sh` does the root steps `nix
 run` needs (on Fedora 44 or newer the `nix` and `nix-daemon` packages, the
 SELinux label and the daemon socket; elsewhere the nix-installer) and
 hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and
@@ -292,6 +298,8 @@ are, not by where a dotenv file would have put them:
 
 A project that keeps its IDs in `.env` today sees `az` and `terraform plan`
 fail inside the sandbox until those lines move to `devenv.nix`.
+`docs/project-devenv.md` has the `env.` lines, and tools, toolchains,
+allow rules and network hosts the same way.
 
 ## Git over SSH
 
@@ -387,5 +395,5 @@ from-zero sequence):
 ```
 harness doctor                  # host prerequisites and, inside a repo, its settings symlink and hooks; exit 1 when one is missing
 harness init <customer>/<repo>  # writes a repo, enters its shell, runs both unit tests on the result
-harness check <repo>            # twelve `claude -p` sessions (thirteen in a fenced repo), judged on transcripts and files; costs API calls
+harness check <repo>            # fourteen `claude -p` sessions (sixteen in a fenced repo), judged on transcripts and files; costs API calls
 ```

@@ -72,14 +72,19 @@ every session on the host, inside a harness repo or not.
 `harness init <customer>/<repo>` (a new directory under the code
 root) or `harness init <path>` (an existing repo) does steps 1 to 5
 and 7, then runs section 5's unit tests on the generated file; `--dry-run`
-shows what it would write, existing files are left alone. The steps, for
-doing it by hand or for reading what the script wrote:
+shows what it would write, existing files are left alone. Before the first
+`direnv allow` it prints the files it did not write that the shell entry
+runs or trusts (`devenv.yaml`, `devenv.nix`, `.envrc`, `devenv.local.*`,
+and a `devenv.lock` already there, as the inputs it pins, nixpkgs
+included) and waits for a `y`, or `--yes`; a re-run on a repo it set up
+earlier asks about its own lock as well. The steps, for doing it by hand
+or for reading what the script wrote:
 
 1. `devenv.yaml`: add the `harness` input (`flake: false`) and
    `imports: - harness/devenv`. Use a git URL pinned by `devenv.lock`; the
    `path:` form is for developing the harness itself.
 2. `devenv.nix`: project tools, and `harness.settings` for project allow
-   rules. On a host without the home module (one set up by
+   rules (`docs/project-devenv.md` has every kind of change). On a host without the home module (one set up by
    `scripts/install.sh`), `harness.claudeCode.enable = true` here and
    `allow_unfree: true` in devenv.yaml put Claude Code, tmux and jq in the
    shell.
@@ -176,7 +181,7 @@ scripts/install.sh                            # sudo: dnf, SELinux label, daemon
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
 harness doctor                                # every line ok
 harness init <customer>/<repo>                # files, two allows, the settings checks, the hook cases
-harness check ~/code/git/<customer>/<repo>    # twelve -p sessions
+harness check ~/code/git/<customer>/<repo>    # fourteen -p sessions
 cd ~/code/git/<customer>/<repo> && ccmux            # interactive: trust dialog once, orange window when it waits
 ```
 Log out and in once at the end so GUI-launched VS Code sees the nix profile.
@@ -325,7 +330,7 @@ which is the dangerous direction.
   Permission denied` on Fedora.** SELinux: `/nix` is `default_t` without a
   policy and systemd may not create a socket there; auditd has the AVC,
   the journal does not. Label the directory the way the Determinate
-  installer's `nix.fc` does, which the bootstrap script now does itself:
+  installer's `nix.fc` does, which `scripts/install.sh` does itself:
   `sudo semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?'`,
   `sudo restorecon -RF /nix/var/nix/daemon-socket`, then restart the socket.
 - **devenv fails with `the SSL certificate is invalid` while fetching an
@@ -452,7 +457,11 @@ other layers are meant to catch; revisit when tightening:
   `docker push`). Same policy as `git push`; not yet encoded.
 - Git config keys that run programs: `-c core.hooksPath=`, `core.sshCommand`,
   `credential.helper`, `--config-env`, `git log --output`. The `.git/hooks`
-  write block does not cover a hooksPath pointing elsewhere.
+  write block does not cover a hooksPath pointing elsewhere. Writing one
+  into the main checkout's `.git/config` fails in the sandbox (the lock
+  path is masked: `could not lock config file .git/config: File exists`,
+  `harness check` case 15, 2026-10-24); the `-c` form, `--global` and a
+  worktree's config are the accepted gaps.
 - `git checkout <path>` with one word (a path cannot be told from a branch
   name) and `git -c alias.x=reset x`, which runs through the `-c` keys. A
   ref followed by paths is refused since 2026-10-21.

@@ -16,6 +16,10 @@ and diff; the human commits and pushes.
   never change flake inputs without asking.
 - `docs/sessions.md`: how sessions coordinate (tiers, proposals, broker mod).
 - `docs/runbook.md`: what the operator types; written for the human.
+- `docs/project-devenv.md`: a project's `devenv.nix`, for a human who
+  does not know Nix; `harness init`'s template links it.
+- `docs/suggestion.md`: ideas with a shape but no commitment; the
+  roadmap's "Ideas, not planned" points here.
 
 A closed decision is reopened only by a new dated roadmap or changelog
 entry, never by editing the old one. Dates are absolute, never relative.
