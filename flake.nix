@@ -35,8 +35,6 @@
 
       homeModules.harness = ./home;
       homeModules.default = self.homeModules.harness;
-      # Older name for the same outputs.
-      homeManagerModules = self.homeModules;
 
       # For other module systems, e.g. a future nix-darwin module.
       lib = import ./lib { inherit (nixpkgs) lib; };
