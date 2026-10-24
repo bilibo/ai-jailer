@@ -127,6 +127,12 @@ and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
   sandbox's Bash auto-allow off; case 11 reads the sandbox's mask as the
   refusal it is; a `-p` permission refusal counts as inconclusive and
   every case keeps its debug log (changelog).
+- The Windows route (2026-10-23): `scripts/install-wsl.ps1` provisions
+  NixOS-WSL from the latest release and makes it a managed host from your
+  nixos-config flake; `scripts/wsl/{bootstrap,update,verify}.sh` do the
+  work inside the distro, pull-only after the first install;
+  `examples/nixos-wsl-host.nix` is the host file. First live managed host:
+  NixOS-WSL on a Windows 11 Home laptop (changelog).
 
 ## Target flow (2026-10-21)
 
@@ -261,6 +267,15 @@ The gaps, in order:
       preamble got devenv a writable runtime directory (changelog), and
       `harness check` passed 12 of 12: case 2 the devenv shell inside the
       sandbox, case 12 the two GitHub tokens.
+   10. Review and commit the staged set (2026-10-24): the 2026-10-23 WSL
+       route (9 files) and the home-module change that stops home-manager
+       writing `~/.claude/settings.json` (changelog 2026-10-24). Then
+       switch the WSL host to a harness revision that has it (the update
+       in runbook section 4 once the host flake's `harness` input points
+       there; `--override-input harness path:<checkout>` for a trial
+       build) and confirm `/model` in a session writes a plain
+       `~/.claude/settings.json`. The host repo's `check-access.sh` case
+       "HM settings.json is a store symlink" inverts with it.
    Not planned: `~/.kube/config` and `~/.docker/config.json` the same way
    as `~/.aws`, until a harness host holds them.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified

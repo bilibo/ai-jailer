@@ -3,6 +3,49 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-24
+
+- First session in this checkout on the NixOS-WSL host, under the managed
+  settings (231 deny rules, the strict allowlist, `/mnt/c` and `/run/WSL`
+  hidden). The checkout and the copy brought over from the Windows side
+  (`C:\code\claude-nix-harness`, placed beside it as
+  `../wsl-build/claude-nix-harness`) are byte-identical, 63 files; the
+  checkout's only extra is the generated `.claude/settings.json`. Branch
+  `wsl-route`, the 2026-10-23 WSL route staged (9 files), nothing
+  committed. `nix flake check` on a copy of the regular files (CLAUDE.md,
+  "Checks"): 16 checks evaluated, every output already in the store from
+  an earlier build; `hook-test` (252) and `project-settings-test` (23)
+  forced with `--rebuild` and passed here. Learned about the hook from
+  inside: a `jq` path into a settings file's `env` object was refused as
+  a `.env` read (the secret-file pattern is `.env` followed by a
+  non-alphanumeric), `ls /mnt/c/code` as a Windows executable, and a
+  heredoc is read as part of the command, so a shell write of a document
+  that mentions `.claude/` paths, `.env` or `sudo` is refused while the
+  Edit tool, checked by path only, is not. All as designed; nothing to
+  change. The host's `/etc/nixos` is still the one baseline commit
+  `install-wsl.ps1` made and has no remote, so `wsl/update.sh` has nothing
+  to pull, while the host repo moved on the same evening (nixos-unstable,
+  `trusted-users = [ "root" ]`, `nixos/workbench.nix`); the host repo's
+  business, noted because the next switch carries the change below.
+- `/model` in a VS Code session on the host failed with `Failed to set
+  model: EROFS: read-only file system, open
+  '/nix/store/...-home-manager-files/.claude/settings.json.tmp.<id>'`.
+  Cause: `home/default.nix` set
+  `programs.claude-code.settings.worktree.baseRef`, the one key that made
+  home-manager write `~/.claude/settings.json` as a store symlink, and
+  Claude Code writes the user file itself at `/model`, through a temporary
+  file beside the link's target. The key was redundant: the managed
+  settings and the repo file carry `worktree.baseRef = "head"` from
+  `lib/settings.nix`. The home module now enables the package only
+  (staged); at the next switch home-manager removes the link and Claude
+  Code creates a plain file on the first write. Nothing moves within a
+  session's reach: the managed layer is immune to user settings and the
+  settings body's `denyWrite` covers `~/.claude`. The unmanaged host was
+  never affected, `harness bootstrap` writes that file as plain JSON. No
+  generation activated from the session (handoff rule); the host repo's
+  `check-access.sh` case "HM settings.json is a store symlink" inverts
+  once it is.
+
 ## 2026-10-23
 
 - Native NixOS recorded as a tested host, unmanaged shape: the NixOS 26.11
@@ -83,6 +126,56 @@ happened and what was learned on the day.
     `config.assertions` with `allowUserNamespaces = false` and finds the
     module's message, no toplevel built. `examples/nixos-host.nix` is the
     import snippet. No generation was activated.
+- Later the same day, from the Windows laptop: the Windows route and the
+  first live managed host, NixOS-WSL 2605.7.2 (NixOS 26.05) on Windows 11
+  Home 26H2 with WSL 3.0.3 (kernel 6.18). `scripts/install-wsl.ps1`, run
+  from a checkout on Windows, resolves the latest NixOS-WSL release,
+  verifies the published sha256, registers the distro, and inside it
+  `scripts/wsl/bootstrap.sh` makes `/etc/nixos` a git checkout of the
+  host's nixos-config flake (a URL, or a Windows folder with one baseline
+  commit), builds `nixosConfigurations.<name>` as the checkout's owner and
+  activates as root; later runs go through `scripts/wsl/update.sh`: `git
+  pull --ff-only`, build, switch, never a commit on the box. `-NoSwitch`
+  builds and prints the activation for a host where the human switches.
+  `examples/nixos-wsl-host.nix` is the host file, `scripts/wsl/verify.sh`
+  the check (19 cases: DNS and HTTPS, flakes and the devenv cache, the
+  managed tree, strict allowlist and hook, user namespaces, bwrap, socat,
+  direnv, devenv, ccmux, claude and git on PATH, the session variables
+  and direnv hook in a login shell, the Windows PATH kept off). The host
+  switched to the harness through that route and passed all 19; `harness
+  check` has not run there yet. Learned: Nix's libgit2 refuses a checkout
+  owned by another user, hence build as the owner, activate as root; the
+  home module leaves the shell to the host, so without
+  `programs.bash.enable` in home-manager neither the direnv hook nor
+  `HARNESS_EXPECT_MANAGED` reach a terminal; NixOS-WSL masks
+  `firewall.service`, so the open system runs no Linux firewall and the
+  Hyper-V firewall is the one in effect; mirrored networking policy-routes
+  every 127.0.0.1 packet through `loopback0` and Windows, so an nftables
+  firewall there must trust `loopback0`, and a resolver on 127.0.0.53
+  needs `ip rule add to 127.0.0.1 from 127.0.0.53 lookup local` or its
+  replies vanish. A host-wide dnsmasq, squid and nftables egress filter
+  was built and verified on the same box first, then set aside: the
+  sandbox's strict allowlist already covers sessions, and it stays out of
+  this repository.
+  - The host's first shell entry in this checkout failed: nixos-26.05 ships
+    devenv 2.1.2, whose direnvrc dies with `structuredAttrs: command not
+    found` on 26.05's structured-attrs dev shells, while the home module
+    takes `pkgs.devenv` from the host's nixpkgs. With this flake's pinned
+    devenv 2.4.0 first on PATH the same entry succeeded in 13 s and wrote
+    the repo file (sandbox on, 7 hooks, 248 deny rules).
+    The host now tracks nixos-unstable, the branch this flake is built
+    against, which carries devenv 2.4.x; `examples/nixos-wsl-host.nix` says
+    so and keeps, commented, the fallback for a stable-branch host (overlay
+    `devenv` from `inputs.harness.packages` and drop `inputs.nixpkgs.follows`
+    on the harness input, which also built). The README's "Usage" snippet
+    with `follows` is right only where the host's nixpkgs is at least as new
+    as this flake's.
+    Also checked on that host (`check-access.sh` in the host repo, 22 of
+    23): home-manager's store symlinks (`~/.claude/settings.json`,
+    `~/.bashrc`, direnv config) with `~/.claude` writable, `systemd --user`
+    up for uid 1000, bwrap with `--unshare-all`, a private network
+    namespace and a tmpfs over `/mnt/c` as the user, `/mnt/c` honouring
+    chmod under `metadata`, `/etc/claude-code` root-owned and unwritable.
 
 ## 2026-10-22
 

@@ -8,8 +8,7 @@
 #   nixosConfigurations.work = nixpkgs.lib.nixosSystem {
 #     modules = [ claude-nix-harness.nixosModules.harness ./nixos-host.nix ];
 #   };
-_:
-{
+_: {
   harness.enable = true;
   # The Claude Code sandbox is bubblewrap; the module asserts this.
   security.allowUserNamespaces = true;

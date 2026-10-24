@@ -136,6 +136,22 @@ The home-manager side (`home/`) is the same on every managed host: direnv
 config, tmux rules, `ccmux`, `programs.claude-code`. It never carries deny
 rules.
 
+Windows (2026-10-23): from a checkout of this repo on Windows 11,
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-wsl.ps1
+-HostRepo <your nixos-config>` installs NixOS-WSL (the latest release,
+checksum verified), puts your flake at `/etc/nixos` as a git checkout owned
+by the default user and switches to `nixosConfigurations.<name>` (`-Output`,
+default `nixos-wsl`). `examples/nixos-wsl-host.nix` is the host file; your
+flake imports NixOS-WSL, home-manager and both harness modules. Running the
+script again is the update: `git pull --ff-only` and switch, never a commit
+on the box, and a dirty `/etc/nixos` stops it. `-NoSwitch` builds and prints
+the two activation commands for a host where you switch by hand. The
+`.wslconfig` comes from the host repo's `windows/wslconfig` and applies on
+the `wsl --shutdown` the script does; after any `wsl.*` option change, run
+`wsl -t <distro>` from Windows. `scripts/wsl/verify.sh` prints what the host
+should look like afterwards. Inside the distro the same two steps are
+`sudo sh <harness checkout>/scripts/wsl/update.sh <name>`.
+
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
 Host prerequisites on a host without the home module:
@@ -331,6 +347,16 @@ which is the dangerous direction.
 - **Hook denies everything, including `ls`.** A regex error makes the ERR
   trap fire, which is the fail-closed design. Run the unit tests; the first
   failing case points at the line.
+- **`/model` fails with `EROFS: read-only file system, open
+  '/nix/store/...-home-manager-files/.claude/settings.json.tmp...'`.**
+  home-manager owns `~/.claude/settings.json` as a store symlink and Claude
+  Code writes that file itself at user scope. A harness revision before
+  2026-10-24 did this through `programs.claude-code.settings` in the home
+  module: move the host to a newer revision and switch; home-manager drops
+  the link and the next `/model` writes a plain file. Your own
+  `programs.claude-code.settings` has the same effect, so keep user-scope
+  settings out of home-manager on a harness host; the managed settings
+  carry everything the harness needs.
 
 ## 8. Known gaps, by design
 
