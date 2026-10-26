@@ -13,7 +13,7 @@ root-owned settings can: mod policy and immunity to your own settings.
 Pick the route for your host:
 
 | Host | Route | Tested |
-|---|---|---|
+| --- | --- | --- |
 | Fedora 44 or newer, Ubuntu, any other Linux, with or without Nix | `scripts/install.sh` ("Any Linux" below): Nix if missing, then `harness bootstrap` for the user side and `harness init` for each repo | Fedora 44 and Ubuntu 26.10 laptops, end to end through `harness check` (2026-10-22) |
 | NixOS, your own configuration | Your configuration provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv` and `programs.claude-code`, or `scripts/install.sh` adds this flake's packages to your profile: on NixOS it downloads nothing, writes nothing under `/etc` (it prints the `nix.settings` block when `nix.conf` lacks flakes or the devenv cache) and leaves home-manager's files alone, printing the option instead. Harness repos import `harness/devenv` as everywhere | NixOS 26.11 laptop, in daily use, this repo's own sessions included (2026-10-23); the install route only dry-run there |
 | NixOS or NixOS-WSL, managed | NixOS module and home module, `harness.enable = true` and nothing else: every rule everywhere, strict network allowlist (in the host flake: `modules = [ claude-nix-harness.nixosModules.harness ]`, `harness.enable = true;`, `security.allowUserNamespaces = true;`, which the module asserts) | module and its tests; the module evaluates in `nix flake check` (2026-10-23); live on the NixOS-WSL laptop from 2026-10-23 until it moved to the plain route (2026-10-24), no native NixOS host yet |
@@ -219,7 +219,7 @@ rows changed later carry their own date). "Prompted" means the
 human at the terminal decides; a `-p` session treats a prompt as a refusal.
 
 | | Unmanaged host (in use) | Mixed host | Managed host |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Enforced | deny rules; the fail-closed hook on every writing tool and settings change; the Bash sandbox with no unsandboxed fallback; bypass mode off; `~/.ssh` and the agent socket hidden; account connectors off | the same inside the roots; plus mod policy and the built-in guard | the same everywhere; plus the strict network allowlist and immunity to user settings |
 | Enforced since 2026-10-21 | the strict network allowlist (user-scope key written by the bootstrap); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; the GitHub tokens stripped from every subprocess (`credentials.envVars`; the `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` scrub is off since 2026-10-22, in user scope it turns the sandbox's Bash auto-allow off) | the same | the same |
 | Prompted | edits outside the working directory | network hosts outside the allowlist (`sandboxStrictAllowlist = false`) | nothing in the sandbox: unknown hosts are refused |
@@ -339,7 +339,7 @@ refuses commands that name it. So split a project's settings by what they
 are, not by where a dotenv file would have put them:
 
 | What | Where | Who sees it |
-|---|---|---|
+| --- | --- | --- |
 | Identifiers the tools need: tenant, subscription, client and resource IDs, region, environment name | `devenv.nix`, `env.ARM_TENANT_ID = "..."` and friends, committed | you and the agent, exported into every command by the devenv shell |
 | The same, per developer or not for the repository | `devenv.local.nix`, gitignored; devenv imports it on its own | you and the agent; the agent cannot create or change it |
 | Secrets: client secrets, tokens, passwords | `.env`, loaded into your shell with devenv's `dotenv.enable = true` (direnv's own dotenv loading is off on a harness host), or your `az login` session | you only; the agent's preamble loads an empty file, and `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET` and the GitHub tokens are stripped from its environment either way |
