@@ -343,7 +343,7 @@ are, not by where a dotenv file would have put them:
 | What | Where | Who sees it |
 | --- | --- | --- |
 | Identifiers the tools need: tenant, subscription, client and resource IDs, region, environment name | `devenv.nix`, `env.ARM_TENANT_ID = "..."` and friends, committed | you and the agent, exported into every command by the devenv shell |
-| The same, per developer or not for the repository | `devenv.local.nix`, gitignored; devenv imports it on its own | you and the agent; the agent cannot create or change it |
+| The same, per developer or not for the repository | nowhere: the `.envrc` `harness init` writes fails the load while `devenv.local.nix` or `devenv.local.yaml` exists, because devenv imports them without a `direnv allow` (roadmap 2.7) | nobody |
 | Secrets: client secrets, tokens, passwords | `.env`, loaded into your shell with devenv's `dotenv.enable = true` (direnv's own dotenv loading is off on a harness host), or your `az login` session | you only; the agent's preamble loads an empty file, and `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET` and the GitHub tokens are stripped from its environment either way |
 
 A project that keeps its IDs in `.env` today sees `az` and `terraform plan`
@@ -445,5 +445,5 @@ from-zero sequence):
 ```
 harness doctor                  # host prerequisites and, inside a repo, its settings symlink and hooks; exit 1 when one is missing
 harness init <customer>/<repo>  # writes a repo, enters its shell, runs both unit tests on the result
-harness check <repo>            # fourteen `claude -p` sessions (sixteen in a fenced repo, seven in the command center), judged on transcripts and files; costs API calls
+harness check <repo>            # sixteen `claude -p` sessions (eighteen in a fenced repo, eight in the command center; one fewer outside tmux), judged on transcripts and files; costs API calls
 ```

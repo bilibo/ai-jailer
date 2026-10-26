@@ -795,7 +795,7 @@ NEXT
 # ---------------------------------------------------------------- report
 report() {
   nix_path
-  local v route="" tf fix host="${PRETTY_NAME:-unknown}" hm
+  local v route="" tf fix no_project host="${PRETTY_NAME:-unknown}" hm
   case "$HOST" in
     fedora) route="nix from Fedora's packages" ;;
     nixos) hm=$(hm_owned_count); route="nix from the system configuration, $hm home-manager owned file$([ "$hm" = 1 ] || echo s) skipped" ;;
@@ -804,6 +804,14 @@ report() {
   [ "$WSL" = 0 ] || host="WSL2 ($host)"
   echo "host: $host ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
+  # The repo shell's direnv exports project and role (pkgs/ccmux.nix), so
+  # they are facts about this cwd, never MISSING. A role without a project
+  # means the environment was assembled by hand or leaked in.
+  info "HARNESS_CODE_ROOT ${HARNESS_CODE_ROOT:-$CODE_ROOT (default)}"
+  no_project="unset: not inside a harness repo's shell"
+  info "HARNESS_PROJECT ${HARNESS_PROJECT:-$no_project}"
+  info "HARNESS_ROLE ${HARNESS_ROLE:-unset}"
+  [ -z "${HARNESS_ROLE:-}" ] || [ -n "${HARNESS_PROJECT:-}" ] || warn "HARNESS_ROLE is set but HARNESS_PROJECT is not: the role names no project, so it did not come from a repo's shell (a stale or hand-set variable)"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
   # A NixOS configuration can carry the whole user side (the README's "your
   # own configuration"); the checks below say whether it does.

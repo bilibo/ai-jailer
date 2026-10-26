@@ -20,11 +20,13 @@
 # .worktreeinclude only gain the lines they lack; CLAUDE.md gains the
 # contract block if it has none. --dry-run prints the files it would write
 # and creates nothing; --verbose traces the shell step. devenv.yaml,
-# devenv.nix, .envrc or a devenv.local.* that this run did not write are the
-# repo's own code, which the shell step approves and runs as you: they are
-# printed and need a y, or --yes. So does a devenv.lock that is there before
-# the first load, shown as the inputs it pins (a re-run on a repo init set
-# up earlier asks about its own lock too).
+# devenv.nix or .envrc that this run did not write are the repo's own code,
+# which the shell step approves and runs as you: they are printed and need a
+# y, or --yes. So does a devenv.lock that is there before the first load,
+# shown as the inputs it pins (a re-run on a repo init set up earlier asks
+# about its own lock too). The template's .envrc fails the load while a
+# devenv.local.nix or devenv.local.yaml exists, so one stops the shell step
+# (exit 1) unless the repo keeps its own .envrc, where it is approved too.
 #
 # The harness input is the same ref bootstrap installs from: --harness, else
 # HARNESS_REF, else the receipt's. A `path:` checkout is the form for
@@ -189,10 +191,24 @@ $claude_line
   };
 }"
 
-# require_allowed last: on the first load `use devenv` creates devenv.lock,
-# then the three files are reported as pending and the next `direnv allow`
-# approves them (see the shell step below).
-put .envrc 'eval "$(devenv direnvrc)"
+# The devenv.local.* test first: it needs no devenv, and its error line is
+# the one the hook's preamble shows (env-guard.sh check_env takes the first
+# stderr line matching "error"). require_allowed last: on the first load
+# `use devenv` creates devenv.lock, then the three files are reported as
+# pending and the next `direnv allow` approves them (see the shell step below).
+put .envrc '# devenv imports devenv.local.nix and devenv.local.yaml with no `direnv allow`,
+# and an interpreter write the harness hook cannot see could create one; a
+# sandbox deny on them broke every load (changelog 2026-10-22, roadmap 2.7).
+# So the load fails while either exists. direnv keeps no watches from a
+# failed load (direnv 2.38.2, 2026-10-26): after removing the file, `direnv
+# reload`.
+for f in devenv.local.nix devenv.local.yaml; do
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    echo "error: $f is refused in a harness repo (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" >&2
+    exit 1
+  fi
+done
+eval "$(devenv direnvrc)"
 use devenv
 require_allowed devenv.nix devenv.yaml devenv.lock' owned
 
@@ -249,7 +265,15 @@ v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.
 # A devenv.lock that is here before the first load is the repo's, not the
 # one `use devenv` creates: it pins every input, nixpkgs included, so its
 # inputs are shown (the raw file is not readable) and approved with the rest.
-for f in devenv.local.nix devenv.local.yaml devenv.lock; do if [ -e "$repo/$f" ]; then foreign+=("$f"); fi; done
+# A devenv.local.* would fail the template's .envrc at the first load; a
+# .envrc the repo kept may load it, so there it is approved like the rest.
+for f in devenv.local.nix devenv.local.yaml; do
+  [ -e "$repo/$f" ] || continue
+  [[ " ${foreign[*]} " == *" .envrc "* ]] \
+    || die "$f exists and the .envrc refuses to load with it (devenv loads it without a direnv allow): remove it, or move its content into devenv.nix, then re-run"
+  foreign+=("$f")
+done
+if [ -e "$repo/devenv.lock" ]; then foreign+=(devenv.lock); fi
 if [ ${#foreign[@]} -gt 0 ]; then
   for f in "${foreign[@]}"; do
     printf '\n==> %s (not written by harness init)\n' "$repo/$f"

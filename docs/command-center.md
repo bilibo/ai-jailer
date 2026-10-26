@@ -87,7 +87,9 @@ cd <checkout> && claude   # without tmux; work sessions still open in tmux
 
 The open files show in `git diff`, and direnv asks again before a changed
 `devenv.nix`, `devenv.yaml`, `devenv.lock` or `.envrc` loads; the settings
-files and `devenv.local.*` switch a repo's rules off with neither. A
+files switch a repo's rules off with neither, and so does `devenv.local.*`
+in a repo whose `.envrc` predates 2026-10-26 (the template written since
+then refuses to load while one exists). A
 center session can write `harness.enable = false` into a work repo: read
 the diff before you `direnv allow` there.
 
@@ -141,22 +143,30 @@ it runs, before you approve it. With `Bash(*)` allowed nothing asks.
 ## 7. Memory
 
 `center` turns `allowMemoryEdits` on; work repos keep it off. The Edit
-and Write tools may write `~/.claude/projects/<slug>/memory/`; the rest of
-`~/.claude` stays refused to them, transcripts (`*.jsonl`) included
-(`lib/deny-rules.nix:114-139`, `hooks/env-guard.sh:172-186`). A shell
-write there is refused when the command names `.claude/` (`:270-280`;
+and Write tools may write `~/.claude/projects/<slug>/memory/` where
+`<slug>` names the session's own `CLAUDE_PROJECT_DIR`; the rest of
+`~/.claude` stays refused to them, transcripts (`*.jsonl`) and other
+projects' memory included (`lib/deny-rules.nix:114-139`,
+`hooks/env-guard.sh:173-206`). The deny rules cannot know the slug and
+leave every project's memory open; the hook narrows it. A shell write
+there is refused when the command names `.claude/` (`:290-303`;
 `center_open` keeps your dotfiles closed).
 
 Why: memory makes the checkout an orchestrator (which repos are in
 flight, what was proposed, what you decided). The risk accepted: every
 later session here reads it as context, unreviewed, so anything a session
 picked up once (a hostile README, a crafted diff, a peer's message) can
-steer later ones. The carve-out matches any project's slug (`:175`,
-roadmap 2.9), so a session here can write a work repo's memory; Claude
-Code asks first: refuse it. Read what is stored:
+steer later ones. The carve-out matches only this checkout's slug
+(roadmap 2.9), so a session here cannot seed a work repo's memory. A
+session started in a subdirectory or a worktree keeps its memory under
+the repository's main root (Claude Code's memory docs); the hook does not
+derive that root, so if `CLAUDE_PROJECT_DIR` is the subdirectory or
+worktree (not verified), that session's memory writes are refused. Read
+what is stored:
 `ls ~/.claude/projects/<slug>/memory/`, where `<slug>` is the checkout's
-absolute path with each `/` turned into `-` (`/home/u/src/claude-nix-harness`
-gives `-home-u-src-claude-nix-harness`).
+absolute path with each character other than an ASCII letter or digit
+turned into `-` (`/home/u/src/claude-nix-harness` gives
+`-home-u-src-claude-nix-harness`).
 
 ## 8. Setting it up
 

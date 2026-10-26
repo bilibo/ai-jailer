@@ -108,10 +108,13 @@ root) or `harness init <path>` (an existing repo) does steps 1 to 5
 and 7, then runs section 5's unit tests on the generated file; `--dry-run`
 shows what it would write, existing files are left alone. Before the first
 `direnv allow` it prints the files it did not write that the shell entry
-runs or trusts (`devenv.yaml`, `devenv.nix`, `.envrc`, `devenv.local.*`,
-and a `devenv.lock` already there, as the inputs it pins, nixpkgs
-included) and waits for a `y`, or `--yes`; a re-run on a repo it set up
-earlier asks about its own lock as well. The steps, for doing it by hand
+runs or trusts (`devenv.yaml`, `devenv.nix`, `.envrc`, and a
+`devenv.lock` already there, as the inputs it pins, nixpkgs included) and
+waits for a `y`, or `--yes`; a re-run on a repo it set up earlier asks
+about its own lock as well. A `devenv.local.nix` or `devenv.local.yaml`
+stops it before any `direnv allow` (since 2026-10-26 the `.envrc` it
+writes refuses to load while one exists); only a repo that keeps its own
+`.envrc` gets the file listed and approved instead. The steps, for doing it by hand
 or for reading what the script wrote:
 
 1. `devenv.yaml`: add the `harness` input (`flake: false`) and
@@ -133,7 +136,11 @@ or for reading what the script wrote:
    require_allowed devenv.nix devenv.yaml devenv.lock
    ```
 
-   Never `source_env`, `source_up`, or a `whitelist.prefix` in direnv.toml.
+   Since 2026-10-26 the file `harness init` writes puts a check above
+   these lines that fails the load while `devenv.local.nix` or
+   `devenv.local.yaml` exists (`pkgs/harness/init.sh` has the text;
+   changelog 2026-10-26 says why). Never `source_env`, `source_up`, or a
+   `whitelist.prefix` in direnv.toml.
 4. `.gitignore`: `.devenv/`, `.direnv/`, `.claude/settings.json`,
    `.claude/settings.local.json`, `.claude/worktrees/`.
    `.worktreeinclude`: `.claude/settings.json`, so a `--worktree` session
@@ -230,7 +237,10 @@ to account sync.
 
 Host prerequisites on a host without the home module:
 `harness doctor`, one line per item, exit 1 when
-something the harness needs is missing. `claude doctor` is the Claude Code
+something the harness needs is missing. Read its three `info` lines
+`HARNESS_CODE_ROOT`, `HARNESS_PROJECT` and the cwd's `HARNESS_ROLE` first:
+they show which repo and role the shell is in, and a role without a project
+is a warning. `claude doctor` is the Claude Code
 side: install health and settings-file validation, without a session.
 
 From zero on an unmanaged Fedora host, end to end, repeatable. `harness
@@ -251,17 +261,18 @@ scripts/install.sh                            # sudo: dnf, SELinux label, daemon
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
 harness doctor                                # every line ok or info
 harness init <customer>/<repo>                # files, two allows, the settings checks, the hook cases
-harness check ~/code/git/<customer>/<repo>    # fourteen -p sessions
+harness check ~/code/git/<customer>/<repo>    # sixteen -p sessions (fifteen outside tmux)
 cd ~/code/git/<customer>/<repo> && ccmux            # interactive: trust dialog once, orange window when it waits
 ```
 
 In the command center (the harness checkout, `harness.role = "center"`)
-`harness check` runs only the seven cases the hook and deny rules hold
+`harness check` runs only the eight cases the hook and deny rules hold
 (devenv-env, git-commit, cred-read, config-write, edit-envrc, nested-flags,
-hooks-registered) and prints one `skip` line, `sandbox off (role center):
+hooks-registered, tmux-socket; tmux-display too inside tmux) and prints one `skip` line, `sandbox off (role center):
 <why>`, for each case only the sandbox holds (sandbox, ssh-agent,
 home-write, repo-write, env-deny, cred-sandbox, git-hookspath; read-fence
-too in a fenced repo), ending `7 passed, 0 failed, 7 skipped`; there Claude
+too in a fenced repo), ending `8 passed, 0 failed, 7 skipped` (`9 passed`
+inside tmux); there Claude
 Code's permission prompt is all that stands in for those seven, so read
 what you approve.
 
@@ -401,7 +412,8 @@ which is the dangerous direction.
   the harness ships none (2026-10-24) and the built-in guard lets no other
   through.
 - **`harness: guard rails off for this repo` at every `cd`.** The repo's
-  `devenv.nix` (or `devenv.local.nix`) sets `harness.enable = false`. If
+  `devenv.nix` (or, in a repo whose `.envrc` predates 2026-10-26,
+  `devenv.local.nix`) sets `harness.enable = false`. If
   nobody meant to, `git log -p devenv.nix` says who did; delete the line
   and `direnv allow`.
 - **Plugin hooks silent.** `allowManagedHooksOnly` is on. Expected on a
@@ -489,8 +501,10 @@ The README's "Lockdown level" table summarises them; the roadmap's
   `run-shell` or `new-window` runs unsandboxed and unhooked. The command
   center is out of its reach since it has no sandbox, but its pane is one
   a work session can type into; since 2026-10-24 hook rule 6 refuses the
-  same launch flags after `ccmux` as after `claude`. Roadmap 2.8
-  (2026-10-24).
+  same launch flags after `ccmux` as after `claude`. Since 2026-10-26
+  hook rule 7 refuses every tmux command but the read-only ones inside the
+  roots; it reads command text, so a script talking to the socket still
+  gets through. Roadmap 2.8 (2026-10-24).
 - Reads are open. A sandboxed command reads the whole machine except the
   `denyRead` paths (`~/.azure`, `~/.gnupg`, `~/.terraform.d`, `~/.netrc`,
   `~/.ssh`, and since 2026-10-21 `~/.aws`, `~/.config/gh` and

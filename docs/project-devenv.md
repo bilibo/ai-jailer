@@ -14,12 +14,14 @@ Everything below is a change to `devenv.nix` or `devenv.yaml`.
 | `devenv.nix` | The project's tools, toolchains, environment variables and harness options | you, by hand; an agent proposes the diff |
 | `devenv.yaml` | Where the inputs come from (the harness, nixpkgs), plus `allow_unfree` | you, rarely; `harness init --force` rewrites it |
 | `devenv.lock` | The exact revision of every input, nixpkgs included. Commit it | nobody: `devenv update` writes it |
-| `.envrc` | Three lines that make direnv load the shell and ask before loading changes | nobody: `harness init --force` rewrites it |
+| `.envrc` | Makes direnv load the shell, ask before loading changes, and refuse a `devenv.local.*` (below) | nobody: `harness init --force` rewrites it |
 | `.claude/settings.json` | The rules Claude Code runs under, generated at every shell entry, gitignored; absent with the guard rails off (below) | nobody; edits are overwritten |
 
-A `devenv.local.nix` beside them is per developer: gitignored, imported
-by devenv on its own, for values that are not the repository's (README,
-"Where project configuration goes").
+There is no per-developer file beside them. devenv imports a
+`devenv.local.nix` or `devenv.local.yaml` without a `direnv allow`, so
+the `.envrc` refuses to load while either exists (`error: devenv.local.nix
+is refused in a harness repo`): remove it and `direnv reload`, or move
+its content into `devenv.nix`.
 
 ## How a change lands
 
@@ -209,9 +211,9 @@ To turn them back on, delete the line (or write `enable = true;`, the
 default) and `direnv allow`. The next shell entry writes
 `.claude/settings.json` again; start new sessions.
 
-Committed, the switch applies to everyone who uses the repo. For
-yourself only, put `harness.enable = false;` in `devenv.local.nix`
-instead ("The files" above).
+Committed, the switch applies to everyone who uses the repo. There is
+no per-developer form: a `devenv.local.nix` stops the shell from loading
+("The files" above).
 
 On a managed host (the NixOS module) this only turns off the repo's own
 copy of the rules. The managed settings under `/etc/claude-code` are

@@ -205,7 +205,10 @@ The gaps, in order:
       `--global` and worktree forms as the accepted gaps (changelog). As
       written: `git config core.hooksPath /tmp/h` inside the sandbox,
       expecting a permission error on `.git/config`.
-   7. `devenv.local.nix` and `devenv.local.yaml` can be created by an
+   7. Done 2026-10-26 for new repos (changelog): the template `.envrc`
+      fails the load while either file exists; this checkout's own
+      `.envrc` and the `harness check` case are still to do. As written:
+      `devenv.local.nix` and `devenv.local.yaml` can be created by an
       interpreter write the hook does not see, and devenv imports them on
       the next evaluation without a `direnv allow` (the literal `denyWrite`
       that closed this broke the shell, 2026-10-22). Candidate: the `.envrc`
@@ -215,7 +218,9 @@ The gaps, in order:
       `python3` write creating one gets the next command's preamble failing
       loudly, not a silently imported file.
    8. **The tmux socket** (2026-10-24; work it before 2.1: the one open
-      item that leaves the sandbox entirely). `allowAllUnixSockets`
+      item that leaves the sandbox entirely). 2026-10-26: (a) written as
+      hook rule 7 with hook-test cases and `harness check` case 16, both
+      not yet run live (changelog); (b) open. `allowAllUnixSockets`
       reaches the user's tmux server, which runs outside the sandbox as
       the user: a sandboxed `tmux send-keys`, `run-shell` or `new-window`
       runs a command with no sandbox and no hook, or types a prompt into
@@ -276,6 +281,9 @@ The gaps, in order:
       the hook refuses `tmux new-window`; after (b) the client cannot
       connect.
    9. **Memory carve-out to the session's own project** (2026-10-24).
+      Done 2026-10-26 (changelog); open: whether a worktree session's
+      `CLAUDE_PROJECT_DIR` is the worktree path, which the rule refuses.
+      As written:
       `env-guard.sh` allows `~/.claude/projects/*/memory/*`: a command-
       center session can write a work repo's memory (prompted, outside
       the working directory), and that repo's next session loads it with
@@ -337,9 +345,9 @@ The gaps, in order:
 
 9. **Left open by the tier handoff** (`docs/handoff-tiers.md`, removed
    2026-10-26; the full phases: `git show 8e38390:docs/handoff-tiers.md`).
-   - `harness doctor` reports `HARNESS_CODE_ROOT`, `HARNESS_PROJECT` and
-     the cwd's `HARNESS_ROLE`; the runbook's verification section starts
-     with it.
+   - Done 2026-10-26 (changelog): `harness doctor` reports
+     `HARNESS_CODE_ROOT`, `HARNESS_PROJECT` and the cwd's `HARNESS_ROLE`;
+     the runbook's verification section starts with it.
    - A center on a managed host: a managed `sandbox.enabled = true` wins
      over the repo file, so `center` turns nothing off there. Undecided
      whether a managed host has a center at all.
@@ -370,6 +378,24 @@ The gaps, in order:
      plugins); what `allowWrite = true` means against the unconditional
      apply/destroy deny; pointing `azfn-rust-handler/devenv.yaml` at this
      repo.
+
+10. **Role design reviewed and kept (2026-10-26).** A proposal to drop
+    `harness.role` for a sandboxed checkout with write rights under the
+    code root and one option-fed hook was discussed and set aside by the
+    owner the same night; the design stands. Three trims from that
+    review, each standing on its own:
+    - The tree and CLAUDE.md disagree: no commit sets `harness.role =
+      "center"` here and `devenv.yaml` imports `./devenv`, so the
+      checkout runs as a work repo with a hook built from the working
+      tree (`HARNESS_ROLE=work` in its shell). Either set the role and pin
+      the module as CLAUDE.md describes, or correct CLAUDE.md. Both files
+      are the human's.
+    - `harness check` reads the role from the repo shell and
+      `.sandbox.enabled` from the settings file (`check.sh:127-132`) and
+      warns when they disagree; the settings file is the truth, so drop
+      the role lookup and the role half of `check-parser-test`.
+    - `harness init` writes `# role = "center";` commented into every work
+      repo's `devenv.nix`; only this checkout can ever set it, so stop.
 
 ## Open questions
 

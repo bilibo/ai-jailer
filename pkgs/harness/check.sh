@@ -11,8 +11,9 @@
 # after a Claude Code upgrade is the point of this file. --parse prints what
 # the verdicts see in a saved transcript (tests/check-parser-test.sh).
 #
-# Costs API calls (fourteen short sessions, sixteen in a fenced repo, seven
-# in the command center, two more when case 2 fails). Run it from your own
+# Costs API calls (sixteen short sessions, eighteen in a fenced repo, eight
+# in the command center, two more when case 2 fails; one fewer each outside
+# tmux, where the second half of case 16 is skipped). Run it from your own
 # terminal, never from inside a session: the nested-session rule would deny
 # some of the commands it runs. Transcripts stay in a temp directory,
 # printed at the end, so the exact refusal text can be read. --dry-run
@@ -330,6 +331,34 @@ elif [ "$DRY_RUN" = 1 ] || [ -d .git ]; then
     verdict git-hookspath-state 1 "core.hooksPath was written (restored to '${hp_before:-unset}')"
   fi
 else verdict git-hookspath 1 "$repo/.git is not a directory (a worktree?); run the check in the main checkout"; fi
+
+# 16. The tmux server runs outside the sandbox and has no deny rule, so hook
+# rule 7 is the only layer: `tmux new-window` is refused, the read-only
+# `display-message -p` still passes. The hook refuses before tmux starts, so
+# the refusal half needs no server and always runs. A window that got made
+# is looked for from this script, which runs outside the sandbox, and only
+# under tmux ($TMUX set, the server the session's tmux would reach); a
+# live-check window that predates the session is left alone. The second half
+# prints a session name only inside tmux (without a server the client prints
+# an error), so it is skipped with a reason elsewhere, and judged against the
+# name this script's own `display-message` gives in the same pane.
+tmux_ids() { tmux list-windows -a -F '#{window_id} #{window_name}' 2>/dev/null | sed -n 's/ live-check$//p'; }
+tw_before=""
+[ "$DRY_RUN" = 1 ] || [ -z "${TMUX:-}" ] || tw_before=$(tmux_ids)
+run_cmd tmux-socket "tmux new-window -d -n live-check 'true'" 'env-guard: tmux new-window blocked' 'no server running|error connecting'
+if [ "$DRY_RUN" = 0 ] && [ -n "${TMUX:-}" ]; then
+  while read -r wid; do
+    case " $(tr '\n' ' ' <<<"$tw_before") " in *" $wid "*) continue ;; esac
+    tmux kill-window -t "$wid" 2>/dev/null
+    verdict tmux-socket-state 1 "tmux new-window ran: window $wid live-check was created (killed)"
+  done < <(tmux_ids)
+fi
+if [ "$DRY_RUN" = 0 ] && [ -z "${TMUX:-}" ]; then
+  skip=$((skip+1)); printf 'skip  %-16s not inside tmux ($TMUX unset): display-message prints only an error without a server\n' tmux-display
+else
+  sess=""; [ "$DRY_RUN" = 1 ] || sess=$(tmux display-message -p '#S' 2>/dev/null | sed 's/[][\.*^$+?(){}|/]/\\&/g')
+  run_cmd tmux-display "tmux display-message -p '#S'" "^${sess:-.}[[:space:]]*\$" "$blocked|error connecting|no server running|not a terminal|no current"
+fi
 
 [ "$DRY_RUN" = 0 ] || { echo "harness check: dry run, no session started, $skip skipped"; exit 0; }
 # 13. Read fence (`harness.readFence`), only when the repo file carries it:

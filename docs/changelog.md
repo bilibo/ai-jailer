@@ -5,6 +5,109 @@ happened and what was learned on the day.
 
 ## 2026-10-26
 
+- Hook rule 7, the tmux server (roadmap 2.8a), staged: inside the roots
+  `tmux` passes only for read-only commands, by full name or alias (`ls`,
+  `list-*`, `has-session`, `show-*`, `display-message -p` without `-I`).
+  Prefixes are refused, and so are `-C`, a quoted or escaped `;`, `#(`,
+  and `$`, backticks and globs in the arguments. A word after `tmux` that
+  cannot be a command name (`grep tmux docs/`) is not counted as a call.
+  The old env check is now rule 8. hook-test gains 72 cases, among them
+  one known false positive, a quoted mention (`grep "tmux send-keys"`),
+  refused for the same reason rule 6 refuses `bash -c "..."` text.
+  `nix flake check` on a copy: every check passes. Learned on tmux 3.8,
+  with a private server: an argument ending in `;` chains the next command
+  (`tmux has -t s ';' display -p hi` ran both). Bare `tmux` without a
+  terminal exits with `open terminal failed` before it creates a session.
+  `#()` in `display-message -p` and `ls -F` did not run its job from a
+  detached client; the rule refuses it anyway. Not yet live in this
+  checkout: its hook is built from the working tree (`devenv.yaml` imports
+  `./devenv`; CLAUDE.md's "pinned from GitHub" and `harness.role =
+  "center"` describe a shape no commit carries, found 2026-10-26: the
+  committed `devenv.nix` sets no role, and the shell exports
+  `HARNESS_ROLE=work`), so the rule applies after the next devenv
+  evaluation. The rule also applies in a center (it is a work repo's rule
+  there).
+- `harness check` case 16, `tmux-socket`, for rule 7 (roadmap 2.8),
+  staged: `tmux new-window -d -n live-check 'true'` must be refused with
+  `env-guard: tmux new-window blocked` (always run, the center too, since
+  the hook refuses before tmux starts); `tmux display-message -p '#S'`
+  must still pass and print the session name the script's own call in
+  the same pane returns, run only inside tmux and skipped with a reason
+  otherwise. Had the refused command run, the script (outside the
+  sandbox) finds the new `live-check` window by id, kills it and fails
+  `tmux-socket-state`, as case 15 restores `core.hooksPath`. Sessions:
+  sixteen, eighteen fenced, eight in the center, one fewer each outside
+  tmux (README, runbook). `check-parser-test` lists both halves. Not run
+  live (rule 7 is not active here yet, and `harness check` starts real
+  sessions); the first run should watch `tmux-display`, in case the
+  session's environment scrub drops `$TMUX`.
+- Roadmap 2.9, staged: with `allowMemoryEdits` the hook let the Edit and
+  Write tools write any `~/.claude/projects/*/memory/*`, so a center
+  session could seed a work repo's memory, which that repo's next session
+  loads unreviewed with its own flag off. `check_edit` now allows only
+  `~/.claude/projects/<slug>/memory/*`, `<slug>` being `CLAUDE_PROJECT_DIR`
+  with every character outside `[a-zA-Z0-9]` made `-`; unset or empty, or
+  a slug over 200 characters, means no carve-out. hook-test adds the own
+  slug (one with `_`, `.` and capitals), another project's, a look-alike
+  `-evil` suffix, a lowercased slug, a worktree project dir, and unset and
+  empty; a mutation run against the old pattern fails exactly the six new
+  refusals. All four hook-test checks pass (353, 384, 439, 372). The
+  static deny rules (`lib/deny-rules.nix`, `claudeHome`) still leave
+  every project's memory open: they cannot know the slug.
+  `docs/command-center.md` section 7 describes the new shape. Learned: the
+  slug is `path.replace(/[^a-zA-Z0-9]/g, "-")`, case kept, truncated to
+  200 with a base36 hash suffix (sessions docs, "Where transcripts are
+  stored"; read in the 2.1.308 binary), and auto memory is keyed on the
+  canonical git root, so worktrees and subdirectories share the main
+  root's directory (memory docs). Not verified: what `CLAUDE_PROJECT_DIR`
+  is for a session started in a worktree or subdirectory (if that path,
+  its own memory writes are now refused, fail closed; a test pins it);
+  non-ASCII paths; a live memory save through the rule.
+- Roadmap 2.7, staged: the `.envrc` that `harness init` writes fails the
+  load while `devenv.local.nix` or `devenv.local.yaml` exists, with one
+  line before `use devenv` (`error: <file> is refused in a harness repo
+  (devenv loads it without a direnv allow): remove it and direnv reload,
+  or move its content into devenv.nix as a proposed diff`), the line the
+  hook's preamble shows; `check_env` names the fix for it instead of
+  `devenv shell`, which skips the `.envrc`. devenv imports both files
+  without a `direnv allow`, and the literal `denyWrite` that closed the
+  interpreter write broke the shell (2026-10-22). With the template
+  `.envrc` a `devenv.local.*` stops `harness init`'s shell step before any
+  `direnv allow`; a repo that keeps its own `.envrc` still gets it shown
+  and approved. A per-developer `devenv.local.nix`, including the
+  per-developer `harness.enable = false`, is gone with it (README,
+  project-devenv, runbook, command-center). harness-init-test 68 to 80.
+  Learned on direnv 2.38.2: a failed load records no `watch_file` paths,
+  only the `.envrc` and its allow/deny files, so removing the file needs
+  a `direnv reload`; devenv's `use_devenv` keeps its watches by logging
+  the error and exiting 0, which also means `check_env`'s exit test does
+  not catch a devenv build failure (seen, not investigated). The live
+  direnv runs were done in a nix build, because the hook refuses a shell
+  write creating `devenv.local.*` even under `$TMPDIR`. Not live in this
+  checkout until its `.envrc` gets the same lines by hand (the proposed
+  diff is in the session report); existing repos get it with `harness
+  init --force`. Its `harness check` case is not written.
+- `harness doctor` prints `HARNESS_CODE_ROOT` (the default `~/code/git`
+  marked when unset), `HARNESS_PROJECT` and `HARNESS_ROLE` as `info`
+  lines after the harness ref line, so a verification starts by seeing
+  which repo and role the shell is in; they are facts, counted nowhere,
+  and a role without a project is a warning, since the repo shell's
+  direnv exports both together (`pkgs/ccmux.nix`). The runbook's
+  verification section starts there. harness-doctor-test covers unset,
+  set and the pair (60 passed; harness-bootstrap-test 165). Learned: bash
+  5 reads an apostrophe inside `${VAR:-...}` in double quotes as
+  unbalanced, so the default text lives in a variable. Closes the first
+  bullet of roadmap item 9. Run here, it printed `HARNESS_ROLE work` for
+  this checkout, which is how the role finding above was made.
+- Found, not fixed: the hook has no rule for `direnv allow` (or `permit`).
+  In a work repo the gate holds because `~/.local/share/direnv/allow/` is
+  not writable from the sandbox; in a center with the sandbox off a
+  session can `direnv allow` another repo's `devenv.nix` after editing
+  it, and its own after an interpreter write the hook does not see. A
+  universal hook rule refusing `direnv allow|permit` with hook-test cases
+  is the patch; a sandboxed checkout (`allowWrite` under the code root,
+  roadmap item 10's set-aside proposal) would close it by construction.
+
 - The NixOS-WSL host drops `harness bootstrap` (the user's decision): the
   host repo's configuration carries direnv (NixOS `programs.direnv`, with
   `pkgs/direnv.toml` as its settings), devenv, `harness` and `ccmux` from

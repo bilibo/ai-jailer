@@ -16,7 +16,8 @@
 # template turns harness.claudeCode.enable on and devenv.yaml gets
 # allow_unfree: true; with one, both stay commented out. A claude in a store
 # directory (a shell's) or under ~/.vscode-server (the extension's) is not
-# the host's.
+# the host's. The template's .envrc fails while a devenv.local.* exists, and
+# init stops on one unless the repo keeps its own .envrc.
 set -uo pipefail
 harness="${1:?usage: harness-init-test.sh <harness> [<settings.json>]}"
 settings="${2:-$harness}"
@@ -159,6 +160,38 @@ if grep -A1 -x -F '  harness = {' "$tmp/code/acme/plain/devenv.nix" | grep -q -E
 # checkout's; no template ever sets a role.
 if grep -A2 -x -F '  harness = {' "$tmp/code/acme/plain/devenv.nix" | sed -n 3p | grep -q -E '^    # role = "center"; +# the harness checkout only \(the command center\): no sandbox there; never a work repo$'; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: no commented-out role = \"center\" after enable in the template"; fi
 if grep -q -E '^ *role *=' "$tmp/code/acme/plain/devenv.nix" "$tmp/code/acme/wsl/devenv.nix"; then fail=$((fail+1)); echo "FAIL: a template sets harness.role"; else pass=$((pass+1)); fi
+
+# The template's .envrc fails the load while devenv.local.nix or
+# devenv.local.yaml exists (roadmap 2.7), before `use devenv`, with an error
+# line the hook's preamble shows (the first stderr line matching "error").
+# No direnv in the build: bash sources the generated file with direnv's
+# functions stubbed, `use` echoing its arguments.
+envrc_run() { # envrc_run <dir>: sets out and rc
+  out=$(cd "$1" && "$BASH" -c 'devenv() { :; }; use() { echo "use $*"; }; require_allowed() { :; }; source ./.envrc' 2>&1); rc=$?
+}
+plain="$tmp/code/acme/plain"
+envrc_run "$plain"
+if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: the template .envrc without devenv.local.* exits $rc"; printf '%s\n' "$out" | sed 's/^/  /'; fi
+check "envrc: no devenv.local.*, reaches use devenv" '^use devenv$'
+for f in devenv.local.yaml devenv.local.nix; do
+  echo '{ }' >"$plain/$f"
+  envrc_run "$plain"
+  if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: the template .envrc with $f exits 0"; fi
+  if [[ "$(grep -i -m1 error <<<"$out")" == "error: $f is refused in a harness repo (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" ]]; then pass=$((pass+1))
+  else fail=$((fail+1)); echo "FAIL: the hook's error line for $f"; printf '%s\n' "$out" | sed 's/^/  /'; fi
+  if [[ "$out" == *'use devenv'* ]]; then fail=$((fail+1)); echo "FAIL: use devenv ran with $f present"; else pass=$((pass+1)); fi
+  rm -f "$plain/$f"
+done
+# The shell step: with the template's .envrc a devenv.local.* stops it before
+# any `direnv allow`; with the repo's own .envrc it is approved like the rest.
+mkdir -p "$tmp/local"; echo '{ }' >"$tmp/local/devenv.local.nix"
+repo_dir="$tmp/local" shell_init --yes
+if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: devenv.local.nix with the template .envrc exits 0"; fi
+check "local: refused, what to do named" 'devenv\.local\.nix exists and the \.envrc refuses to load with it .*: remove it, or move its content into devenv\.nix'
+if grep -q 'direnv allow' "$tmp/calls"; then fail=$((fail+1)); echo "FAIL: direnv allow ran with a devenv.local.nix"; else pass=$((pass+1)); fi
+mkdir -p "$tmp/ownrc"; echo 'use devenv' >"$tmp/ownrc/.envrc"; echo '{ }' >"$tmp/ownrc/devenv.local.nix"
+repo_dir="$tmp/ownrc" shell_init
+check "own .envrc: devenv.local.nix approved with it" 'not approved: \.envrc devenv\.local\.nix;'
 
 # claudeCode.enable. has/lacks <description> <file> <regex>: a line in the file.
 has()   { if grep -q -E "$3" "$2" 2>/dev/null; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$3/ in $2)"; sed 's/^/  /' "$2" 2>/dev/null; fi; }

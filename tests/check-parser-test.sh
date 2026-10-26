@@ -52,7 +52,7 @@ if [ "$rc" = 66 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a m
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 tmp=$(cd "$tmp" && pwd -P)
 sandbox_cases="sandbox ssh-agent home-write repo-write env-deny cred-sandbox git-hookspath"
-hook_cases="devenv-env git-commit cred-read config-write edit-envrc nested-flags hooks-registered"
+hook_cases="devenv-env git-commit cred-read config-write edit-envrc nested-flags hooks-registered tmux-socket tmux-display"
 fake_repo() { # fake_repo <name> <settings JSON | @symlink target>
   mkdir -p "$tmp/$1/.claude"; : >"$tmp/$1/.envrc"
   case "$2" in @*) ln -s "${2#@}" "$tmp/$1/.claude/settings.json" ;; *) printf '%s\n' "$2" >"$tmp/$1/.claude/settings.json" ;; esac

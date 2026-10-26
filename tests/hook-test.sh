@@ -275,6 +275,85 @@ block 'git pu\sh origin main'
 block $'git \\\npush origin main'
 block 'claude --dangerously-skip-permis\sions -p hi'
 
+# --- 7. tmux: its server runs outside the sandbox ---------------------------
+# Read-only commands, by full name or alias.
+allow 'tmux ls'
+allow 'tmux list-sessions -F "#{session_name}"'
+allow 'tmux list-panes -a'
+allow 'tmux has-session -t =acme-infra'
+allow 'tmux display-message -p "#S"'
+allow 'tmux display -p "#{window_name}"'
+allow 'tmux show-environment -g HARNESS_ROLE'
+allow 'tmux showw -g'
+allow 'tmux -L other ls'
+allow 'tmux -S /tmp/tmux-1000/default list-windows'
+allow 'tmux -V'
+allow 'tmux ls 2>&1 | head'
+allow 'echo $(tmux display-message -p "#S")'
+# Bare tmux is new-session, which needs a terminal the tool does not have.
+allow 'tmux'
+# `tmux` as a word that is not a call.
+allow 'grep -n tmux docs/runbook.md'
+allow 'grep -rn tmux hooks/'
+allow 'cat ~/.tmux.conf'
+allow 'echo $TMUX $TMUX_PANE'
+allow 'nix build nixpkgs#tmux'
+allow 'hooks/tmux-notify.sh clear'
+# Everything that runs a command, types into a pane or reconfigures the server.
+block 'tmux new-window "bash -c x"'
+block 'tmux neww x'
+block 'tmux run-shell "touch /tmp/x"'
+block 'tmux run "touch /tmp/x"'
+block 'tmux send-keys -t center:0 "git push" Enter'
+block 'tmux send -t center:0 x'
+block 'tmux new-session -d "x"'
+block 'tmux split-window x'
+block 'tmux respawn-pane -k x'
+block 'tmux pipe-pane "cat > /tmp/x"'
+block 'tmux if-shell true x'
+block 'tmux source-file /tmp/x.conf'
+block 'tmux set-hook -g after-new-window x'
+block 'tmux bind-key x run-shell y'
+block 'tmux set-option -g default-command x'
+block 'tmux paste-buffer -t center:0'
+block 'tmux capture-pane -p -t center:0'
+block 'tmux kill-server'
+block 'tmux display-popup x'
+block 'tmux display-message "hi"'
+block 'tmux display-message -I -p -t center:0'
+block 'tmux lis'                                 # a unique prefix: refused, not resolved
+# The ways around the command word: paths, wrappers, quotes, escapes, expansion.
+block '/usr/bin/tmux neww x'
+block '/nix/store/x-tmux-3.8/bin/tmux neww x'
+block 'nix run nixpkgs#tmux -- neww x'
+block 'env FOO=1 tmux neww x'
+block 'bash -c "tmux neww x"'
+block 'cd /tmp && tmux neww x'
+block "t'm'ux neww x"
+block 't\mux neww x'
+block 'tmux -L x -u neww x'
+block 'tmux -2 -f /dev/null neww x'
+block 'tmux -Lsock neww x'
+block 'tmux "neww" x'
+block 'tmux neww>/dev/null x'
+block 'tmux $C x'
+block 'tmux ne?w x'
+block 'tmux {neww,} x'
+block 'echo `tmux neww x`'
+block $'tmux ls\ntmux neww x'
+block 'tmux grep docs'                           # could be a command: fail closed
+# Quotes are stripped, as for rule 6 (`bash -c "..."`): a quoted mention counts.
+block 'grep -rn "tmux send-keys" docs'
+# Chaining inside one tmux call, and server-side formats.
+block "tmux ls ';' neww x"
+block 'tmux ls \; neww x'
+block 'tmux has -t "s;" neww x'
+block 'tmux ls $SEP neww'
+block 'tmux ls -F "#(touch /tmp/x)"'
+block 'tmux display -p "#(id)"'
+block 'tmux -C ls'
+block 'tmux -uCC ls'
+
 # --- Edit / Write tool ----------------------------------------------------
 run 0 "$(edit_file $IN/main.tf)"
 run 0 "$(edit_file $IN/README.md)"
@@ -301,16 +380,29 @@ run 2 "$(edit_file "$HOME/code/../.bashrc")"
 run 2 "$(edit_file devenv.nix)"
 run 0 "$(edit_file main.tf)"
 # Auto-memory lives under ~/.claude/projects/<slug>/memory/. Allowed only when
-# the host was built with allowMemoryEdits; nothing else under ~/.claude ever.
+# the host was built with allowMemoryEdits, and only the slug of the session's
+# CLAUDE_PROJECT_DIR; nothing else under ~/.claude ever.
 MEM=$(sed -n 's/^ALLOW_MEMORY_EDITS="\(.*\)"$/\1/p' "$hook")
 mem="$HOME/.claude/projects/-home-x-repo/memory"
+export CLAUDE_PROJECT_DIR=/home/x/repo
 if [ "$MEM" = 1 ]; then
   run 0 "$(edit_file "$mem/MEMORY.md")"
   run 0 "$(edit_file "$mem/some-fact.md")"
   run 0 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$mem/new.md\",\"content\":\"x\"}}"
+  # Every character outside [a-zA-Z0-9] becomes `-`; case is kept.
+  CLAUDE_PROJECT_DIR=/home/x/My_Repo.v2 run 0 "$(edit_file "$HOME/.claude/projects/-home-x-My-Repo-v2/memory/MEMORY.md")"
 else
   run 2 "$(edit_file "$mem/MEMORY.md")"
 fi
+# Another project's memory, and a slug that only starts like this one's.
+run 2 "$(edit_file "$HOME/.claude/projects/-home-x-other/memory/MEMORY.md")"
+run 2 "$(edit_file "$HOME/.claude/projects/-home-x-repo-evil/memory/MEMORY.md")"
+CLAUDE_PROJECT_DIR=/home/x/My_Repo.v2 run 2 "$(edit_file "$HOME/.claude/projects/-home-x-my-repo-v2/memory/MEMORY.md")"
+# A worktree session's memory is the main checkout's; not matched (fail closed).
+CLAUDE_PROJECT_DIR=/home/x/repo/.claude/worktrees/w run 2 "$(edit_file "$mem/MEMORY.md")"
+CLAUDE_PROJECT_DIR= run 2 "$(edit_file "$mem/MEMORY.md")"
+unset CLAUDE_PROJECT_DIR
+run 2 "$(edit_file "$mem/MEMORY.md")"
 run 2 "$(edit_file "$mem/../session.jsonl")"
 run 2 "$(edit_file "$mem/../../../settings.json")"
 run 2 "$(edit_file "$HOME/.claude/projects/-home-x-repo/session.jsonl")"
@@ -356,6 +448,9 @@ allow 'claude --settings /tmp/mine.json -p hi'
 # ccmux launches into harness repos only: its flags count everywhere.
 block 'ccmux acme/infra --bare'
 allow 'ccmux acme/infra --worktree'
+# The tmux rule is a project rule: no harness sandbox out here to escape.
+allow 'tmux new-window x'
+block "tmux -S $IN/sock new-window x"
 run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$OUT\"}"
 run 2 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"user_settings\",\"cwd\":\"$OUT\"}"
 # A session outside the roots that reaches into a repo under them.

@@ -22,6 +22,7 @@ doctor() {
   out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" \
     HARNESS_OS_RELEASE="${OS_RELEASE:-/var/empty/none}" HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
     HARNESS_SYSTEM_BASHRC="${SYSTEM_BASHRC:-/var/empty/none}" ${DIRENV_CONFIG:+"DIRENV_CONFIG=$DIRENV_CONFIG"} \
+    ${T_CODE_ROOT:+"HARNESS_CODE_ROOT=$T_CODE_ROOT"} ${T_PROJECT:+"HARNESS_PROJECT=$T_PROJECT"} ${T_ROLE:+"HARNESS_ROLE=$T_ROLE"} \
     "$harness" doctor 2>&1); rc=$?
 }
 check() { # check <description> <want-regex>
@@ -137,6 +138,26 @@ check "no mkhl.direnv on WSL is an info line" 'info  VS Code extension mkhl\.dir
 refute "no mkhl.direnv on WSL is not missing" 'MISSING VS Code extension mkhl\.direnv'
 doctor "$tmp/empty" "$tmp/vbin"
 check "no mkhl.direnv elsewhere is missing" 'MISSING VS Code extension mkhl\.direnv'
+
+# The environment lines: facts (info), counted nowhere; a role without a
+# project is the one warning.
+doctor "$tmp/empty"
+read -r miss1 warn1 < <(summary_of)
+check "code root default"       "info  HARNESS_CODE_ROOT $tmp/home/code/git \\(default\\)"
+check "project unset"           "info  HARNESS_PROJECT unset: not inside a harness repo's shell"
+check "role unset"              'info  HARNESS_ROLE unset'
+refute "unset is no role warning" 'HARNESS_ROLE is set but'
+T_CODE_ROOT=/srv/code T_PROJECT=acme/app T_ROLE=work doctor "$tmp/empty"
+read -r miss2 warn2 < <(summary_of)
+check "code root set"           'info  HARNESS_CODE_ROOT /srv/code[[:space:]]'
+check "project set"             'info  HARNESS_PROJECT acme/app[[:space:]]'
+check "role set"                'info  HARNESS_ROLE work[[:space:]]'
+refute "set pair is no warning" 'HARNESS_ROLE is set but'
+T_ROLE=work doctor "$tmp/empty"
+read -r miss3 warn3 < <(summary_of)
+check "role without project is a warning" 'warn  HARNESS_ROLE is set but HARNESS_PROJECT is not'
+refute "role without project is not missing" 'MISSING HARNESS'
+if [ "$miss1" = "$miss2" ] && [ "$miss1" = "$miss3" ] && [ "$warn1" = "$warn2" ] && [ "$((warn1+1))" = "$warn3" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: counts: missing $miss1/$miss2/$miss3, warnings $warn1/$warn2/$warn3 (want equal missing, one more warning only for the inconsistent pair)"; fi
 
 out=$("$harness" --version 2>&1); rc=$?
 exits "--version" 0; check "--version prints the revision" '^harness .+'

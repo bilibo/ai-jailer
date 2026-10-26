@@ -68,7 +68,11 @@ check_env() {
   if [ "$rc" != 0 ] || grep -q 'is blocked' <<<"$err"; then
     rm -f "$out"
     first=$(grep -i -m1 'error' <<<"$err" || grep -v '^$' <<<"$err" | tail -n 1 || true)
-    if grep -q 'is blocked' <<<"$err"; then fix="direnv allow $dir"; else fix="the devenv error (devenv shell in $dir shows it)"; fi
+    # The template .envrc refuses to load while a devenv.local.* exists
+    # (2026-10-26); `devenv shell` skips the .envrc and would import it.
+    if grep -q 'is blocked' <<<"$err"; then fix="direnv allow $dir"
+    elif grep -q 'is refused in a harness repo' <<<"$err"; then fix="remove the devenv.local file from your own terminal; it is not the agent's to remove"
+    else fix="the devenv error (devenv shell in $dir shows it)"; fi
     deny "direnv export failed in $dir: ${first:-exit $rc} (fix: $fix)"
   fi
   # The export lists what differs from this environment: a profile already
@@ -170,12 +174,28 @@ ENV
         # ~/.bashrc, a link into the store, still matches its own name) and
         # its target (a link in the repo to ~/.bashrc) must pass.
         [[ "$f" == /* ]] || f="$cwd/$f"
+        # The one carve-out under ~/.claude is auto-memory, when the host
+        # allows it, and only the session's own project's: another repo's
+        # next session loads its memory unreviewed, with its own
+        # allowMemoryEdits off. Claude Code names the directory after the
+        # path with every character outside [a-zA-Z0-9] made `-`, case kept;
+        # past 200 characters it truncates and appends a hash this hook does
+        # not compute (code.claude.com/docs/en/sessions, "Where transcripts
+        # are stored"; read in the 2.1.308 binary, 2026-10-26). No
+        # CLAUDE_PROJECT_DIR, or a slug past 200, means no carve-out. A
+        # session started in a subdirectory or a worktree keeps its memory
+        # under the repository's main root (docs/en/memory), which this
+        # does not match: refused, not widened.
+        own_memory=
+        if [ "$ALLOW_MEMORY_EDITS" = 1 ] && [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+          slug="${CLAUDE_PROJECT_DIR//[^a-zA-Z0-9]/-}"
+          [ "${#slug}" -gt 200 ] || own_memory="$HOME/.claude/projects/$slug/memory"
+        fi
         check_edit() { # check_edit <absolute path>
           [ "$in_scope" = 1 ] || { under_root "$1" && in_scope=1; }
-          # The one carve-out under ~/.claude is auto-memory, when the host allows it.
-          if [ "$ALLOW_MEMORY_EDITS" = 1 ]; then
+          if [ -n "$own_memory" ]; then
             case "$1" in
-              "$HOME"/.claude/projects/*/memory/*) return 0 ;;
+              "$own_memory"/*) return 0 ;;
             esac
           fi
           # The user's own Claude and Nix config, and the files listed below
@@ -310,7 +330,63 @@ ENV
         re="(^|[^a-z])($launcher)( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions|add-dir)( |=|$)"
         [[ "${q,,}" =~ $re ]] && deny "claude launch flag blocked"
 
-        # 7. the environment the command is about to run in must load
+        # 7. the tmux server (project rule; roadmap 2.8a). It runs outside
+        # the sandbox and allowAllUnixSockets reaches its socket, so most
+        # tmux commands run something there with no sandbox and no hook
+        # (`run-shell`, `new-window`, `send-keys` into another session's
+        # pane). Allowed: the read-only commands in tmux_ro by full name or
+        # alias (tmux also takes unique prefixes; those are refused), and
+        # display-message only with -p and without -I (-I writes stdin into
+        # a pane). A word after `tmux` that cannot be a tmux command name
+        # (`grep tmux docs/`) is not a tmux call; one that could become one
+        # by expansion is refused. Bare `tmux` (new-session) passes: without
+        # a terminal it exits before creating anything (tmux 3.8, live
+        # 2026-10-26). Refused in a call: -C (control mode reads commands
+        # from stdin); an argument ending in `;`, tmux's own command
+        # separator (`tmux has -t s ';' display -p hi` ran both, live
+        # 2026-10-26), which reaches tmux only quoted or escaped, so this
+        # rule reads a quoted or escaped separator as \x01; `#(`, a format
+        # job the server runs (not seen to run from `display-message -p` on
+        # tmux 3.8, refused anyway); and `$`, backticks and globs in the
+        # arguments, which can expand to a `;`. Text only: a script or
+        # `python` on the socket gets past this; roadmap 2.8b is the socket.
+        if [ "$in_scope" = 1 ]; then
+        tm=$(printf '%s' "$cmd" | jq -Rsj 'gsub("(?<q>\"(\\\\.|[^\"\\\\])*\"|\\x27[^\\x27]*\\x27|\\\\.|>&|&>)"; .q | if test("^[\"\\x27\\\\]") then gsub("[;&|]"; "\u0001") else gsub("&"; "_") end)' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"" | tr '<>' '  ')
+        tmux_ro='^(ls|list-(sessions|windows|panes|clients|buffers|keys|commands)|lsw|lsp|lsc|lsb|lsk|lscm|has|has-session|show|show-(options|window-options|environment|buffer|messages|hooks)|showw|showenv|showb|showmsgs|display|display-message)$'
+        call='(^|[^a-zA-Z0-9_.-])tmux( |$)(.*)'
+        name='^[a-z-]+$'
+        name_exp=$'[\x01$`?*[{]'
+        arg_exp=$'[\x01$`?*[]'
+        control='^-[^cfLST]*C'
+        takes_arg='^-[^cfLST]*[cfLST]$'
+        print='(^| )-[aClNpv]*p[aClNpv]*( |$)'
+        input='(^| )-[a-zA-Z]*I'
+        rest="$tm"
+        while [[ "$rest" =~ $call ]]; do
+          rest="${BASH_REMATCH[3]}"
+          read -ra words <<<"${rest%%[;&|)\`]*}"
+          sub="" i=0
+          while [ "$i" -lt "${#words[@]}" ]; do
+            w="${words[$i]}"; i=$((i + 1))
+            [[ "$w" == -* ]] || { sub="$w"; break; }
+            [[ "$w" =~ $control ]] && deny "tmux -C blocked: control mode reads tmux commands from stdin"
+            [[ "$w" =~ $takes_arg ]] && i=$((i + 1))
+          done
+          [ -n "$sub" ] || continue
+          if ! [[ "$sub" =~ $name ]]; then
+            [[ "$sub" =~ $name_exp ]] && deny "tmux call blocked: its command word could expand to a tmux command"
+            continue
+          fi
+          [[ "$sub" =~ $tmux_ro ]] || deny "tmux $sub blocked: the tmux server runs outside the sandbox (read-only: ls, list-*, has-session, show-*, display-message -p, by full name or alias)"
+          a="${words[*]:i}"
+          [[ "$a" =~ $arg_exp || "$a" == *'#('* ]] && deny "tmux $sub blocked: \$, backticks, globs, #( and a quoted ; are refused in tmux arguments"
+          if [[ "$sub" == display* ]] && { ! [[ "$a" =~ $print ]] || [[ "$a" =~ $input ]]; }; then
+            deny "tmux $sub blocked: only display-message -p, without -I"
+          fi
+        done
+        fi
+
+        # 8. the environment the command is about to run in must load
         # (universal; the env-file preamble above is fail-open on its own).
         check_env "$cwd"
         exit 0 ;;
