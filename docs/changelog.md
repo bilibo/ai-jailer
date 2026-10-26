@@ -3,6 +3,51 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-26
+
+- The NixOS-WSL host drops `harness bootstrap` (the user's decision): the
+  host repo's configuration carries direnv (NixOS `programs.direnv`, with
+  `pkgs/direnv.toml` as its settings), devenv, `harness` and `ccmux` from
+  this flake as an input, the tmux rules through home-manager
+  `programs.tmux`, and `HARNESS_CODE_ROOT`; `~/.claude/settings.json` is
+  left to Claude Code and account sync. Found: the bootstrap had never run
+  on that host, so `harness` was not on PATH at all, and the locked nixpkgs
+  there (2026-10-20) ships direnv 2.38.2, so `pkgs/direnv.nix` is a no-op
+  on it (this repo's own lock, 2026-10-14, still needs the override).
+- `harness doctor` accepts that shape: `direnv.toml` is looked up under
+  `DIRENV_CONFIG` (NixOS sets `/etc/direnv`); a store link there is taken
+  as is, like home-manager's, and a plain file is judged by `strict_env`
+  and `load_dotenv`; the bash hook may be in `/etc/bashrc`
+  (`HARNESS_SYSTEM_BASHRC` in the tests); no receipt on NixOS is an info
+  line; the `environment.d` PATH is not checked when direnv is a system
+  package; and `sandbox.network.strictAllowlist` missing is MISSING only
+  when a receipt exists (bootstrap wrote it), a warning otherwise.
+  `harness-doctor-test` gains 8 cases. Tried on the NixOS-WSL host with
+  `nh os test` and this checkout as the `harness` input: 1 missing
+  (mkhl.direnv, below), 2 warnings (the allowlist, account sync).
+- `mkhl.direnv` on WSL is an info line, not MISSING (the user's decision):
+  installed on the Windows side it only raises errors, and in the WSL
+  remote it is a manual "Install in WSL", since nothing provisions VS Code
+  extensions there. Without it, VS Code's own processes (the Claude Code
+  extension, language servers, tasks) run outside the repo's devenv
+  shell; only terminals that `cd` into the repo get it. Other hosts keep
+  MISSING: bootstrap installs it there. `harness-doctor-test` gains 3
+  cases.
+- nixpkgs bumped (2026-10-14 to 2026-10-23, the user's go-ahead), which
+  ships direnv 2.38.2, and `pkgs/direnv.nix` deleted: `flake.nix`,
+  `nixos/default.nix`, `home/default.nix`, `lib/managed-tree.nix` and
+  `devenv/devenv.nix` (a guard-rail file, edited from an unsandboxed
+  session with the user's go-ahead) use `pkgs.direnv`, and the home module
+  asserts >= 2.38. `nix flake check` on a copy: every check passes.
+- Found: with only `flake.lock` bumped, this checkout's sessions refused
+  every Bash command with `direnv: error exit status 127`. The devenv
+  module's hook puts its own direnv first on PATH, and that one comes from
+  the dev shell's nixpkgs (`devenv.lock`, still 2026-10-14: direnv
+  2.37.1), where the `.envrc`'s `require_allowed` is not a command.
+  `nix flake check` did not catch it: the hook tests run a stub direnv.
+  `devenv.lock` bumped to the same nixpkgs; Bash commands pass the hook
+  again. The devenv module has no version assertion yet.
+
 ## 2026-10-24
 
 - The Windows route moved to the host repo (the user's decision), staged

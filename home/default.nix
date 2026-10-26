@@ -28,8 +28,8 @@ in
 
     direnvPackage = lib.mkOption {
       type = lib.types.package;
-      default = import ../pkgs/direnv.nix { inherit pkgs; };
-      defaultText = lib.literalExpression "pkgs.direnv (>= 2.38, overridden while nixpkgs is older)";
+      default = pkgs.direnv;
+      defaultText = lib.literalExpression "pkgs.direnv";
       description = "direnv >= 2.38 for `require_allowed` in .envrc files.";
     };
 
@@ -42,6 +42,16 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # Every harness .envrc calls `require_allowed` (direnv >= 2.38). nixpkgs
+    # ships 2.38.2 since this flake's 2026-10-23 lock; before that
+    # pkgs/direnv.nix built it, so an older nixpkgs now fails here instead.
+    assertions = [
+      {
+        assertion = lib.versionAtLeast cfg.direnvPackage.version "2.38";
+        message = "harness.direnvPackage is direnv ${cfg.direnvPackage.version}; `require_allowed` needs 2.38 or newer (update nixpkgs).";
+      }
+    ];
+
     programs = {
       # The package only, no `settings`: with any key there home-manager
       # writes `~/.claude/settings.json` as a store symlink, and Claude Code

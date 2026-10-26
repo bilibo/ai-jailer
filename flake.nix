@@ -35,7 +35,7 @@
       packages = forAll (
         pkgs:
         let
-          direnvPackage = import ./pkgs/direnv.nix { inherit pkgs; };
+          direnvPackage = pkgs.direnv;
           hooks = import ./lib/hooks.nix {
             inherit pkgs direnvPackage;
             inherit (pkgs) lib;

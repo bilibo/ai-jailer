@@ -6,7 +6,7 @@ for an agent.
 
 ## 1. Daily flow
 
-1. Open the repo folder in VS Code. direnv (`mkhl.direnv`) loads the devenv
+1. Open the repo folder in VS Code. direnv loads the devenv
    shell; the first time, or after `devenv.nix`/`devenv.yaml`/`devenv.lock`
    change, it asks you to allow. Allow from a terminal:
 
@@ -152,7 +152,7 @@ or for reading what the script wrote:
 | Host | Set |
 | --- | --- |
 | Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
-| Unmanaged host | No harness modules (NixOS-WSL from the host repo's `install-wsl.ps1`, `bilibo/nixos-wsl`'s, is this shape since 2026-10-24). Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing, Nix is the system's) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist` and `syncClaudeAiSkills`/`syncClaudeAiPlugins = false` (account-synced skills and plugins off, the default since 2026-10-24; `--account-sync` leaves them on), and offers the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl where an older Debian kernel does. On NixOS (2026-10-23) nothing under `/etc` is written: `nix.conf` is the system configuration's, so the `nix.settings` block is printed when it lacks flakes or the devenv cache, and a user file that is a store symlink (home-manager's) is left alone with the option that sets it printed; `root_write` refuses any store symlink on every host. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
+| Unmanaged host | No harness modules (NixOS-WSL from the host repo's `install-wsl.ps1`, `bilibo/nixos-wsl`'s, is this shape since 2026-10-24). Your own config provides direnv >= 2.38 (nixpkgs' since 2026-10-23), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing, Nix is the system's) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist` and `syncClaudeAiSkills`/`syncClaudeAiPlugins = false` (account-synced skills and plugins off, the default since 2026-10-24; `--account-sync` leaves them on), and offers the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl where an older Debian kernel does. On NixOS (2026-10-23) nothing under `/etc` is written: `nix.conf` is the system configuration's, so the `nix.settings` block is printed when it lacks flakes or the devenv cache, and a user file that is a store symlink (home-manager's) is left alone with the option that sets it printed; `root_write` refuses any store symlink on every host. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
 | Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
 
 See `nixos/default.nix` for every option. In a repo, `devenv.nix` sets the
@@ -204,15 +204,16 @@ rules.
 
 Windows (2026-10-24): the host repo carries the installer, not this repo;
 `bilibo/nixos-wsl` is the reference one, and its README has the install,
-update and managed opt-in steps. The host is plain: NixOS-WSL plus the
-sandbox prerequisites, no harness module. The harness starts at `harness
-bootstrap`, as on any NixOS. Inside the distro, as yourself:
+update and managed opt-in steps. The host is plain, no harness module,
+and since 2026-10-26 its configuration carries the user side (direnv with
+`pkgs/direnv.toml`, devenv, `harness`, `ccmux`, the tmux rules,
+`HARNESS_CODE_ROOT=~/code`), so there is no bootstrap. Inside the distro,
+as yourself:
 
-```nix
-nix run github:bilibo/claude-nix-harness#harness -- bootstrap
-# new terminal: PATH, HARNESS_CODE_ROOT and the direnv hook come from ~/.bashrc.d
-harness doctor                        # every line ok or info
+```bash
+harness doctor                        # every line ok, info or warn
 harness init <customer>/<repo>        # once per work repo
+cd ~/code/<customer>/<repo> && ccmux
 ```
 
 The host carries tmux but deliberately no `claude`: the VS Code extension
@@ -221,10 +222,9 @@ it), which is enough for interactive use, and for tmux and `ccmux`
 sessions a work repo brings its own CLI `claude` (and tmux) through
 `harness.claudeCode.enable`, which `harness init` writes when it finds no
 host `claude`. `harness doctor` reports the absence as an `info` line, not
-a failure; a missing tmux is a warning, since ccmux carries its own. Keep
-home-manager off `~/.bashrc` on such a host: bootstrap skips a
-store-symlinked rc file and only prints the option. To switch to the
-managed layer later, run `harness reset` first.
+a failure; a missing tmux is a warning, since ccmux carries its own, and
+so is the strict network allowlist when `~/.claude/settings.json` is left
+to account sync.
 
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
@@ -358,13 +358,10 @@ which is the dangerous direction.
   `harness check`. Minimum 2.1.295 for `onFailure: block`; the
   settings keys were last checked against 2.1.296 (`lib/settings.nix`
   header), the Fedora host runs 2.1.304.
-- direnv: `pkgs/direnv.nix` overrides to 2.38.2 while nixpkgs is older. The
-  locked nixpkgs (2026-10-14) ships 2.37.1, so the override is in use. At
-  the next `nix flake update nixpkgs`, check `nix eval nixpkgs#direnv.version`;
-  at 2.38 or newer the file already falls through to `pkgs.direnv`. To
-  remove it, replace every import of it with `pkgs.direnv` (five:
-  `flake.nix`, `nixos/default.nix`, `home/default.nix`, `devenv/devenv.nix`,
-  `lib/managed-tree.nix`), then delete the file.
+- direnv: plain `pkgs.direnv` since 2026-10-26 (the locked nixpkgs,
+  2026-10-23, ships 2.38.2; the `pkgs/direnv.nix` override is gone). The
+  home module asserts >= 2.38, so a host configuration on an older nixpkgs
+  fails to build rather than lose `require_allowed`.
 - Host tools on an unmanaged host: `harness upgrade`
   after a `nix flake update` or a move of the checkout re-adds direnv,
   devenv and ccmux from the current lock, then hands the user steps to the

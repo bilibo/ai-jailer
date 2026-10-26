@@ -151,6 +151,8 @@ APPARMOR_PROFILE="${HARNESS_APPARMOR_PROFILE:-/etc/apparmor.d/bwrap}"
 NIX_INSTALLER="${HARNESS_NIX_INSTALLER:-/nix/nix-installer}"
 OS_RELEASE="${HARNESS_OS_RELEASE:-/etc/os-release}"
 NIXOS_MARKER="${HARNESS_NIXOS_MARKER:-/etc/NIXOS}"
+# Where NixOS programs.direnv puts the bash hook; doctor accepts it there.
+SYSTEM_BASHRC="${HARNESS_SYSTEM_BASHRC:-/etc/bashrc}"
 WSL_MARKER="${HARNESS_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 DEFERRED=()   # declined root steps, printed at the end as commands for later
 
@@ -803,6 +805,9 @@ report() {
   echo "host: $host ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
+  # A NixOS configuration can carry the whole user side (the README's "your
+  # own configuration"); the checks below say whether it does.
+  elif [ "$HOST" = nixos ]; then info "no receipt: harness bootstrap has not run here; on NixOS the system configuration can provide everything below"
   else warn "no receipt at $RECEIPT: reset has nothing to undo, upgrade uses the built-in package list (harness bootstrap writes one)"; fi
 
   if command -v nix >/dev/null 2>&1; then
@@ -823,10 +828,12 @@ report() {
   fi
 
   if [ -n "$CA_BUNDLE" ]; then ok "CA bundle for Nix-built tools: $CA_BUNDLE (NIX_SSL_CERT_FILE)"; else miss "no CA bundle found for NIX_SSL_CERT_FILE: devenv cannot fetch over https"; fi
+  fix="nix profile add $HARNESS_REF#direnv"; [ "$HOST" != nixos ] || fix="programs.direnv.enable in configuration.nix, or $fix"
   if command -v direnv >/dev/null 2>&1; then
-    v=$(direnv version); ver_ge "$v" "$MIN_DIRENV" && ok "direnv $v ($(command -v direnv))" || miss "direnv $v is older than $MIN_DIRENV (require_allowed): nix profile add $HARNESS_REF#direnv"
-  else miss "direnv >= $MIN_DIRENV (nix profile add $HARNESS_REF#direnv)"; fi
-  if command -v devenv >/dev/null 2>&1; then ok "devenv $(devenv version 2>/dev/null | awk '{print $NF}') ($(command -v devenv))"; else miss "devenv (nix profile add $HARNESS_REF#devenv)"; fi
+    v=$(direnv version); ver_ge "$v" "$MIN_DIRENV" && ok "direnv $v ($(command -v direnv))" || miss "direnv $v is older than $MIN_DIRENV (require_allowed): $fix"
+  else miss "direnv >= $MIN_DIRENV ($fix)"; fi
+  fix="nix profile add $HARNESS_REF#devenv"; [ "$HOST" != nixos ] || fix="devenv in environment.systemPackages, or $fix"
+  if command -v devenv >/dev/null 2>&1; then ok "devenv $(devenv version 2>/dev/null | awk '{print $NF}') ($(command -v devenv))"; else miss "devenv ($fix)"; fi
   if command -v ccmux >/dev/null 2>&1; then ok "ccmux ($(command -v ccmux))"; else warn "ccmux not on the host PATH (the devenv shell of a harness repo has it; nix profile add $HARNESS_REF#ccmux for everywhere)"; fi
 
   for t in bwrap socat; do command -v "$t" >/dev/null 2>&1 && ok "$t ($(command -v "$t"))" || miss "$t (bubblewrap and socat from your distro's packages; the devenv shell's claude-code brings its own): the sandbox refuses to start without it"; done
@@ -860,8 +867,11 @@ report() {
   # extension runs its bundled binary, and repos bring the CLI.
   else info "claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from harness.claudeCode.enable (harness init turns it on on such a host)"; fi
   local cs="$HOME/.claude/settings.json"
+  # Missing only where bootstrap wrote it; a host that leaves the file to
+  # Claude Code and account sync gets prompts instead of refusals.
   if jq -e '.sandbox.network.strictAllowlist == true' "$cs" >/dev/null 2>&1; then ok "strict network allowlist in $cs (unlisted hosts refused, not prompted)"
-  else miss "sandbox.network.strictAllowlist is not true in $cs (user-or-managed scope; the repo file cannot set it)"; fi
+  elif [ -s "$RECEIPT" ]; then miss "sandbox.network.strictAllowlist is not true in $cs (user-or-managed scope; the repo file cannot set it; harness bootstrap writes it)"
+  else warn "sandbox.network.strictAllowlist is not true in $cs: an unlisted host prompts instead of being refused (user-or-managed scope; the repo file cannot set it)"; fi
   if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (harness bootstrap removes it)"; fi
   if jq -e '.syncClaudeAiSkills == false and .syncClaudeAiPlugins == false' "$cs" >/dev/null 2>&1; then ok "account-synced skills and plugins off in $cs"
   else warn "account-synced skills and plugins load (syncClaudeAiSkills, syncClaudeAiPlugins not false in $cs; the harness reviews none of them): harness bootstrap turns them off, unless run with --account-sync"; fi
@@ -877,19 +887,30 @@ report() {
     else
       ok "code $v"
       code --list-extensions 2>/dev/null | grep -q -i -x 'anthropic.claude-code' && ok "VS Code extension anthropic.claude-code" || warn "VS Code extension anthropic.claude-code not installed"
-      code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv' && ok "VS Code extension mkhl.direnv" || miss "VS Code extension mkhl.direnv (code --install-extension mkhl.direnv)"
+      # On WSL `code` is the Remote-WSL CLI, so this lists the remote's
+      # extensions. There mkhl.direnv is a manual install (no bootstrap), and
+      # on the Windows side it only raises errors.
+      if code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then ok "VS Code extension mkhl.direnv"
+      elif [ "$WSL" = 1 ]; then info "VS Code extension mkhl.direnv not in the WSL remote: without it the Claude Code extension, language servers and tasks run outside the repo's devenv shell; install it from the Extensions view with \"Install in WSL\", never on Windows"
+      else miss "VS Code extension mkhl.direnv (code --install-extension mkhl.direnv)"; fi
     fi
   fi
 
   [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ccmux resolves <customer>/<repo> under it)"
-  if hm_owned "$HOME/.config/direnv/direnv.toml"; then ok "direnv.toml (home-manager)"
-  elif grep -q -F "$MARK_BEGIN" "$HOME/.config/direnv/direnv.toml" 2>/dev/null; then ok "direnv.toml"
-  elif [ -e "$HOME/.config/direnv/direnv.toml" ]; then warn "~/.config/direnv/direnv.toml exists and is not the harness one (strict_env, warn_timeout, load_dotenv = false)"
-  else miss "~/.config/direnv/direnv.toml"; fi
+  # The file direnv reads: NixOS programs.direnv points DIRENV_CONFIG at
+  # /etc/direnv. A store link is a Nix module's, taken as is; any other
+  # file is judged by its two security keys.
+  local dt="${DIRENV_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/direnv}/direnv.toml"
+  if hm_owned "$dt"; then
+    if [[ "$dt" == "$HOME"/* ]]; then ok "direnv.toml (home-manager)"; else ok "direnv.toml $dt (system configuration)"; fi
+  elif grep -q -E '^strict_env *= *true' "$dt" 2>/dev/null && grep -q -E '^load_dotenv *= *false' "$dt" 2>/dev/null; then ok "direnv.toml $dt"
+  elif [ -e "$dt" ]; then warn "$dt exists and is not the harness one (strict_env, warn_timeout, load_dotenv = false)"
+  else miss "$dt"; fi
   tf=$(tmux_file)
   if hm_owned "$tf"; then ok "tmux config $(tilde "$tf") (home-manager)"
   else grep -q -F "$MARK_BEGIN" "$tf" 2>/dev/null && ok "tmux harness block in $(tilde "$tf")" || miss "tmux harness block in $(tilde "$tf")"; fi
   if hm_owned "$HOME/.bashrc"; then ok "~/.bashrc (home-manager: the direnv hook and HARNESS_CODE_ROOT come from it)"
+  elif grep -q 'direnv hook bash' "$SYSTEM_BASHRC" 2>/dev/null; then ok "direnv hook in $SYSTEM_BASHRC (system configuration)"
   else
     grep -q 'direnv hook bash' "$HOME/.bashrc.d/claude-nix-harness.sh" 2>/dev/null && ok "direnv hook and HARNESS_CODE_ROOT in ~/.bashrc.d" || miss "~/.bashrc.d/claude-nix-harness.sh"
     if [ -e "$HOME/.bashrc" ] || [ ! -e "$HOME/.zshrc" ]; then
@@ -898,7 +919,9 @@ report() {
   fi
   if hm_owned "$HOME/.zshrc"; then ok "~/.zshrc (home-manager)"
   elif [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (harness bootstrap adds it)"; fi
-  if hm_owned "$HOME/.config/environment.d/50-claude-nix-harness.conf"; then ok "session PATH (home-manager)"
+  # System packages are on every session's PATH already.
+  if [[ "$(command -v direnv 2>/dev/null)" == /run/current-system/* ]]; then :
+  elif hm_owned "$HOME/.config/environment.d/50-claude-nix-harness.conf"; then ok "session PATH (home-manager)"
   else [ -r "$HOME/.config/environment.d/50-claude-nix-harness.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"; fi
   [ -n "${HARNESS_EXPECT_MANAGED:-}" ] && warn "HARNESS_EXPECT_MANAGED is set but this host has no managed settings" || true
 }

@@ -49,9 +49,10 @@ let
   harnessLib = import ../lib { inherit lib; };
   projectName = if config.name == null then "project" else config.name;
 
-  # The hook calls `direnv status` and `direnv allow`; any version does, but
-  # the same override as the home module keeps the two in step.
-  direnvPackage = import ../pkgs/direnv.nix { inherit pkgs; };
+  # The hook's `direnv export` evaluates the .envrc, whose `require_allowed`
+  # needs direnv >= 2.38. This is devenv.lock's nixpkgs, not flake.lock's:
+  # bump both (changelog 2026-10-26).
+  direnvPackage = pkgs.direnv;
 
   # The command center's checkout; null in a work repo, whose hook and
   # deny rules then carry nothing of the center's (same store paths).

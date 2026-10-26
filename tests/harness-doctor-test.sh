@@ -21,6 +21,7 @@ mkdir -p "$tmp/home"
 doctor() {
   out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" \
     HARNESS_OS_RELEASE="${OS_RELEASE:-/var/empty/none}" HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
+    HARNESS_SYSTEM_BASHRC="${SYSTEM_BASHRC:-/var/empty/none}" ${DIRENV_CONFIG:+"DIRENV_CONFIG=$DIRENV_CONFIG"} \
     "$harness" doctor 2>&1); rc=$?
 }
 check() { # check <description> <want-regex>
@@ -106,9 +107,36 @@ refute "no extension verdict"   'VS Code extension [a-z]+\.' # the verdict names
 printf 'ID=nixos\nPRETTY_NAME="NixOS 26.11 (Xantusia)"\n' >"$tmp/os-release"
 OS_RELEASE="$tmp/os-release" doctor "$tmp/empty"
 check "nixos host line"         'host: NixOS 26.11 \(Xantusia\) .*nix from the system configuration, 0 home-manager owned files skipped'
+check "nixos without a receipt is an info line" 'info  no receipt: harness bootstrap has not run here'
+refute "nixos without a receipt is no warning" 'warn  no receipt'
+check "no allowlist without a receipt is a warning" 'warn  sandbox\.network\.strictAllowlist is not true'
+refute "no allowlist without a receipt is not missing" 'MISSING sandbox\.network\.strictAllowlist'
+# The user side from the system configuration (NixOS programs.direnv):
+# direnv.toml under DIRENV_CONFIG and the hook in /etc/bashrc, nothing in HOME.
+mkdir -p "$tmp/etc-direnv"; printf '[global]\nload_dotenv = false\nstrict_env = true\nwarn_timeout = "2m"\n' >"$tmp/etc-direnv/direnv.toml"
+# shellcheck disable=SC2016  # the hook line as NixOS writes it
+printf 'eval "$(/nix/store/x-direnv/bin/direnv hook bash)"\n' >"$tmp/etc-bashrc"
+OS_RELEASE="$tmp/os-release" DIRENV_CONFIG="$tmp/etc-direnv" SYSTEM_BASHRC="$tmp/etc-bashrc" doctor "$tmp/empty"
+check "direnv.toml from DIRENV_CONFIG" "ok    direnv\.toml $tmp/etc-direnv/direnv\.toml"
+check "hook from the system bashrc" "ok    direnv hook in $tmp/etc-bashrc \(system configuration\)"
+refute "no bashrc.d verdict with a system hook" 'bashrc\.d'
+printf '[global]\nstrict_env = false\n' >"$tmp/etc-direnv/direnv.toml"
+OS_RELEASE="$tmp/os-release" DIRENV_CONFIG="$tmp/etc-direnv" doctor "$tmp/empty"
+check "a foreign direnv.toml is a warning" "warn  $tmp/etc-direnv/direnv\.toml exists and is not the harness one"
 printf 'ID=ubuntu\nPRETTY_NAME="Ubuntu 26.10"\n' >"$tmp/os-release"; touch "$tmp/wsl"
 OS_RELEASE="$tmp/os-release" WSL_MARKER="$tmp/wsl" doctor "$tmp/empty"
 check "wsl host line"           'host: WSL2 \(Ubuntu 26.10\) '
+
+# mkhl.direnv: a manual install in the WSL remote, so an info line there;
+# MISSING elsewhere, where bootstrap installs it.
+mkdir -p "$tmp/vbin"
+# shellcheck disable=SC2016  # the stub's own $1
+printf '#!/bin/sh\ncase "$1" in --version) echo 1.143.1 ;; --list-extensions) echo anthropic.claude-code ;; esac\n' >"$tmp/vbin/code"; chmod +x "$tmp/vbin/code"
+WSL_MARKER="$tmp/wsl" doctor "$tmp/empty" "$tmp/vbin"
+check "no mkhl.direnv on WSL is an info line" 'info  VS Code extension mkhl\.direnv not in the WSL remote'
+refute "no mkhl.direnv on WSL is not missing" 'MISSING VS Code extension mkhl\.direnv'
+doctor "$tmp/empty" "$tmp/vbin"
+check "no mkhl.direnv elsewhere is missing" 'MISSING VS Code extension mkhl\.direnv'
 
 out=$("$harness" --version 2>&1); rc=$?
 exits "--version" 0; check "--version prints the revision" '^harness .+'

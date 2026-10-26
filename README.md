@@ -15,9 +15,9 @@ Pick the route for your host:
 | Host | Route | Tested |
 | --- | --- | --- |
 | Fedora 44 or newer, Ubuntu, any other Linux, with or without Nix | `scripts/install.sh` ("Any Linux" below): Nix if missing, then `harness bootstrap` for the user side and `harness init` for each repo | Fedora 44 and Ubuntu 26.10 laptops, end to end through `harness check` (2026-10-22) |
-| NixOS, your own configuration | Your configuration provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv` and `programs.claude-code`, or `scripts/install.sh` adds this flake's packages to your profile: on NixOS it downloads nothing, writes nothing under `/etc` (it prints the `nix.settings` block when `nix.conf` lacks flakes or the devenv cache) and leaves home-manager's files alone, printing the option instead. Harness repos import `harness/devenv` as everywhere | NixOS 26.11 laptop, in daily use, this repo's own sessions included (2026-10-23); the install route only dry-run there |
+| NixOS, your own configuration | Your configuration provides direnv >= 2.38 (nixpkgs' since 2026-10-23), `devenv` and `programs.claude-code`, or `scripts/install.sh` adds this flake's packages to your profile: on NixOS it downloads nothing, writes nothing under `/etc` (it prints the `nix.settings` block when `nix.conf` lacks flakes or the devenv cache) and leaves home-manager's files alone, printing the option instead. Harness repos import `harness/devenv` as everywhere | NixOS 26.11 laptop, in daily use, this repo's own sessions included (2026-10-23); the install route only dry-run there |
 | NixOS or NixOS-WSL, managed | NixOS module and home module, `harness.enable = true` and nothing else: every rule everywhere, strict network allowlist (in the host flake: `modules = [ claude-nix-harness.nixosModules.harness ]`, `harness.enable = true;`, `security.allowUserNamespaces = true;`, which the module asserts) | module and its tests; the module evaluates in `nix flake check` (2026-10-23); live on the NixOS-WSL laptop from 2026-10-23 until it moved to the plain route (2026-10-24), no native NixOS host yet |
-| Windows 11, NixOS-WSL | A host repo installs NixOS-WSL ("Windows" below; `bilibo/nixos-wsl` is the reference one). The host is plain: only the sandbox prerequisites (user namespaces, bubblewrap and socat, flakes and the devenv cache, `allowUnfree`) plus tmux, and no `claude`. The harness starts at bootstrap: inside the distro, `nix run github:bilibo/claude-nix-harness#harness -- bootstrap` and `harness init <customer>/<repo>` per work repo, as on any NixOS. The managed modules (previous row; that repo's README, "Opting into the managed layer") are the stricter opt-in | Windows 11 Home 26H2, WSL 3.0.3 laptop: managed shape end to end through the installer's `verify.sh` (19 checks, 2026-10-23); plain shape evaluated (dry-run of both host outputs) and `verify.sh`'s unmanaged branch exercised, 2026-10-24; not yet switched in, bootstrap not yet run there. The installer moved to the host repo on 2026-10-24 |
+| Windows 11, NixOS-WSL | A host repo installs NixOS-WSL ("Windows" below; `bilibo/nixos-wsl` is the reference one). The host is "your own configuration" (row 2) with no `claude`: the sandbox prerequisites, direnv with this repo's `direnv.toml`, devenv, `harness` and `ccmux` from this flake, the tmux rules through home-manager. No `harness bootstrap`: `harness init <customer>/<repo>` per work repo, then `cd` and `ccmux`. The managed modules (previous row; that repo's README, "Opting into the managed layer") are the stricter opt-in | Windows 11 Home 26H2, WSL 3.0.3 laptop: managed shape end to end through the installer's `verify.sh` (19 checks, 2026-10-23); plain shape with the tools in the host configuration built (both outputs, 2026-10-26), not yet switched in. The installer moved to the host repo on 2026-10-24 |
 | Mixed host | NixOS module with `enforcementRoots = [ "~/code/git" ]`: managed rules under the roots, your own settings elsewhere | available, superseded by the first two rows |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
@@ -61,7 +61,7 @@ hooks/      env-guard.sh (the guard hook), center-guard.sh (spliced into it for 
 nixos/      NixOS module: harness.* -> /etc/claude-code
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates .claude/settings.json with deny rules, hooks and sandbox; `ccmux`
-pkgs/       ccmux launcher, direnv >= 2.38 override, claude-code override (alsa-lib as a RUNPATH instead of an `LD_LIBRARY_PATH` every command inherits), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
+pkgs/       ccmux launcher, direnv.toml and tmux.conf (the host-side settings), claude-code override (alsa-lib as a RUNPATH instead of an `LD_LIBRARY_PATH` every command inherits), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
 scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap`, then `harness init` on the checkout. No Windows installer: a NixOS-WSL host repo carries its own (bilibo/nixos-wsl's scripts/install-wsl.ps1)
 tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, RUNPATH, `--version`; unfree, so only when the evaluator allows it), check-parser-test.sh (`harness check --parse` against the transcripts in fixtures/)
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), project-devenv (a project's devenv.nix for non-Nix users), command-center (this checkout as the session that orchestrates the work repos), roadmap, changelog, sessions (tiers, proposals), suggestion (ideas with a shape, not planned)
@@ -108,19 +108,21 @@ leaves both commented out.
 ## Windows: NixOS-WSL
 
 This repo keeps no Windows installer (since 2026-10-24). A host repo
-installs NixOS-WSL and stays plain: NixOS-WSL and the sandbox
-prerequisites, no harness module. `bilibo/nixos-wsl` is the reference
-one; its README has the installer, its flags, updates and the managed
-opt-in.
+installs NixOS-WSL and stays plain: no harness module. `bilibo/nixos-wsl`
+is the reference one; its README has the installer, its flags, updates
+and the managed opt-in.
 
-Then, inside the distro, as yourself: `nix run
-github:bilibo/claude-nix-harness#harness -- bootstrap` (the NixOS path:
-nothing under `/etc`, the `nix.settings` block printed if it is missing),
-then `harness init <customer>/<repo>` for each work repo. Leave `~/.bashrc`
-to the user rather than home-manager: bootstrap skips a store-symlinked rc
-file and only prints the option. For rules everywhere, the managed layer is
-the opt-in: import this repo's NixOS and home modules as well
-(the host repo's README, "Opting into the managed layer").
+Since 2026-10-26 that host configuration carries the user side too, so
+there is no bootstrap: it takes this flake as an input for `harness`,
+`ccmux`, `pkgs/direnv.toml` (NixOS `programs.direnv.settings`) and
+`pkgs/tmux.conf` (home-manager `programs.tmux`), and sets
+`HARNESS_CODE_ROOT`. Inside the distro, `harness init <customer>/<repo>`
+for each work repo; entering it loads the shell. `harness doctor` accepts
+the system-level direnv config and hook. `~/.claude/settings.json` is left
+to Claude Code, so the strict network allowlist is a warning there, not
+a gap. For rules everywhere, the managed layer is the opt-in: import this
+repo's NixOS and home modules as well (the host repo's README, "Opting
+into the managed layer").
 
 The plain host carries tmux but deliberately no `claude`: Claude Code is
 the VS Code extension on Windows, which runs its bundled binary inside WSL
@@ -280,8 +282,8 @@ root-owned settings still apply. Only the owner can set it: the deny rules
 and the hook refuse an agent's edits to `devenv.nix`
 (`docs/project-devenv.md`, "Turning the guard rails off (and on)").
 The host needs direnv >= 2.38 for `require_allowed` in `.envrc` (the
-locked nixpkgs, 2026-10-14, ships 2.37.1; `pkgs/direnv.nix` is the
-override), `devenv` on PATH,
+locked nixpkgs, 2026-10-23, ships 2.38.2; the home module asserts the
+minimum), `devenv` on PATH,
 and `bubblewrap` and `socat` with user namespaces enabled for the sandbox
 (`failIfUnavailable` refuses to start a session without it). The home
 module below brings the first two; on an unmanaged host they come from

@@ -15,7 +15,7 @@
   allowManagedHooksOnly ? true,
   strictAllowlist ? true,
   extraKnownMarketplaces ? [ ],
-  direnvPackage ? import ../pkgs/direnv.nix { inherit pkgs; },
+  direnvPackage ? pkgs.direnv,
   # The JSON refers to its own hooks by this stable path, not by store path.
   managedDir ? "/etc/claude-code",
 }:

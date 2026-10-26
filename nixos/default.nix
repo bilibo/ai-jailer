@@ -123,8 +123,8 @@ in
 
     direnvPackage = lib.mkOption {
       type = lib.types.package;
-      default = import ../pkgs/direnv.nix { inherit pkgs; };
-      defaultText = lib.literalExpression "pkgs.direnv (>= 2.38, overridden while nixpkgs is older)";
+      default = pkgs.direnv;
+      defaultText = lib.literalExpression "pkgs.direnv";
       description = "direnv used by the env hook. Must match the user's direnv so `direnv allow` state is shared.";
     };
 
