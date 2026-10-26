@@ -9,9 +9,11 @@ for an agent.
 1. Open the repo folder in VS Code. direnv (`mkhl.direnv`) loads the devenv
    shell; the first time, or after `devenv.nix`/`devenv.yaml`/`devenv.lock`
    change, it asks you to allow. Allow from a terminal:
-   ```
+
+   ```md
    direnv allow
    ```
+
    The harness devenv module runs at that moment: it writes
    `.claude/settings.json` (store symlink: deny rules, hooks, sandbox,
    bypass mode off). On a host that carries the harness home module it also
@@ -20,12 +22,14 @@ for an agent.
    host runs on the repo file alone and stays quiet.
 2. Start a session in the project's tmux session. Inside the repo (any
    subdirectory or worktree) the project name is optional:
-   ```
+
+   ```md
    ccmux                                # first window
    ccmux --worktree                     # a session that will edit files
    ccmux -p "explain the module layout"
    ccmux <customer>/<repo> --worktree   # from anywhere else; a path works too
    ```
+
    `ccmux` creates or attaches the tmux session named `<customer>-<repo>` and
    opens one window per call. From inside tmux it switches to it; from the
    VS Code terminal it attaches. It resolves the project from the argument,
@@ -122,11 +126,13 @@ or for reading what the script wrote:
    it leaves both commented out; the `claude` line of its report says which
    way it went.
 3. `.envrc`:
-   ```
+
+   ```sh
    eval "$(devenv direnvrc)"
    use devenv
    require_allowed devenv.nix devenv.yaml devenv.lock
    ```
+
    Never `source_env`, `source_up`, or a `whitelist.prefix` in direnv.toml.
 4. `.gitignore`: `.devenv/`, `.direnv/`, `.claude/settings.json`,
    `.claude/settings.local.json`, `.claude/worktrees/`.
@@ -144,7 +150,7 @@ or for reading what the script wrote:
 ## 4. Host configuration
 
 | Host | Set |
-|---|---|
+| --- | --- |
 | Managed host (NixOS, NixOS-WSL) | NixOS module `harness.enable = true;` and home module `harness.enable = true;`, nothing else; everything strict, everywhere |
 | Unmanaged host | No harness modules (NixOS-WSL from the host repo's `install-wsl.ps1`, `bilibo/nixos-wsl`'s, is this shape since 2026-10-24). Your own config provides direnv >= 2.38 (`pkgs/direnv.nix`), `devenv`, `programs.claude-code`; harness repos import `harness/devenv` and bring their own rules. Sessions outside them keep whatever your own settings allow. `scripts/install.sh` installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing, Nix is the system's) and hands over to `harness bootstrap`, which adds direnv, devenv, ccmux and `harness` from this flake (`nix profile add`), writes the home module's direnv, tmux and PATH configuration as plain files (the direnv hook for bash, and zsh where there is a `~/.zshrc`), plus the user-scope `strictAllowlist` and `syncClaudeAiSkills`/`syncClaudeAiPlugins = false` (account-synced skills and plugins off, the default since 2026-10-24; `--account-sync` leaves them on), and offers the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl where an older Debian kernel does. On NixOS (2026-10-23) nothing under `/etc` is written: `nix.conf` is the system configuration's, so the `nix.settings` block is printed when it lacks flakes or the devenv cache, and a user file that is a store symlink (home-manager's) is left alone with the option that sets it printed; `root_write` refuses any store symlink on every host. It puts the devenv cache into the root-owned `nix.conf` rather than making you a trusted Nix user: a trusted user can hand the daemon any option, and agents run as you. `--trusted-user` opts in when a project needs per-repo caches. |
 | Mixed host | NixOS module with `enforcementRoots`, `sandboxStrictAllowlist = false`, `allowManagedHooksOnly = false`, `extraKnownMarketplaces` for your own plugins, `allowMemoryEdits = true` if Claude Code should keep its auto-memory. Managed rules under the roots, your own settings elsewhere. |
@@ -201,12 +207,14 @@ Windows (2026-10-24): the host repo carries the installer, not this repo;
 update and managed opt-in steps. The host is plain: NixOS-WSL plus the
 sandbox prerequisites, no harness module. The harness starts at `harness
 bootstrap`, as on any NixOS. Inside the distro, as yourself:
-```
+
+```nix
 nix run github:bilibo/claude-nix-harness#harness -- bootstrap
 # new terminal: PATH, HARNESS_CODE_ROOT and the direnv hook come from ~/.bashrc.d
 harness doctor                        # every line ok or info
 harness init <customer>/<repo>        # once per work repo
 ```
+
 The host carries tmux but deliberately no `claude`: the VS Code extension
 on Windows runs its bundled binary inside WSL over Remote-WSL (nix-ld runs
 it), which is enough for interactive use, and for tmux and `ccmux`
@@ -235,7 +243,8 @@ host set up before the `harness` CLI existed (by the old
 `scripts/bootstrap-fedora.sh`) has no `harness` on PATH: run install.sh
 once first, which adds it and writes the receipt. `<customer>/<repo>` is a
 throwaway repo under the code root:
-```
+
+```sh
 harness reset                                 # sudo; asks first; reads the receipt; leaves ~/code/git alone
 rm -rf ~/code/git/<customer>/<repo>           # the throwaway repo, so init starts clean
 scripts/install.sh                            # sudo: dnf, SELinux label, daemon socket; then harness bootstrap (nix.conf, profile, user files) and harness init on this checkout; the ref is this checkout
@@ -245,6 +254,7 @@ harness init <customer>/<repo>                # files, two allows, the settings 
 harness check ~/code/git/<customer>/<repo>    # fourteen -p sessions
 cd ~/code/git/<customer>/<repo> && ccmux            # interactive: trust dialog once, orange window when it waits
 ```
+
 In the command center (the harness checkout, `harness.role = "center"`)
 `harness check` runs only the seven cases the hook and deny rules hold
 (devenv-env, git-commit, cred-read, config-write, edit-envrc, nested-flags,
@@ -267,12 +277,14 @@ The 2026-10-20 run of this list on the Fedora laptop, with
 (SELinux label, CA bundle path) are in the script.
 
 Unit tests, no Claude Code needed, from a checkout of this repo:
-```
+
+```nix
 nix flake check                                     # every suite under tests/, in the Nix sandbox
 nix shell nixpkgs#jq -c tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh   # the installed hook, managed host
 nix shell nixpkgs#jq -c tests/hook-test.sh "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' <repo>/.claude/settings.json)"   # the repo's hook
 tests/ccmux-test.sh "$(command -v ccmux)"           # inside a repo shell, or after home-manager switch
 ```
+
 Inside a Claude Code session the sandbox masks shell startup files and
 `.gitmodules` in the working directory with device nodes, so Nix cannot
 read that directory as a git flake and a bare `nix flake check` there
@@ -290,7 +302,7 @@ stream-json transcript and on the files afterwards rather than on the
 model's prose, and keeps the transcripts for the exact refusal text. By
 hand:
 
-```
+```sh
 claude -p 'run: grep -i nonewprivs /proc/self/status'      # NoNewPrivs: 1 => sandboxed
 claude -p 'run: git commit -m x'                            # env-guard block
 claude -p 'run: cat ~/.azure/msal_token_cache.json'         # blocked
@@ -303,7 +315,7 @@ claude -p hi --debug-file /tmp/d.txt; grep env-guard /tmp/d.txt   # repo hooks r
 
 Managed hosts only:
 
-```
+```sh
 claude --plugin-dir /tmp/x -p hi                            # rejected at startup
 claude -p hi --debug-file /tmp/d.txt; grep -i allowManagedModsOnly /tmp/d.txt   # guard loaded
 ```
