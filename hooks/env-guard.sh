@@ -6,16 +6,18 @@
 #
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
 # ConfigChange (together with onFailure = "block" in the hook registration).
+# The trap needs set -E to fire inside functions, where the checks run.
+# An unset variable under set -u exits non-zero without the trap.
 # The same for the environment: the env-file preamble below discards what
 # `direnv export` says, so before every Bash command the hook checks that
 # the nearest .envrc can load (check_env) and refuses the command with the
-# reason when it cannot. Needs Claude Code >= 2.1.295. lib/hooks.nix puts jq, direnv, sed and
-# coreutils from the store first on PATH, so the guard never runs the
-# user's copies of them.
+# reason when it cannot. Needs Claude Code >= 2.1.295. lib/hooks.nix puts
+# jq, direnv, grep, sed, coreutils, diffutils and findutils from the store
+# first on PATH, so the guard never runs the user's copies of them.
 #
 # Every regex lives in a variable: bash word-splits an inline `=~` pattern
 # on spaces, so `[[ x =~ a b ]]` is a syntax error.
-set -uo pipefail
+set -Euo pipefail
 PATH="@path@:${PATH:-}"
 trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 
@@ -123,7 +125,8 @@ case "$event" in
     # Executed by Claude Code as a preamble before every Bash command, in that
     # command's cwd. Per-command evaluation is robust to EnterWorktree and to
     # devenv.nix edits; the find line cleans the .devenv/shell-*.sh files that
-    # every `devenv direnv-export` leaves behind (decision 7.3 in the brief).
+    # every `devenv direnv-export` leaves behind (decision 7.3 of a design
+    # brief not kept in this repo; changelog 2026-10-22 refers to it).
     # direnv and devenv by store path, resolved here outside the sandbox (the
     # user's devenv, the hook's direnv): with the read fence on,
     # `~/.nix-profile` (a symlink) is not mounted back into the sandbox, so
@@ -175,8 +178,9 @@ ENV
               "$HOME"/.claude/projects/*/memory/*) return 0 ;;
             esac
           fi
-          # The user's own Claude and Nix config, and every file that runs code
-          # at their next shell, git or tmux start, outside the sandbox.
+          # The user's own Claude and Nix config, and the files listed below
+          # that run code at their next shell, git or tmux start, outside the
+          # sandbox. The same list as userConfig in lib/deny-rules.nix; change both.
           case "$1" in
             "$HOME"/.claude/*|"$HOME"/.claude.json|"$HOME"/.config/*|"$HOME"/.ssh/*|\
             "$HOME"/.bashrc|"$HOME"/.bash_profile|"$HOME"/.bash_login|"$HOME"/.profile|\
@@ -243,7 +247,7 @@ ENV
         # 3. credentials (universal)
         re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +sp +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
         [[ "$n" =~ $re ]] && deny "credential operation blocked"
-        # A secret path anywhere blocks, unless the whole command is one simple
+        # A path matching cred_files anywhere blocks, unless the whole command is one simple
         # command whose verb cannot show content: one line (the normaliser
         # folds newlines, so the raw command is checked), no pipe, no `$(`,
         # backtick or `>(` substitution, no input redirection, and none of
@@ -267,11 +271,14 @@ ENV
         [[ "$n" =~ $re ]] && deny "system change blocked"
         re="$b(powershell|pwsh|cmd)(\.exe)?( |$)|$b[^ ]*\.exe( |$)|/mnt/c/"
         [[ "$n" =~ $re ]] && deny "Windows executable blocked"
-        # Shell-side writes to the files the Edit tool may not touch (project rule).
+        # Shell-side writes to the project setup files the Edit tool refuses
+        # (project rule). The user-config files the Edit check refuses are not
+        # matched here; in a work repo the sandbox's write confinement covers them.
         if [ "$in_scope" = 1 ]; then
         config_files='(devenv\.(nix|yaml|lock|local)|\.envrc|\.claude/|\.claude-plugin|\.git/hooks|\.git/config|\.config/nix|\.config/direnv)'
-        # `2>/dev/null`, `>&2` and friends write no file; every `>` left after
-        # dropping them does (`1>`, `2>`, `&>`, `>>` included).
+        # `2>/dev/null`, `>&2` and friends write no file, so they are dropped;
+        # every `>` left counts as a write (`1>`, `2>`, `&>`, `>>` included).
+        # Only `>/dev/null` with no space is dropped: `> /dev/null` counts.
         w=$(printf '%s' "$n" | sed -E 's#[0-9]*>&[0-9]+##g; s#[0-9]*>/dev/null##g')
         writers="(&?>|$b(tee|mv|cp|rm|ln|install|truncate|chmod|chattr|patch|dd)$e|sed +-[a-z]*i|perl +-[a-z]*i)"
         if [[ "$n" =~ $config_files ]] && [[ "$w" =~ $writers ]]; then
@@ -286,7 +293,8 @@ ENV
         [[ "$n" =~ $re ]] && deny "plugin sideload blocked"
 
         # 6. nested sessions that would skip the repo's rules (project rule;
-        # for `ccmux` universal: it only launches into the code root).
+        # for `ccmux` universal: it launches into the code root, or into
+        # HARNESS_PROJECT_DIR for a harness clone elsewhere).
         # Without managed settings the repo file is the only rule source, and
         # these flags replace or bypass it for the child session (`--bare`
         # skips every hook); `--add-dir` widens the child's working
@@ -303,7 +311,7 @@ ENV
         [[ "${q,,}" =~ $re ]] && deny "claude launch flag blocked"
 
         # 7. the environment the command is about to run in must load
-        # (universal; the env-file preamble below is fail-open on its own).
+        # (universal; the env-file preamble above is fail-open on its own).
         check_env "$cwd"
         exit 0 ;;
     esac

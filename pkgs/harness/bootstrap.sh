@@ -128,7 +128,7 @@ done
 CODE_ROOT="${CODE_ROOT%/}"
 
 # The marker text predates the harness CLI; it stays so that blocks written by
-# earlier versions are still found (scripts/install.sh writes the same one).
+# earlier versions are still found.
 MARK_BEGIN="# --- claude-nix-harness (scripts/bootstrap-fedora.sh) ---"
 MARK_END="# --- end claude-nix-harness ---"
 DEVENV_CACHE="https://devenv.cachix.org"

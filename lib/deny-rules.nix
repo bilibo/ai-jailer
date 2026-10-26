@@ -23,9 +23,9 @@
   # The command center's checkout (`harness.role = "center"`,
   # docs/command-center.md), or null. It sets up and changes other repos,
   # so their setup files (`centerOpen` below) are refused in its own root
-  # only, by absolute path: `//` and the path (`Read(//absolute)`,
-  # docs/handoff-tiers.md; a single leading `/` is project-relative). The
-  # rest of `projectConfig` stays `**/`: refused in every repo.
+  # only, by absolute path: `//` and the path (`Read(//absolute)`, Claude
+  # Code permissions docs, checked 2026-10-18; a single leading `/` is
+  # project-relative). The rest of `projectConfig` stays `**/`: refused in every repo.
   centerRoot ? null,
 }:
 assert lib.assertMsg (
@@ -140,13 +140,17 @@ let
 
   # Files that run code at the user's next shell, git or tmux start, outside
   # the sandbox. `~/.config/**` matches the sandbox's denyWrite of ~/.config.
+  # The same list as the hook's user-config case (hooks/env-guard.sh,
+  # check_edit); change both.
   userConfig = claudeHome ++ [
     "Edit(~/.bashrc)"
     "Edit(~/.bash_profile)"
+    "Edit(~/.bash_login)"
     "Edit(~/.profile)"
     "Edit(~/.zshrc)"
     "Edit(~/.zprofile)"
     "Edit(~/.zshenv)"
+    "Edit(~/.zlogin)"
     "Edit(~/.gitconfig)"
     "Edit(~/.tmux.conf)"
     "Edit(~/.ssh/**)"

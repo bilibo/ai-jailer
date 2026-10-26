@@ -47,7 +47,7 @@ view across sessions. The deny rules and the mod policy do not cover
 messaging at all; a repo cannot isolate its session from its peers, and the
 README says so under what a repo cannot enforce.
 
-## 3. Tiers (handoff phase 2), realised as roles
+## 3. Tiers, realised as roles
 
 Planned on 2026-10-20 as two tiers, customer and platform, chosen by
 `ccmux` from the directory and exported as `HARNESS_TIER`. Realised on
@@ -66,12 +66,12 @@ words.
 The role is the repo owner's line in `devenv.nix`, which the deny rules
 and the hook refuse to a session and `require_allowed` flags at the next
 `cd`, so no session can make its own repo a center; `harness init`
-refuses a work repo that sets `center`. The configured platform roots
+warns about a work repo that sets `center`. The configured platform roots
 (a home module option, or a bootstrap `HARNESS_PLATFORM_ROOTS`) were
 never built: on an unmanaged host the repo file is the only rule source,
 and the line in `devenv.nix` is the whole decision, as `harness.enable =
-false` is. `~/nixos-config` has no harness shell and no role (handoff
-phase 2 has what is open). The center session is not "allowed to act for
+false` is. `~/nixos-config` has no harness shell and no role (roadmap
+item 9 has what is open). The center session is not "allowed to act for
 peers"; it may edit harness source because that is its directory, and the
 permission prompt in it is the gate. It must not run in a bypass mode;
 its generated settings set `disableBypassPermissionsMode` like a work

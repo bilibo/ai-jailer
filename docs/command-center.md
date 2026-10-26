@@ -22,7 +22,7 @@ locked repo.
 ## 1. The role
 
 `harness.role` in a repo's `devenv.nix`: `work` by default, `center` in
-this checkout (`harness init` refuses a work repo that sets it).
+this checkout (`harness init` warns about a work repo that sets it).
 
 | | `work` (default) | `center` |
 |---|---|---|
@@ -59,8 +59,8 @@ Try an edit first on a copy (CLAUDE.md) or in a `path:` test repo.
 ## 3. Starting it, and what asks first
 
 ```
-ccmux bilibo/claude-nix-harness                     # tmux session bilibo-claude-nix-harness
-cd ~/code/git/bilibo/claude-nix-harness && claude   # without tmux; work sessions still open in tmux
+cd <checkout> && ccmux    # wherever you cloned it; the devenv shell names the project
+cd <checkout> && claude   # without tmux; work sessions still open in tmux
 ```
 
 - **Bash asks** for every command no allow rule matches (a `-p` session
@@ -154,7 +154,9 @@ picked up once (a hostile README, a crafted diff, a peer's message) can
 steer later ones. The carve-out matches any project's slug (`:175`,
 roadmap 2.9), so a session here can write a work repo's memory; Claude
 Code asks first: refuse it. Read what is stored:
-`ls ~/.claude/projects/-home-raulk-code-git-bilibo-claude-nix-harness/memory/`.
+`ls ~/.claude/projects/<slug>/memory/`, where `<slug>` is the checkout's
+absolute path with each `/` turned into `-` (`/home/u/src/claude-nix-harness`
+gives `-home-u-src-claude-nix-harness`).
 
 ## 8. Setting it up
 

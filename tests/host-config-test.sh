@@ -2,7 +2,7 @@
 #   host-config-test.sh <direnv.toml> <tmux.conf>
 #
 # The two host settings files pkgs/ ships: the home module reads them on a
-# managed host and install.sh copies them on a bootstrapped one, so the
+# managed host and harness bootstrap writes them on a bootstrapped one, so the
 # settings the sandbox and ccmux rely on are asserted here once.
 set -uo pipefail
 toml="${1:?usage: host-config-test.sh <direnv.toml> <tmux.conf>}"

@@ -132,9 +132,8 @@ or for reading what the script wrote:
    `.claude/settings.local.json`, `.claude/worktrees/`.
    `.worktreeinclude`: `.claude/settings.json`, so a `--worktree` session
    starts with the repo's rules before devenv regenerates them there.
-5. `CLAUDE.md`: the environment contract (copy the block from
-   `azfn-rust-handler`, the repo the harness was verified against) plus
-   project notes.
+5. `CLAUDE.md`: the environment contract (the block `harness init`
+   writes; run `harness init --dry-run` to see it named) plus project notes.
 6. No `.claude/skills/<x>/.claude-plugin/plugin.json` anywhere. A directory
    with that manifest is a plugin.
 7. `direnv allow`, twice in a new repo (the first load creates
@@ -198,19 +197,10 @@ config, tmux rules, `ccmux`, `programs.claude-code`. It never carries deny
 rules.
 
 Windows (2026-10-24): the host repo carries the installer, not this repo;
-the harness starts at `harness bootstrap`, as on any NixOS. `bilibo/nixos-wsl`
-is the reference host repo: clone it on Windows 11 (`git clone
-https://github.com/bilibo/nixos-wsl.git C:\code\nixos-wsl`), then from the
-checkout `powershell -NoProfile -ExecutionPolicy Bypass -File
-.\scripts\install-wsl.ps1` installs NixOS-WSL (the latest release, checksum
-verified), puts the host repo at `/etc/nixos` as a git checkout owned by the
-default user (a clone of the checkout's `origin`, else a copy of the
-folder; `-HostRepo <git URL or folder>` overrides) and switches to
-`nixosConfigurations.<name>` (`-Output`, default `nixos-wsl`). The host is
-plain: `examples/nixos-wsl-plain.nix` is its shape, NixOS-WSL plus the four
-sandbox prerequisites (`security.allowUserNamespaces`, bubblewrap and
-socat, flakes and the devenv cache in `nix.settings`, `allowUnfree`) and no
-harness module. Then, inside the distro, as yourself:
+`bilibo/nixos-wsl` is the reference one, and its README has the install,
+update and managed opt-in steps. The host is plain: NixOS-WSL plus the
+sandbox prerequisites, no harness module. The harness starts at `harness
+bootstrap`, as on any NixOS. Inside the distro, as yourself:
 ```
 nix run github:bilibo/claude-nix-harness#harness -- bootstrap
 # new terminal: PATH, HARNESS_CODE_ROOT and the direnv hook come from ~/.bashrc.d
@@ -225,20 +215,8 @@ sessions a work repo brings its own CLI `claude` (and tmux) through
 host `claude`. `harness doctor` reports the absence as an `info` line, not
 a failure; a missing tmux is a warning, since ccmux carries its own. Keep
 home-manager off `~/.bashrc` on such a host: bootstrap skips a
-store-symlinked rc file and only prints the option. Running the script
-again is the update: `git pull --ff-only` and switch, never a commit on the
-box, and a dirty `/etc/nixos` stops it. `-NoSwitch` builds and prints the
-two activation commands for a host where you switch by hand. The
-`.wslconfig` comes from the host repo's `windows/wslconfig` and applies on
-the `wsl --shutdown` the script does; after any `wsl.*` option change, run
-`wsl -t <distro>` from Windows. The host repo's `scripts/wsl/verify.sh`
-prints what the host should look like afterwards: on a plain host it skips
-the managed-layer checks with one line, checks tmux, and reports direnv,
-devenv, ccmux and claude without failing on them. Inside the distro the
-update is `sudo sh /etc/nixos/scripts/wsl/update.sh <name>`, since the host
-repo is `/etc/nixos`. The managed
-layer stays available: `harness reset` first, then import both harness
-modules as well (`examples/nixos-wsl-host.nix`).
+store-symlinked rc file and only prints the option. To switch to the
+managed layer later, run `harness reset` first.
 
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
@@ -251,8 +229,8 @@ From zero on an unmanaged Fedora host, end to end, repeatable. `harness
 reset` reverses what the receipt lists, the Fedora nix packages included
 when install.sh put them there, so the sequence starts from a Fedora with
 only VS Code, Claude Code and this checkout on it (a reinstall of Fedora is
-the same list minus the first line). Without a receipt, reset leaves Nix
-installed with its daemon socket off, and install.sh turns it back on. A
+the same list minus the first line). Without a receipt, reset does nothing
+("nothing recorded, nothing to reset"). A
 host set up before the `harness` CLI existed (by the old
 `scripts/bootstrap-fedora.sh`) has no `harness` on PATH: run install.sh
 once first, which adds it and writes the receipt. `<customer>/<repo>` is a
@@ -371,10 +349,10 @@ which is the dangerous direction.
 - direnv: `pkgs/direnv.nix` overrides to 2.38.2 while nixpkgs is older. The
   locked nixpkgs (2026-10-14) ships 2.37.1, so the override is in use. At
   the next `nix flake update nixpkgs`, check `nix eval nixpkgs#direnv.version`;
-  at 2.38 or newer delete the file and point the one remaining
-  unconditional import (`lib/managed-tree.nix` default) at `pkgs.direnv`;
-  the NixOS, home and devenv modules and the flake's packages already fall
-  back on their own.
+  at 2.38 or newer the file already falls through to `pkgs.direnv`. To
+  remove it, replace every import of it with `pkgs.direnv` (five:
+  `flake.nix`, `nixos/default.nix`, `home/default.nix`, `devenv/devenv.nix`,
+  `lib/managed-tree.nix`), then delete the file.
 - Host tools on an unmanaged host: `harness upgrade`
   after a `nix flake update` or a move of the checkout re-adds direnv,
   devenv and ccmux from the current lock, then hands the user steps to the
@@ -494,7 +472,7 @@ which is the dangerous direction.
   skills and plugins (the bootstrap turns those off in user scope).
 
 Sandbox limits, checked against the sandboxing docs and live on 2026-10-20.
-The README's "Lockdown level today" table summarises them; the roadmap's
+The README's "Lockdown level" table summarises them; the roadmap's
 "sandbox hardening" entry closes them in order:
 
 - The tmux server runs outside the sandbox and its socket is reachable

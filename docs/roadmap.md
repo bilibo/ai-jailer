@@ -1,144 +1,13 @@
 # Roadmap
 
 What exists, what is next, and ideas that are not committed to. Dated
-history is in `docs/changelog.md`; the tier, read-fence, customer-module
-and launcher-subcommand work is phased in `docs/handoff-tiers.md`.
+history is in `docs/changelog.md`.
 
 ## Done
 
-- NixOS module: managed settings, hook, sandbox, mod policy, directory
-  scoping, per-host options.
-- home-manager module: direnv, tmux, `ccmux`.
-- `harness.role` (work | center) and the pinned command-center import,
-  2026-10-24; `harness.enable` as the per-repo off switch, the same day.
-- devenv module: generated project settings, host check.
-- One settings body for the managed and the repo copy; the repo file
-  carries deny rules, every hook and the sandbox, so an unmanaged host runs
-  on it alone. The hook blocks `settings.local.json` changes and nested
-  `claude` and `ccmux` launch flags.
-- Tests in `nix flake check`: hook unit tests (154 cases, 180 with
-  enforcement roots), the generated repo settings file (15 checks), ccmux
-  resolution under both names.
-- Own repo with a `flake.nix` exporting the modules, `lib`, the managed
-  trees, `packages.direnv` and `packages.devenv` for an unmanaged host, and
-  the tests as `checks`.
-- Unmanaged Fedora host (2026-10-20): `scripts/bootstrap-fedora.sh` with
-  `--check`, `--upgrade` and `--reset`; `scripts/init-repo.sh` (runbook
-  section 3); `scripts/live-check.sh` (section 5's live cases). The
-  from-zero sequence in runbook section 5 passed end to end on the Fedora
-  laptop: first time a real session ran on the repo file alone.
-- Host prerequisites settled: direnv 2.38 (override until nixpkgs ships
-  it), Nix multi-user without `trusted-users` (the devenv cache goes into
-  the root-owned `nix.conf` instead; `--trusted-user` opts in).
-- Account connectors off in harness repos (`disableClaudeAiConnectors`
-  from the repo file, `harness.allowConnectors` per repo), 2026-10-20.
-- Sandbox hardening, the first three items of the 2026-10-20 audit
-  (2026-10-21): the bootstrap writes `sandbox.network.strictAllowlist =
-  true` into the user-scope `~/.claude/settings.json` (and
-  `syncClaudeAiSkills` and `syncClaudeAiPlugins = false`, the default since
-  2026-10-24; `--account-sync` leaves them out); the repo
-  file lists its own settings, hooks, skills, plugin manifest and `.git`
-  hooks and config as literal `denyWrite` paths under `config.devenv.root`,
-  which Linux honours; `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1"` strips
-  credential-shaped variables from every subprocess and the GitHub tokens
-  the scrub keeps are `deny` entries. `project-settings-test` 18 checks;
-  `live-check` cases 11 (repo write) and 12 (env scrub) written, not yet
-  run.
-- One CLI instead of three scripts (2026-10-21): `harness` (`pkgs/harness.nix`)
-  with `bootstrap`, `upgrade`, `doctor`, `init`, `check`, `reset` and shared
-  `--dry-run`, `--yes`, `--verbose`; the script bodies under `pkgs/harness/`,
-  shellchecked at build time; `scripts/install.sh` does the root steps
-  `nix run` needs and hands over to `harness bootstrap`; a receipt at
-  `~/.local/state/claude-nix-harness/receipt.json` drives `reset` and
-  `upgrade`; `harness doctor` and `harness init --dry-run` run in
-  `nix flake check`.
-- Install route for any Linux without Nix (2026-10-19): root `install.sh`
-  (nix-installer, profile packages, rc lines, direnv and tmux files), tested
-  with every command stubbed (`install-test`, `host-config-test`); not yet
-  run on a real distro. Overlaps with `scripts/install.sh` + `harness
-  bootstrap`; one of the two goes.
-- Secret paths in the hook, path-first (2026-10-21): a command naming a
-  secret file is refused unless it is one harmless verb with no pipe,
-  substitution or input redirection; the reader-verb list is gone.
-  `devenv.local.nix` and `devenv.local.yaml` in `repoProtected`, so the
-  file devenv auto-imports without any re-approval cannot be created from
-  the sandbox. Bootstrap appends `pkgs/direnv.toml` and `pkgs/tmux.conf`
-  instead of its own copies; `reset` without a receipt leaves Nix alone;
-  `scripts/install.sh` does dnf, the SELinux label and the daemon socket
-  (what `nix run` needs) and hands the rest to `harness bootstrap`; `ccode`
-  is gone.
-- Read fence prototype (2026-10-21): `harness.readFence` (off by default)
-  hides the rest of `$HOME` from sandboxed commands; the hook's env preamble
-  puts direnv and devenv on PATH by store path because `~/.nix-profile`, a
-  symlink, is not mounted back into a fenced sandbox. Live in the test repo:
-  devenv shell loads, `~/.bashrc` and the VS Code settings unreadable,
-  `~/.claude` present for the shell snapshot. `project-settings-fenced-test`
-  (21 checks).
-- Root `CLAUDE.md` (2026-10-21), under 30 lines: which document owns what,
-  the handoff's standing rules, the closed-decision rule, how a session runs
-  the checks. First `harness doctor` and `harness init --dry-run` against
-  the checkout: init leaves `devenv.yaml`, `devenv.nix` and `.envrc` alone
-  and would add three `.gitignore` lines that `.claude/` already covers;
-  doctor's repo report and VS Code lines were false from inside a session
-  (the sandbox masks `.claude/settings.json` as a character device, and the
-  host's `code` dies on the shell's `LD_LIBRARY_PATH`), now reported as
-  such (`harness-doctor-test` 27 checks). `harness check` against the
-  checkout still has not run: it needs a terminal, not a session.
-- One install route (2026-10-21): `scripts/install.sh` + `harness
-  bootstrap` survives; the root `install.sh` is gone and what only it did
-  moved over. The script: the nix-installer where Fedora's packages are
-  not there (before `nix run` exists), the checkout as the default ref,
-  `harness init` on the checkout at the end (the old shell build and
-  self-check). bootstrap: no Fedora-only preflight, the user-namespace
-  sysctl offered on its own and declinable, the direnv hook in a
-  `~/.bashrc` that does not source `~/.bashrc.d` and in `~/.zshrc`, the
-  tmux block in the file tmux reads (`~/.tmux.conf` when it exists),
-  flakes in `nix.conf` where the installer left them off; `reset` undoes
-  the sysctl and runs the installer's uninstaller. `install-test` rewritten
-  for the script (both routes, 44 checks), `harness-bootstrap-test` new
-  (94 checks: rc-file layouts, nix.conf, the sysctl, idempotency, reset). Run on nothing but the stubs so far; the runbook's
-  fresh-distro list (section 5) is the verification, on Ubuntu 24.04.
-- Audit fixes (2026-10-21, staged; in once committed): two whole-repo
-  audits (Opus, then Fable), every hook claim re-run against the built
-  hook, worked by three sessions the same evening (changelog). The hook
-  refuses working-tree discards and force-moves (`checkout .`/`-f`,
-  `switch -f`/`-C`, `checkout -B`, `branch -f`, `tag -f`, `worktree
-  remove -f`), checks edits on the link target as well as the name, and
-  covers `~/.bashrc.d`, `~/.local/bin` and every `file -f` spelling;
-  `~/.aws`, `~/.config/gh` and `~/.git-credentials` are hidden by every
-  layer. `harness init` asks before loading repo files it did not write;
-  `harness upgrade` builds before it removes; the no-receipt `reset`
-  branch, the profile-ccmux ref fallback and `lib/project-settings.nix`
-  are gone; the direnv version check lives in `pkgs/direnv.nix` only.
-  hook-test 241 cases, project-settings-test 22 (23 fenced),
-  harness-bootstrap-test 101, harness-init-test 24; `nix flake check`
-  green on the combined tree.
-- The 2026-10-23 brief, all seven items (changelog): `harness init` runs
-  the settings test with the real repo path; NixOS and WSL detection in
-  install, bootstrap and doctor with the store-symlink guard on
-  `root_write`; `nh` and `--add-dir` denied; the hook refuses a Bash
-  command whose `.envrc` cannot load (`check_env`); `harness check`
-  verdicts from tool results only, with `--parse`; the AppArmor bwrap
-  profile instead of the sysctl on Ubuntu; the NixOS module evaluated in
-  `nix flake check` with `examples/nixos-host.nix`. Every piece has a
-  check; the AppArmor and WSL pieces are stub-tested only until the Ubuntu
-  laptop and a WSL host run them.
-- First live `harness check` (2026-10-22, Ubuntu, 9 of 12): `devenv.local.*`
-  out of the literal `denyWrite` list so the devenv shell can load inside
-  the sandbox (unverified until the next run); the environment scrub gone
-  for good, a repo file's copy is ignored and a user-scope copy turns the
-  sandbox's Bash auto-allow off; case 11 reads the sandbox's mask as the
-  refusal it is; a `-p` permission refusal counts as inconclusive and
-  every case keeps its debug log (changelog).
-- The Windows route (2026-10-23): `scripts/install-wsl.ps1` provisions
-  NixOS-WSL from the latest release and makes it a managed host from your
-  nixos-config flake; `scripts/wsl/{bootstrap,update,verify}.sh` do the
-  work inside the distro, pull-only after the first install;
-  `examples/nixos-wsl-host.nix` is the host file. First live managed host:
-  NixOS-WSL on a Windows 11 Home laptop (changelog). 2026-10-24: the
-  installer and `scripts/wsl/` moved to the host repo (`bilibo/nixos-wsl`,
-  `scripts/install-wsl.ps1`), which provisions itself; this repo keeps no
-  Windows installer and starts at `harness bootstrap` (changelog).
+What exists is in the README (the host and lockdown tables); when and why
+it changed is in `docs/changelog.md`. The itemised list that stood here
+until 2026-10-26 is in git: `git show 8e38390:docs/roadmap.md`.
 
 ## Target flow (2026-10-21)
 
@@ -204,11 +73,11 @@ The gaps, in order:
   (`allow_unfree: true`); the `direnv allow` prompt after every change
   and why (`require_allowed`); and the agent's side: it proposes the
   diff, the human applies it. The template gains one commented line per
-  case pointing at the guide. Phase 3's `lang` option (handoff) shortens
+  case pointing at the guide. The customer module's `lang` option (item 9) shortens
   it later; the guide comes first. Since 2026-10-21 the template lists
   every harness option commented out; the guide is still to write.
 - D. **Command center as a tier**: realised 2026-10-24 as `harness.role`
-  (handoff phase 2, `docs/sessions.md` section 3). `center` is this
+  (`docs/sessions.md` section 3). `center` is this
   checkout: the same deny rules and hook as a work repo, no sandbox, Bash
   prompted, memory on, `HARNESS_ROLE=center` carried by `ccmux`. `work`
   is everywhere else. The checkout imports the module pinned from GitHub,
@@ -267,15 +136,11 @@ The gaps, in order:
       preamble got devenv a writable runtime directory (changelog), and
       `harness check` passed 12 of 12: case 2 the devenv shell inside the
       sandbox, case 12 the two GitHub tokens.
-   10. Review and commit the staged set (2026-10-24): the 2026-10-23 WSL
-       route (9 files) and the home-module change that stops home-manager
-       writing `~/.claude/settings.json` (changelog 2026-10-24). Then
-       switch the WSL host to a harness revision that has it (the update
-       in runbook section 4 once the host flake's `harness` input points
-       there; `--override-input harness path:<checkout>` for a trial
-       build) and confirm `/model` in a session writes a plain
-       `~/.claude/settings.json`. The host repo's `check-access.sh` case
-       "HM settings.json is a store symlink" inverts with it.
+   10. Confirm on the WSL host that `/model` in a session writes a plain
+       `~/.claude/settings.json` after `harness bootstrap`. The staged set
+       this item first named was committed (9197010), the WSL route then
+       moved to `bilibo/nixos-wsl` (8e38390), its flake has no `harness`
+       input, and its `check-access.sh` already checks for a plain file.
    Not planned: `~/.kube/config` and `~/.docker/config.json` the same way
    as `~/.aws`, until a harness host holds them.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
@@ -303,7 +168,7 @@ The gaps, in order:
    2. `permissions.blockReadsOutsideWorkingDirectories = true` last. Any
       scope, `true` wins; it stops the Read tool outside the working
       directories, which also stops a session in the test repo reading the
-      harness checkout. Decide per tier (handoff phase 2).
+      harness checkout. Decide per role; the center must not set it.
    3. Keyring agent sockets: `denyRead` for `/run/user/*/gcr` and
       `/run/user/*/keyring` next to the `/run/WSL` entry. Every unix socket
       is reachable and the gcr address is guessable; `ssh-add -l` against it
@@ -361,10 +226,7 @@ The gaps, in order:
       (Read-only file system)`, the directory absent); under `ccmux` the
       client takes the path from `$TMUX`, and a socket on the read-only
       `/run/user` mount answers (the gcr case, 2026-10-21). `ccmux` from
-      a command-center session uses this path by design, and hook rule 6
-      matches `claude`, not `ccmux`: `ccmux <c>/<r> --setting-sources
-      user` or `--bare` passes and starts a session with none of the
-      repo's rules. Since 2026-10-24 the command center runs without the
+      a command-center session uses this path by design. Since 2026-10-24 the command center runs without the
       sandbox (`harness.role = "center"`), so it has nothing to escape and
       is out of this item's scope, and its `ccmux` launches cross no
       sandbox boundary. The item stays open for work repos, and the
@@ -383,8 +245,7 @@ The gaps, in order:
          `run-shell`, `new-window`, `split-window`, `new-session`,
          `respawn-*`, `pipe-pane`, `if-shell`, `source-file`, `set-hook`,
          `bind-key`, `display-popup`, `display-menu`, `command-prompt`,
-         `confirm-before`, `set-option default-command`). Rule 6 becomes
-         `(claude|ccmux)`. Keeps `ccmux`; text only, so a script or
+         `confirm-before`, `set-option default-command`). Keeps `ccmux`; text only, so a script or
          `python` on the socket still gets through.
       b. Private socket: `ccmux` runs tmux with `-S` under a directory the
          repo file can `denyRead` without knowing the uid
@@ -402,7 +263,7 @@ The gaps, in order:
          brings its own sockets into `/run/user/<uid>`
          (`vscode-ipc-*.sock`, seen 2026-10-24). Not on its own.
       First (a), with hook-test cases: one regex and its tests, `ccmux`
-      keeps working, and it closes the flag hole that (b) leaves. Then
+      keeps working. Then
       (b) together with 2.3 (the same mechanism, a socket directory in
       `denyRead`). `tmux-notify.sh` must keep working: it runs as a hook,
       outside the sandbox, needs `$TMUX` and `$TMUX_PANE` in claude's
@@ -434,7 +295,7 @@ The gaps, in order:
 5. **Reader-only service principal per customer.** The one control that
    holds against every client, including things the hook never sees. Human
    logs it into the repo's `AZURE_CONFIG_DIR`.
-6. **Limits suite**: `scripts/live-check.sh` is the first cut. Still to do:
+6. **Limits suite**: `harness check` (`pkgs/harness/check.sh`) is the first cut. Still to do:
    a throwaway repo (`harness init` into a temporary code root), the cases
    from item 2, the `.devenv/shell-*.sh` litter count over 50 commands,
    `harness doctor --full` running it.
@@ -451,7 +312,9 @@ The gaps, in order:
    (`examples/nixos-wsl-plain.nix`, the sandbox prerequisites and nothing
    from the harness), the harness comes afterwards as the user, and the
    managed base config stays as the stricter opt-in
-   (`examples/nixos-wsl-host.nix`). What remains here is the native NixOS
+   (`examples/nixos-wsl-host.nix`). 2026-10-26: `examples/` removed; the
+   WSL shapes live in `bilibo/nixos-wsl`, and the README's managed-host
+   row carries the import lines. What remains here is the native NixOS
    managed host, when someone wants one.
 8. **Broker mod: dropped 2026-10-24.** A mod is a hooks module the engine
    loads into every session on the machine, outside the Bash sandbox, and
@@ -471,6 +334,42 @@ The gaps, in order:
    stays the proposal flow (`docs/sessions.md` section 4) plus `ccmux`; a
    proposal record or a structural gate comes back only through a new
    dated entry here.
+
+9. **Left open by the tier handoff** (`docs/handoff-tiers.md`, removed
+   2026-10-26; the full phases: `git show 8e38390:docs/handoff-tiers.md`).
+   - `harness doctor` reports `HARNESS_CODE_ROOT`, `HARNESS_PROJECT` and
+     the cwd's `HARNESS_ROLE`; the runbook's verification section starts
+     with it.
+   - A center on a managed host: a managed `sandbox.enabled = true` wins
+     over the repo file, so `center` turns nothing off there. Undecided
+     whether a managed host has a center at all.
+   - Platform roots without a harness devenv (`~/nixos-config`): no role,
+     no generated file; the planned `ccmux --settings` route was not built.
+   - Customer module (`imports: - harness/devenv/customer`, with items 3
+     to 5): `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `CUSTOMER_NAME`;
+     `AZURE_CONFIG_DIR` per actor under `.git/devenv-base/`; a human-only
+     `az-login` script; an `enterShell` tenant check; a hook branch that
+     refuses `az`, `terraform apply|destroy` and `pulumi up` on a tenant or
+     subscription mismatch; `allowWrite` and `lang` options.
+   - `harness init` additions: a customer registry
+     (`~/code/git/<customer>/customer.toml`), the customer block in
+     `devenv.nix`, `README.md` and `.editorconfig`, the first commit, the
+     template version in `devenv.yaml`, and `harness upgrade` showing the
+     diff.
+   - Limits-suite cases for item 6: nested `claude --add-dir ..`, `nh os
+     switch`, `nixos-rebuild switch`, `home-manager switch`, reads of a
+     sibling customer file, outside the code root and of another project's
+     `~/.claude/projects/`, `terraform apply` with `allowWrite = false` and
+     with a mismatched subscription, a write to `~/.claude/settings.json`,
+     `/mnt/c` and `/run/WSL` on WSL, `git push`.
+   - Decisions for the owner: whether the work host carries the
+     working-style rule from nixos-config; platform-tier cloud tools (`az`,
+     `azd`, `terraform` into a devenv, or a PATH filter); whether
+     `~/nixos-config` sessions may commit; where the doc-quality skills
+     live for customer repos (since 2026-10-24 the harness ships no
+     plugins); what `allowWrite = true` means against the unconditional
+     apply/destroy deny; pointing `azfn-rust-handler/devenv.yaml` at this
+     repo.
 
 ## Open questions
 
@@ -510,8 +409,7 @@ The gaps, in order:
   LD_LIBRARY_PATH : <alsa-lib>/lib`), inherited by every hook and Bash
   command. Closed the same day: `pkgs/claude-code.nix` drops the wrapper
   line and puts alsa-lib on the binary's RUNPATH; the home module,
-  `packages.claude-code` and (once the human applies the diff) the
-  devenv module use it; `claude-code-test` checks it (changelog). Not the
+  `packages.claude-code` and the devenv module use it; `claude-code-test` checks it (changelog). Not the
   hook preamble: that would have covered the Bash tool only.
 
 ## Ideas, not planned

@@ -182,7 +182,7 @@ block 'run0 ls'
 block 'nix profile install nixpkgs#hello'
 block 'nix-env -iA nixpkgs.hello'
 block 'nixos-rebuild switch'
-block 'nixos-rebuild build'               # denied as a whole, build included (handoff phase 1)
+block 'nixos-rebuild build'               # denied as a whole, build included (the owner's call, 2026-10-23)
 block 'home-manager switch'
 block 'nh os switch'
 block 'nh os boot .'
@@ -353,7 +353,7 @@ run 2 "$(edit_file "$HOME/.bashrc")"
 # Sessions outside the roots keep their launch flags and settings.local.json.
 allow 'claude --dangerously-skip-permissions -p hi'
 allow 'claude --settings /tmp/mine.json -p hi'
-# ccmux only launches into the code root: its flags count everywhere.
+# ccmux launches into harness repos only: its flags count everywhere.
 block 'ccmux acme/infra --bare'
 allow 'ccmux acme/infra --worktree'
 run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$OUT\"}"

@@ -276,7 +276,7 @@
           host-config-test =
             test "host-config-test" ./tests/host-config-test.sh
               "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
-          # The pre-Nix script with its host commands stubbed, both routes.
+          # The pre-Nix script with its host commands stubbed: installer, Fedora and NixOS routes.
           install-test = test "install-test" ./tests/install-test.sh "${./scripts/install.sh}";
           # No nix, claude or code in the build sandbox: the MISSING case.
           harness-doctor-test =

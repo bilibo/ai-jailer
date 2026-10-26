@@ -59,7 +59,7 @@ in
         enable = true;
         package = cfg.direnvPackage;
         nix-direnv.enable = true;
-        # Shared with install.sh, so a bootstrapped host gets the same settings.
+        # Shared with harness bootstrap, so a bootstrapped host gets the same settings.
         config.global = (builtins.fromTOML (builtins.readFile ../pkgs/direnv.toml)).global;
       };
 

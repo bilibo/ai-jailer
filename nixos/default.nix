@@ -76,7 +76,7 @@ in
     allowLocalCommits = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Let agents commit on their worktree branch. Push stays impossible either way (brief decision 7.5).";
+      description = "Let agents commit on their worktree branch. Push stays impossible either way (decision 7.5 of a design brief not kept in this repo).";
     };
 
     allowMemoryEdits = lib.mkOption {

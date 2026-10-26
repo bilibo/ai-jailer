@@ -92,7 +92,7 @@ The harness is the process half of agent control: what the process can
 read, write, run and reach. Roadmap item 5 names the other half from the
 process's side: "Reader-only service principal per customer. The one
 control that holds against every client, including things the hook never
-sees." The handoff's phase 3 already shapes it: `AZURE_CONFIG_DIR` under
+sees." Roadmap item 9's customer module already shapes it: `AZURE_CONFIG_DIR` under
 `.git/devenv-base/azure-<actor>`, the actor `agent` or `human` from
 `CLAUDECODE`, `agentAuth = user | sp` with `user` the default, `az login`
 in the universal deny set so only the human logs either directory in, a
@@ -120,7 +120,7 @@ usable by someone who never installs Nix. The harness must keep working
 for non-Azure customers; it is cloud-agnostic apart from the `az` regex
 and the network allowlist.
 
-The seams, each already in the code or the handoff:
+The seams, each already in the code or the roadmap:
 
 1. **Consumption.** A third `agentAuth` value for an identity minted in
    the tenant for this agent on this host: scoped reader, time-bound,

@@ -57,8 +57,8 @@ pkgs.writeShellApplication {
     HARNESS_REV = rev;
     HARNESS_TESTS = "${tests}";
     HARNESS_DEFAULT_REF = defaultRef;
-    # bootstrap appends these to the user's direnv and tmux config; the home
-    # module and install.sh read the same files.
+    # bootstrap writes these into the user's direnv and tmux config; the
+    # home module reads the same files.
     HARNESS_DIRENV_TOML = "${./direnv.toml}";
     HARNESS_TMUX_CONF = "${./tmux.conf}";
   };
@@ -77,7 +77,7 @@ pkgs.writeShellApplication {
       --dry-run   print each step, run none (never sudo)
       --yes       no confirmation prompt
       --verbose   print each command before it runs
-      --version   the harness revision
+      --version   the harness revision (before the command only)
 
     harness <command> --help has the details.
     EOF

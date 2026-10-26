@@ -1,5 +1,7 @@
-# A session in a harness repo gets no agent and no key files, so it cannot
-# push, clone or ssh as the user, while the user's own shells keep both. A
+# A sandboxed session in a harness repo (every work repo) gets no agent and
+# no key files, so it cannot push, clone or ssh as the user, while the
+# user's own shells keep both. The center runs without the sandbox, so its
+# key files stay readable (settings.nix drops `filesystem` there). A
 # project rule, not a universal one: outside the enforcement roots a session
 # keeps the agent, and a hardware key's touch is the gate for the user's
 # own pushes (README, "Git over SSH").

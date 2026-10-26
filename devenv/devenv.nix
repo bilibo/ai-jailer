@@ -2,7 +2,7 @@
 #
 #   inputs:
 #     harness:
-#       url: git+https://...  (or path:..., flake: false)
+#       url: github:bilibo/claude-nix-harness  (or path:..., flake: false)
 #   imports:
 #     - harness/devenv
 #
@@ -122,7 +122,7 @@ in
     allowLocalCommits = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Let agents commit on their worktree branch (push stays impossible). Match the host's harness.allowLocalCommits where there is one.";
+      description = "Let agents commit on their worktree branch (push stays impossible with the sandbox on; the center has only the hook's git rule). Match the host's harness.allowLocalCommits where there is one.";
     };
 
     allowMemoryEdits = lib.mkOption {
@@ -226,7 +226,7 @@ in
       ++ lib.optionals cfg.claudeCode.enable [
         claudeCode
         pkgs.tmux
-        pkgs.jq # install.sh's self-check reads the generated settings with it
+        pkgs.jq # reason not recorded; harness init gets its own jq (pkgs/harness.nix)
       ]
       # The command center maintains the harness: CLAUDE.md's lint tools.
       ++ lib.optionals center [

@@ -17,12 +17,10 @@ Agents stage and diff; the human commits and pushes.
 
 ## Which document owns what
 
-- `README.md`: current state, the layers, the host and lockdown tables.
-- `docs/roadmap.md`: what is next, in order; its "Done" list is what exists.
+- `README.md`: current state, the layers, the host and lockdown tables;
+  what exists.
+- `docs/roadmap.md`: what is next, in order.
 - `docs/changelog.md`: dated history, newest first, with what was learned.
-- `docs/handoff-tiers.md`: the tier, read-fence and customer-module phases,
-  and the standing rule: never activate a NixOS or home-manager generation,
-  never change flake inputs without asking.
 - `docs/sessions.md`: how sessions coordinate (tiers, proposals).
 - `docs/command-center.md`: this checkout as the command center: what a
   session started here may and may not do, and the memory decision.
@@ -34,6 +32,9 @@ Agents stage and diff; the human commits and pushes.
 
 A closed decision is reopened only by a new dated roadmap or changelog
 entry, never by editing the old one. Dates are absolute, never relative.
+
+Never activate a NixOS or home-manager generation, and never change flake
+inputs without asking.
 
 ## Checks
 

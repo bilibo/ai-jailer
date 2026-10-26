@@ -12,7 +12,7 @@
 # again for the devenv files and .envrc. Still refused: all of it under
 # CENTER_ROOT, and in every repo the files that switch the rules off unseen
 # (.claude/settings.json, .claude/settings.local.json, devenv.local.*) and
-# the rest of the project list (.env*, tfvars, tfstate, .git/hooks,
+# the rest of the project list (.env, .env.*, tfvars, tfstate, .git/hooks,
 # .git/config, .claude-plugin/). Every other rule is a work repo's.
 CENTER_ROOT="@centerRoot@"
 # The root as named and as it resolves, for a link on the way to it.
