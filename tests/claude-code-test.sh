@@ -3,9 +3,9 @@
 #
 # pkgs/claude-code.nix: the wrapper no longer sets LD_LIBRARY_PATH (the
 # binary wrapper embeds its own invocation text, so the name must be absent
-# from it), the binary carries alsa-lib as a RUNPATH instead, and it still
-# starts: `claude --version` names the package version. Needs patchelf and
-# binutils on PATH.
+# from it), the binary itself is untouched (no RUNPATH: the patch broke
+# 2.1.303, changelog 2026-10-27), and it still starts: `claude --version`
+# names the package version. Needs patchelf and binutils on PATH.
 set -uo pipefail
 pkg="${1:?usage: claude-code-test.sh <claude-code>}"
 pass=0; fail=0
@@ -21,7 +21,7 @@ if strings "$wrapper" | grep -q LD_LIBRARY_PATH; then bad "the wrapper still nam
 if strings "$wrapper" | grep -q -- "--prefix 'PATH' ':'"; then ok; else bad "the wrapper lost its PATH prefix (the whole line was dropped, not one argument)"; fi
 
 rpath=$(patchelf --print-rpath "$binary" 2>&1)
-case "$rpath" in *alsa-lib*) ok ;; *) bad "no alsa-lib in the binary's RUNPATH: '$rpath'" ;; esac
+case "$rpath" in *alsa-lib*) bad "alsa-lib is back on the binary's RUNPATH: '$rpath' (the patch segfaults 2.1.303)" ;; *) ok ;; esac
 
 export HOME="${TMPDIR:-/tmp}/claude-code-test-home"; mkdir -p "$HOME"
 v=$("$wrapper" --version 2>&1); rc=$?

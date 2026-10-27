@@ -1,17 +1,26 @@
-# nixpkgs wraps `claude` with `--prefix LD_LIBRARY_PATH : <alsa-lib>/lib`:
-# nothing links libasound, the binary dlopens it at runtime. LD_LIBRARY_PATH
-# is inherited by every hook, Bash command and MCP server a session starts,
-# and on a host whose own binaries use the distro glibc, one that loads
-# libasound (VS Code's `code`) gets the Nix copy, whose RUNPATH pulls the
-# Nix glibc into a process already running the distro's, and dies
-# (changelog 2026-10-24). The scoped form of the same dependency is a
-# RUNPATH on the binary: a dlopen from the executable's own code searches
-# it, and no child ever sees it. autoPatchelfHook has already grown this
-# Bun-compiled binary once (the interpreter), so patchelf is known to keep
-# it working. The wrapper line is removed from installPhase and must be
-# there to remove: when nixpkgs stops setting it, the assertion fails and
-# this file goes, pkgs.claude-code taking its place (tests/claude-code-test.sh
-# checks the result).
+# nixpkgs wraps `claude` with `--prefix LD_LIBRARY_PATH : <alsa-lib>/lib`.
+# LD_LIBRARY_PATH is inherited by every hook, Bash command and MCP server
+# a session starts, and on a host whose own binaries use the distro glibc,
+# one that loads libasound (VS Code's `code`) gets the Nix copy, whose
+# RUNPATH pulls the Nix glibc into a process already running the distro's,
+# and dies (changelog 2026-10-24). This override removes that wrapper line
+# and nothing else.
+#
+# The library served an embedded native addon (`bun-ant-audio-out`, linked
+# against libasound.so.2) that the binary extracts and dlopens when audio
+# output is used. Without the variable that dlopen fails and audio output
+# does not work; the sandboxed sessions this harness runs do not use it.
+# Not replaced by a RUNPATH on the binary: `patchelf --add-rpath`, in any
+# order with autoPatchelfHook's interpreter change, leaves claude-code
+# 2.1.303 segfaulting on `--version` (changelog 2026-10-27; 2.1.308 was
+# unaffected), and a RUNPATH on the executable would not have reached the
+# addon's own dependencies anyway (ld.so searches the loading object's
+# RUNPATH, not the executable's, for a dlopened library's NEEDED entries).
+#
+# The wrapper line is removed from installPhase and must be there to
+# remove: when nixpkgs stops setting it, the assertion fails and this file
+# goes, pkgs.claude-code taking its place (tests/claude-code-test.sh checks
+# the result).
 { pkgs }:
 let
   inherit (pkgs) lib;
@@ -30,11 +39,5 @@ pkgs.claude-code.overrideAttrs (
       assert lib.assertMsg (replaced != old.installPhase)
         "pkgs/claude-code.nix: pkgs.claude-code ${old.version} no longer sets LD_LIBRARY_PATH in its wrapper; delete this override";
       replaced;
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.patchelf ];
-    # After autoPatchelfHook's fixup, which sets the interpreter and would
-    # not add a library nothing links.
-    postFixup = (old.postFixup or "") + ''
-      patchelf --add-rpath ${alsa} $out/bin/.claude-wrapped
-    '';
   }
 )

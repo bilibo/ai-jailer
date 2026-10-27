@@ -54,7 +54,7 @@ in
       type = lib.types.package;
       default = import ../pkgs/claude-code.nix { inherit pkgs; };
       defaultText = lib.literalExpression "pkgs.claude-code without LD_LIBRARY_PATH in its wrapper (pkgs/claude-code.nix)";
-      description = "The Claude Code package. The default carries alsa-lib as a RUNPATH instead of the LD_LIBRARY_PATH nixpkgs' wrapper exports into every hook, command and MCP server.";
+      description = "The Claude Code package. The default is nixpkgs' package without the LD_LIBRARY_PATH its wrapper exports into every hook, command and MCP server (pkgs/claude-code.nix).";
     };
   };
 

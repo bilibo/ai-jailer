@@ -44,9 +44,9 @@ hooks/      env-guard.sh (the guard hook), tmux-notify.sh
 nixos/      NixOS module: harness.* -> /etc/claude-code, the worker users, the sudo rule
 home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`; applied per worker by the NixOS module
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates the project layer of .claude/settings.json
-pkgs/       ccmux launcher, direnv.toml and tmux.conf (the host-side settings), claude-code override (alsa-lib as a RUNPATH instead of an `LD_LIBRARY_PATH` every command inherits), devenv-cache.nix (the devenv cache key), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
+pkgs/       ccmux launcher, direnv.toml and tmux.conf (the host-side settings), claude-code override (nixpkgs' package without the `LD_LIBRARY_PATH` every command would inherit), devenv-cache.nix (the devenv cache key), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
 scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap` with the worker flags, then `harness init` on the checkout
-tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, RUNPATH, `--version`; unfree, so only when the evaluator allows it), check-parser-test.sh (`harness check --parse` against the transcripts in fixtures/)
+tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, binary untouched, `--version`; unfree, so only when the evaluator allows it), check-parser-test.sh (`harness check --parse` against the transcripts in fixtures/)
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), project-devenv (a project's devenv.nix for non-Nix users), roadmap, changelog, sessions (tiers, proposals), suggestion (ideas with a shape, not planned)
 ```
 
@@ -271,8 +271,9 @@ path:<checkout>#devenv path:<checkout>#ccmux` adds them from this flake,
 pinned by its lock, and `path:<checkout>#claude-code` when Claude Code
 itself comes from Nix: nixpkgs' wrapper exports an `LD_LIBRARY_PATH` that
 every hook, command and MCP server inherits and that kills a distro binary
-loading libasound (`pkgs/claude-code.nix` carries the library as a RUNPATH
-instead; the home and devenv modules use it). `harness doctor` reports
+loading libasound (`pkgs/claude-code.nix` drops the variable; the binary
+is otherwise unpatched, so audio output, which needed it, does not work;
+the home and devenv modules use it). `harness doctor` reports
 every host prerequisite, `claude doctor` included, and `harness init
 <customer>/<repo>` writes the files above into a repo and runs its first
 shell entry. `nix run path:<checkout>#harness -- <command>` runs the CLI

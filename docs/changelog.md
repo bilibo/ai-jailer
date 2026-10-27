@@ -144,6 +144,25 @@ happened and what was learned on the day.
   `~/.ssh` and pushes from a session stop working);
   `syncClaudeAiSkills = false` in managed settings binds the owner's
   account too.
+- The first host build with a worker failed: `pkgs/claude-code.nix`
+  (2026-10-24) added alsa-lib to the binary's RUNPATH with `patchelf
+  --add-rpath`, and nixpkgs' version check then found claude-code
+  2.1.303 (the host's nixpkgs, 02c087f) segfaulting on `--version`.
+  Reproduced on the plain package: unpatched it runs; with the RUNPATH
+  added after, before or in the same patchelf call as the interpreter
+  change, and through autoPatchelfHook's `runtimeDependencies`, it
+  segfaults. 2.1.308 (this checkout's nixpkgs) takes the same patch
+  without harm; the cause is not known. The binary shows what the
+  library was for: an embedded `bun-ant-audio-out` addon linked against
+  `libasound.so.2`, extracted and dlopened for audio output. A RUNPATH
+  on the executable is not searched for a dlopened object's own NEEDED
+  entries (ld.so's rule, not tested live), so the 2026-10-24 form most
+  likely never made audio work either. The override now removes the
+  wrapper line and leaves the binary alone: audio output needs
+  `LD_LIBRARY_PATH` and is not available from this package;
+  `claude-code-test` now fails if the RUNPATH comes back. Verified:
+  the override builds on both nixpkgs revisions with the version check
+  on, and the test script passes 7 of 7 on each.
 
 ## 2026-10-26
 

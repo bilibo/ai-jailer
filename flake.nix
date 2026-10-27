@@ -412,8 +412,8 @@
         # evaluator allows it (NIXPKGS_ALLOW_UNFREE=1 with --impure, or
         # allowUnfree in the nixpkgs config).
         // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
-          # pkgs/claude-code.nix: no LD_LIBRARY_PATH in the wrapper, alsa-lib
-          # as a RUNPATH, and the binary still starts.
+          # pkgs/claude-code.nix: no LD_LIBRARY_PATH in the wrapper, the binary
+          # unpatched, and it still starts.
           claude-code-test =
             pkgs.runCommand "claude-code-test"
               {

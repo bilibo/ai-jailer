@@ -534,9 +534,12 @@ The gaps, in order:
   2026-10-24 (changelog): nixpkgs' `claude-code` wrapper (`--prefix
   LD_LIBRARY_PATH : <alsa-lib>/lib`), inherited by every hook and Bash
   command. Closed the same day: `pkgs/claude-code.nix` drops the wrapper
-  line and puts alsa-lib on the binary's RUNPATH; the home module,
-  `packages.claude-code` and the devenv module use it; `claude-code-test` checks it (changelog). Not the
-  hook preamble: that would have covered the Bash tool only.
+  line and put alsa-lib on the binary's RUNPATH; the home module,
+  `packages.claude-code` and the devenv module use it; `claude-code-test`
+  checks it (changelog). Not the hook preamble: that would have covered
+  the Bash tool only. The RUNPATH went on 2026-10-27 (changelog): it
+  segfaults claude-code 2.1.303, and it never reached the audio addon's
+  own libasound dependency; the override now only removes the variable.
 
 ## Ideas, not planned
 
