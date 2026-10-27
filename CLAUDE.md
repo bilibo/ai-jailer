@@ -1,18 +1,13 @@
 # claude-nix-harness
 
-Guard-railed Claude Code for hosts with Nix. This checkout is itself a
-harness repo with `harness.role = "center"` (since 2026-10-24 the root
-`devenv.yaml` imports the harness module pinned from GitHub, like a work
-repo, so the working tree's `hooks/` and `lib/` are not this shell's live
-rules until the human runs `devenv update harness`), so a session here
-runs under the repo file: the hook refuses edits to `devenv.nix`,
-`devenv.yaml`, `devenv/devenv.nix`, `.envrc` and `.claude/`; propose those
-as diffs. No sandbox in the center: Bash is prompted, and the credential
-paths are reachable by scripts (`docs/command-center.md`, section 5).
-Other repos' setup files (`devenv.nix`, `devenv.yaml`, `devenv.lock`,
-`.envrc`, `.claude/` skills and hooks) are open to a center session by
-the Edit tool or one shell command naming the absolute path; every
-repo's `.claude/settings*.json` and `devenv.local.*` stay refused.
+Guard-railed Claude Code for hosts with Nix. This checkout is the harness
+repo, and a session here runs under the host's managed settings like a
+session in any repo, sandbox on: the hook refuses edits to `devenv.nix`,
+`devenv.yaml`, `devenv/devenv.nix`, `.envrc` and `.claude/` here as
+everywhere; propose those as diffs. The root `devenv.yaml` imports
+`./devenv` from the working tree. That is fine because the live hook is
+the one under `/etc/claude-code`, not the tree's `hooks/`: a working-tree
+edit takes effect only when the human rebuilds or runs `harness upgrade`.
 Agents stage and diff; the human commits and pushes.
 
 ## Which document owns what
@@ -22,8 +17,6 @@ Agents stage and diff; the human commits and pushes.
 - `docs/roadmap.md`: what is next, in order.
 - `docs/changelog.md`: dated history, newest first, with what was learned.
 - `docs/sessions.md`: how sessions coordinate (tiers, proposals).
-- `docs/command-center.md`: this checkout as the command center: what a
-  session started here may and may not do, and the memory decision.
 - `docs/runbook.md`: what the operator types; written for the human.
 - `docs/project-devenv.md`: a project's `devenv.nix`, for a human who
   does not know Nix; `harness init`'s template links it.

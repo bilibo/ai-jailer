@@ -44,76 +44,72 @@ Built into the binary, no mod involved, on this build (2.1.304):
 What it does not provide: a record of a proposal, a guarantee that the
 receiver asks the human, a notion of which session may touch what, or any
 view across sessions. The deny rules and the mod policy do not cover
-messaging at all; a repo cannot isolate its session from its peers, and the
-README says so under what a repo cannot enforce.
+messaging at all; a repo cannot isolate its session from its peers.
+Whether sessions under different Linux users still see each other is not
+checked.
 
-## 3. Tiers, realised as roles
+## 3. Tiers, realised as Linux users
 
 Planned on 2026-10-20 as two tiers, customer and platform, chosen by
 `ccmux` from the directory and exported as `HARNESS_TIER`. Realised on
-2026-10-24 as a role the repo's own devenv shell sets: `harness.role` in
-its `devenv.nix`, exported as `HARNESS_ROLE` at every shell entry and
-carried by `ccmux`, which names the tmux window after it and does not
-pass `center` on to a work session it launches. The customer tier is the
-role `work`, the platform tier the role `center`; section 5 keeps the old
-words.
+2026-10-24 as a role the repo's devenv shell set (`harness.role`,
+`HARNESS_ROLE`). Replaced on 2026-10-27 by Linux users, because a role set
+inside one UID separated nothing: every session ran as the same user with
+the same files. A tier is now a user, and which session may touch what is a
+property of the operating system. Section 5 keeps the old words.
 
-| Role | Where | Rules | Part in the flow |
+| Tier | Who | Rules | Part in the flow |
 |---|---|---|---|
-| `work` (default) | every harness repo under `HARNESS_CODE_ROOT` (`~/code/git/<customer>/<repo>`) | the repo's generated `.claude/settings.json`: full deny set, hook, sandbox with the network allowlist, memory off | proposes; never applies a change the rules refused |
-| `center` | this checkout only, which imports the harness module pinned from GitHub like a work repo | the same deny set and hook, no sandbox, every Bash command prompted unless the owner allows `Bash(*)`, memory on (`docs/command-center.md`) | the control room: the human accepts or rejects proposals there |
+| work | the worker user `w-<customer>`, one per customer: private 0750 home, own Claude login, own git identity, own clones under its code root (`~/code/git/<customer>/<repo>`), no push credential, no sudo | the host's managed settings: full deny set, hook, sandbox, mod policy; plus the repo's project layer | proposes; never applies a change the rules refused |
+| owner | your own account, a member of every worker's group, with `sudo -u w-<customer>` to the workers and no sudo rule the other way | the same managed settings: the owner's sessions are bound too | the human: accepts or rejects proposals, applies diffs as the owner or as the worker, reads the workers' clones through the group |
 
-The role is the repo owner's line in `devenv.nix`, which the deny rules
-and the hook refuse to a session and `require_allowed` flags at the next
-`cd`, so no session can make its own repo a center; `harness init`
-warns about a work repo that sets `center`. The configured platform roots
-(a home module option, or a bootstrap `HARNESS_PLATFORM_ROOTS`) were
-never built: on an unmanaged host the repo file is the only rule source,
-and the line in `devenv.nix` is the whole decision, as `harness.enable =
-false` is. `~/nixos-config` has no harness shell and no role (roadmap
-item 9 has what is open). The center session is not "allowed to act for
-peers"; it may edit harness source because that is its directory, and the
-permission prompt in it is the gate. It must not run in a bypass mode;
-its generated settings set `disableBypassPermissionsMode` like a work
-repo's.
+Which tier a session is in is its UID, not a line in a file an agent could
+edit: a worker cannot become the owner, cannot read the owner's home or
+another worker's (0750; untested live, check V7 and `harness check` case
+18), and cannot use sudo (hook rule 4 refuses it by text; the sudoers file
+has no rule for a worker). `ccmux <customer>/<repo>` from the owner's
+account hands over to the worker (`sudo -u w-<customer> -i`); a worker
+naming another customer is refused. No session has a different rule set
+from the workers': a session in this checkout is an ordinary managed
+session. A tmux server is per user, so a worker's `send-keys` reaches only
+its own server (runbook section 8).
 
-The roles do not remove the 2026-10-20 trigger: the hook is the same in
-both, so its rule for `*/devenv.nix` still matches the harness's own
-`devenv/devenv.nix` in the center, and a change there still comes to the
-human as a diff.
+The 2026-10-20 trigger remains: the hook's rule for `*/devenv.nix` matches
+the harness's own `devenv/devenv.nix` too, so a change there comes to the
+human as a diff, in every session.
 
 ## 4. The proposal flow
 
-A proposal is a diff plus a rationale, the role and directory it came
-from, and a timestamp. It is the only thing that crosses from a work repo
-to the center.
+A proposal is a diff plus a rationale, the user and directory it came
+from, and a timestamp. It is the only thing that crosses from a worker to
+the owner.
 
 1. A work session hits a refusal for a change to a harness-owned or
    project-config file (`devenv.nix`, `.envrc`, `.claude/settings.json`,
    the harness source). It writes the change as a diff and submits it as a
    proposal. It does not ask any session to apply it.
-2. The center session shows the proposal to the human: the model relays
-   it in chat and asks. The window it waits in turns colour in tmux
-   (`tmux-notify.sh`), next to the work session's under `ccmux`.
-3. The human accepts in the center session. Only then does an edit
-   happen, by the center session, under its own permission prompt, or by
-   the human from the diff where the hook refuses the file in the center
-   too (`devenv.*`, `.envrc`, `.claude/`).
+2. The owner's session, or the owner reading the worker's window, shows
+   the proposal to the human: the model relays it in chat and asks. The
+   window it waits in turns colour in tmux (`tmux-notify.sh`), per user.
+3. The human accepts and applies the diff, as the owner or as the worker
+   (`sudo -u w-<customer> -i`), in an editor or a terminal, since the hook
+   refuses a session's edit to these files in every session. The
+   `direnv allow` that follows is the human's, run as the worker: the hook
+   refuses it to sessions.
 4. The applied change is traceable to the accepted proposal.
 
-Since 2026-10-24 the roles exist; the flow on top of them is unchanged.
-Steps 1 and 2 are the CLAUDE.md contract in both places: the block
-`harness init` writes into work repos ("Do not work around it: propose a
-diff or ask") and this repo's own CLAUDE.md ("propose those as diffs";
-it has no line of its own on relayed requests, so the receiving side is
-Claude Code's guidance in section 2). Step 3 is Claude Code's permission
-prompt plus the receiving model's judgement. Step 4 is the chat
-transcript. That is the whole mechanism: the broker mod that was to make
-steps 2, 3 and 4 structural was dropped on 2026-10-24 (section 5).
+The flow is unchanged by the move to users. Steps 1 and 2 are the CLAUDE.md
+contract in both places: the block `harness init` writes into work repos
+("Do not work around it: propose a diff or ask") and this repo's own
+CLAUDE.md ("propose those as diffs"; it has no line of its own on relayed
+requests, so the receiving side is Claude Code's guidance in section 2).
+Step 3 is the human. Step 4 is the chat transcript. That is the whole
+mechanism: the broker mod that was to make steps 2, 3 and 4 structural was
+dropped on 2026-10-24 (section 5).
 
 Relay is for the genuine case: a work session needing a change to
 harness source or project configuration. Routine work bouncing through the
-center means a rule over-matches, and the fix is the rule.
+owner means a rule over-matches, and the fix is the rule.
 
 ## 5. The broker mod: dropped 2026-10-24
 
@@ -138,7 +134,7 @@ on every host, for coordination that never relaxes a rule (section 1).
 
 What stays is the policy that refuses mods:
 
-- Managed host: the built-in guard's `allowManagedModsOnly` with no
+- The built-in guard's `allowManagedModsOnly` with no
   organisation mod enabled, so every mod is refused;
   `strictKnownMarketplaces` empty unless `harness.extraKnownMarketplaces`
   lists a source, so no marketplace can be added; `disableSideloadFlags`;
@@ -146,16 +142,16 @@ What stays is the policy that refuses mods:
 - Any host: the deny rules and the hook refuse `claude plugin` and the
   plugin flags on a nested `claude`; `harness init` refuses a repo with a
   plugin manifest under `.claude`.
-- Unmanaged host: since the same day `harness bootstrap` writes
-  `syncClaudeAiSkills` and `syncClaudeAiPlugins = false` into user scope by
-  default, so the claude.ai account's plugins and skills do not load;
-  `--account-sync` opts back in.
+- Since 2026-10-27 the managed settings carry `syncClaudeAiSkills` and
+  `syncClaudeAiPlugins = false` (check V9 pending), so the claude.ai
+  account's plugins and skills do not load; bootstrap's user-scope write
+  and `--account-sync` are gone.
 
 Coordination stays the proposal flow of section 4 plus `ccmux`: the
 CLAUDE.md contract in each tier, Claude Code's own messaging between
-sessions, the platform session's permission prompt as the gate, and the
-tmux window colour as the sign that a session waits. A record of proposals
-and a structural gate have no replacement; reopening either takes a new
+sessions, the human as the gate, and the tmux window colour as the sign
+that a session waits. A record of proposals and a structural gate have no
+replacement; reopening either takes a new
 dated roadmap entry.
 
 ## 6. Testing
@@ -169,15 +165,14 @@ dated roadmap entry.
 - The proposal flow is a contract between models and a human, so its test
   is live: the live suite (`harness check`) is to gain a case where a work
   session's refused edit ends as a proposal in chat and not as an edit
-  anywhere. The roles it waited for exist since 2026-10-24; the case does
-  not yet.
+  anywhere. The case does not exist yet.
 
 ## 7. Open questions
 
-- Whether a center session can be kept out of bypass mode by its
-  generated settings alone (`disableBypassPermissionsMode` is honoured from
-  any scope; confirm it covers `--permission-mode` on the outer `claude`,
-  which the hook cannot see).
+- Whether the managed settings alone keep a session out of bypass mode
+  (`disableBypassPermissionsMode` is honoured from any scope; confirm it
+  covers `--permission-mode` on the outer `claude`, which the hook cannot
+  see).
 - Remote Control: a driven session is still the local process, so the
-  roles apply unchanged; confirm once Remote Control can start on a
+  rules apply unchanged; confirm once Remote Control can start on a
   harness host (roadmap, Ideas).

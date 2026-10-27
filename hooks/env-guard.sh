@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # env-guard: the guard hook. Registered for SessionStart, CwdChanged,
-# FileChanged, ConfigChange and PreToolUse, from managed settings on a
-# managed host and from the repo's .claude/settings.json (devenv module)
-# everywhere; the Setup branch below is ready but not registered.
+# FileChanged, ConfigChange and PreToolUse from managed settings only; the
+# repo's .claude/settings.json carries no hook since 2026-10-27. The Setup
+# branch below is ready but not registered. Every rule applies in every
+# directory: per-customer isolation comes from the Linux users (decided
+# 2026-10-27), not from this hook.
 #
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
 # ConfigChange (together with onFailure = "block" in the hook registration).
@@ -21,11 +23,9 @@ set -Euo pipefail
 PATH="@path@:${PATH:-}"
 trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 
-# Substituted by lib/hooks.nix from the harness.* options: 0 or 1, and a
-# colon-separated list where `~` means $HOME and empty means everywhere.
+# Substituted by lib/hooks.nix from the harness.* options: 0 or 1.
 ALLOW_LOCAL_COMMITS="@allowLocalCommits@"
 ALLOW_MEMORY_EDITS="@allowMemoryEdits@"
-ENFORCEMENT_ROOTS="@enforcementRoots@"
 
 input=$(cat)
 event=$(jq -r '.hook_event_name // empty' <<<"$input")
@@ -84,34 +84,6 @@ check_env() {
   return 0
 }
 
-# Project rules apply when there are no roots, when cwd is unknown (fail
-# closed), when cwd is under a root, or when the call names a path under a
-# root (`git -C ~/code/git/x push` from a session started elsewhere). The
-# universal rules apply regardless.
-in_scope=1
-roots=()
-if [ -n "$ENFORCEMENT_ROOTS" ] && [ -n "$cwd" ]; then
-  in_scope=0
-  IFS=: read -ra raw <<<"$ENFORCEMENT_ROOTS"
-  for r in "${raw[@]}"; do
-    r="${r/#\~/$HOME}"; roots+=("${r%/}")
-  done
-  under_root() { # under_root <path>
-    local p="$1" r
-    for r in "${roots[@]}"; do [[ "$p" == "$r" || "$p" == "$r/"* ]] && return 0; done
-    return 1
-  }
-  mentions_root() { # mentions_root <normalised command text>
-    local t="$1" r rl
-    for r in "${roots[@]}"; do
-      rl="${r,,}"
-      [[ "$t" == *"$rl"* || "$t" == *"~${rl#"${HOME,,}"}"* ]] && return 0
-    done
-    return 1
-  }
-  under_root "$cwd" && in_scope=1
-fi
-
 case "$event" in
   SessionStart|CwdChanged|FileChanged|Setup)
     [ -n "${CLAUDE_ENV_FILE:-}" ] || exit 0
@@ -156,11 +128,9 @@ ENV
   ConfigChange)
     src=$(jq -r '.source // empty' <<<"$input")
     case "$src" in
-      user_settings|policy_settings) deny "config change to $src blocked" ;;
       # .claude/settings.local.json outranks the repo's settings.json for
-      # scalar keys (sandbox.enabled, defaultMode) and is applied live, so
-      # under the roots a change to it is refused (project rule).
-      local_settings) [ "$in_scope" = 1 ] && deny "config change to $src blocked" ;;
+      # scalar keys (sandbox.enabled, defaultMode) and is applied live.
+      user_settings|policy_settings|local_settings) deny "config change to $src blocked" ;;
     esac
     exit 0 ;;
 
@@ -192,7 +162,6 @@ ENV
           [ "${#slug}" -gt 200 ] || own_memory="$HOME/.claude/projects/$slug/memory"
         fi
         check_edit() { # check_edit <absolute path>
-          [ "$in_scope" = 1 ] || { under_root "$1" && in_scope=1; }
           if [ -n "$own_memory" ]; then
             case "$1" in
               "$own_memory"/*) return 0 ;;
@@ -208,14 +177,12 @@ ENV
             "$HOME"/.gitconfig|"$HOME"/.tmux.conf|"$HOME"/.bashrc.d/*|"$HOME"/.local/bin/*)
               deny "edit of $1 is forbidden (user config)" ;;
           esac
-          if [ "$in_scope" = 1 ]; then
-            case "$1" in
-              */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude-plugin/*|\
-              */devenv.nix|*/devenv.yaml|*/devenv.lock|*/devenv.local.*|*/.envrc|*/.env|*/.env.*|*.tfvars|*.tfvars.json|*.tfstate|\
-              */.git/hooks/*|*/.git/config)
-                deny "edit of $1 is forbidden (config/env/credentials/plugin)" ;;
-            esac
-          fi
+          case "$1" in
+            */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude-plugin/*|\
+            */devenv.nix|*/devenv.yaml|*/devenv.lock|*/devenv.local.*|*/.envrc|*/.env|*/.env.*|*.tfvars|*.tfvars.json|*.tfstate|\
+            */.git/hooks/*|*/.git/config)
+              deny "edit of $1 is forbidden (config/env/credentials/plugin)" ;;
+          esac
         }
         check_edit "$(realpath -sm -- "$f")"
         check_edit "$(realpath -m -- "$f")"
@@ -229,12 +196,10 @@ ENV
         # `nc` keeps case, for the few flags where case is the meaning.
         nc=$(printf '%s' "$cmd" | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
         n="${nc,,}"
-        [ "$in_scope" = 1 ] || { mentions_root "$n" && in_scope=1; }
         b='(^|[ ;&|(])'       # start of a (sub)command
         e='( |$)'             # end of a word
 
-        # 1. git history and index writes (project rule)
-        if [ "$in_scope" = 1 ]; then
+        # 1. git history and index writes
         git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|branch +(-f|--force)|tag +-d|tag +(-f|--force)|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|checkout +(-f|--force|\.[^ ]*)|switch +(-f|--force|--discard-changes)|worktree +remove( +[^ ;&|]+)* +(-f|--force)|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
         [ "$ALLOW_LOCAL_COMMITS" = 1 ] || git_ops="commit|$git_ops"
         # `/usr/bin/git`, `git -C . push`, `git --git-dir=.git push`.
@@ -250,10 +215,8 @@ ENV
         [[ "$n" =~ $re ]] && ! [[ "$n" =~ $creates ]] && deny "git history/index write blocked"
         re='git_dir=|git_work_tree=|git_index_file=|git_config_global=|git_config_system='
         [[ "$n" =~ $re ]] && deny "git env redirect blocked"
-        fi
 
-        # 2. cloud and infrastructure writes (project rule)
-        if [ "$in_scope" = 1 ]; then
+        # 2. cloud and infrastructure writes
         re="(^|[^a-z])(terraform|tofu|terragrunt)( +-[^ ]+)* +(apply|destroy|import|taint|untaint|state|force-unlock|workspace +(new|delete|select))$e"
         [[ "$n" =~ $re ]] && deny "terraform write blocked"
         re="(^|[^a-z])az .* (create|delete|update|set|start|stop|restart|deploy|purge|assign|remove|rotate|regenerate|invoke|run|import|restore|scale)$e"
@@ -262,11 +225,14 @@ ENV
         [[ "$n" =~ $re ]] && deny "az deployment/rest write blocked"
         re='(^|[^a-z])(func +azure +functionapp +publish|pulumi +(up|destroy)|bicep +publish)'
         [[ "$n" =~ $re ]] && deny "deploy blocked"
-        fi
 
-        # 3. credentials (universal)
+        # 3. credentials
         re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +sp +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
         [[ "$n" =~ $re ]] && deny "credential operation blocked"
+        # cred_files: in-repo secrets and the session user's own Claude
+        # credentials. The owner's credential directories (~/.ssh, ~/.aws,
+        # ...) are not listed: a session runs as a worker user, which cannot
+        # read the owner's home (Linux-user design, decided 2026-10-27).
         # A path matching cred_files anywhere blocks, unless the whole command is one simple
         # command whose verb cannot show content: one line (the normaliser
         # folds newlines, so the raw command is checked), no pipe, no `$(`,
@@ -275,7 +241,7 @@ ENV
         # each line (`file -f`, `--files0-from`, `--pathspec-from-file`). A
         # reader list cannot be completed (dd, tr, perl, `git show
         # <ref>:.env`, a bare `< .env`).
-        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.azure/|\.terraform\.d/|credentials\.json|\.claude\.json|\.credentials|/\.ssh/|id_(rsa|ed25519)|\.netrc|\.npmrc|\.pypirc|\.aws/|\.git-credentials|\.config/gh/)'
+        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json)'
         harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch)( [^;&|<$`(]*)?$'
         list_opts='--files0-from|--files-from|--pathspec-from-file|(^| )file( +-[a-z]+)* +-[a-z]*f'
         if [[ "$n" =~ $cred_files ]]; then
@@ -284,17 +250,24 @@ ENV
           [ "$safe" = 1 ] || deny "credential file access blocked"
         fi
 
-        # 4. system and config (universal)
+        # 4. system and config
         re="(^|[^a-z])(sudo|doas|pkexec|su|run0)$e"
         [[ "$n" =~ $re ]] && deny "privilege escalation blocked"
         re='(^|[^a-z])(nix +(profile|upgrade-nix|registry|store +(gc|delete|optimise))|nix-env|nix-collect-garbage|nixos-rebuild|nh +(os +(switch|boot|test)|home +switch)|nix-channel|home-manager +switch|systemctl|journalctl +--vacuum|wsl\.exe|wslconfig)'
         [[ "$n" =~ $re ]] && deny "system change blocked"
         re="$b(powershell|pwsh|cmd)(\.exe)?( |$)|$b[^ ]*\.exe( |$)|/mnt/c/"
         [[ "$n" =~ $re ]] && deny "Windows executable blocked"
-        # Shell-side writes to the project setup files the Edit tool refuses
-        # (project rule). The user-config files the Edit check refuses are not
-        # matched here; in a work repo the sandbox's write confinement covers them.
-        if [ "$in_scope" = 1 ]; then
+        # `direnv allow` approves an .envrc, and the env-file preamble then
+        # loads it, with the devenv.nix it uses, before every later Bash
+        # command. The sandbox keeps direnv's allow list read-only; without
+        # the sandbox only this rule stops a session approving its own edit
+        # (changelog 2026-10-26). `grant` is a third name for allow, and
+        # `edit` allows once the editor exits (`direnv help`, 2.38.2).
+        re="$b"'direnv +(allow|permit|grant|edit)'"$e"
+        [[ "$n" =~ $re ]] && deny "direnv allow blocked: the human approves .envrc changes"
+        # Shell-side writes to the project setup files the Edit tool refuses.
+        # The user-config files the Edit check refuses are not matched here;
+        # in a work repo the sandbox's write confinement covers them.
         config_files='(devenv\.(nix|yaml|lock|local)|\.envrc|\.claude/|\.claude-plugin|\.git/hooks|\.git/config|\.config/nix|\.config/direnv)'
         # `2>/dev/null`, `>&2` and friends write no file, so they are dropped;
         # every `>` left counts as a write (`1>`, `2>`, `&>`, `>>` included).
@@ -304,20 +277,16 @@ ENV
         if [[ "$n" =~ $config_files ]] && [[ "$w" =~ $writers ]]; then
           deny "shell write to config file blocked"
         fi
-        fi
 
-        # 5. plugin and mod loading (universal)
+        # 5. plugin and mod loading
         re='(^|[^a-z])claude +plugin +(install|marketplace|enable|update|add)'
         [[ "$n" =~ $re ]] && deny "plugin install blocked"
         re='--plugin-(dir|url)|claude_code_plugin_dirs=|--mcp-config|--agents( |=)'
         [[ "$n" =~ $re ]] && deny "plugin sideload blocked"
 
-        # 6. nested sessions that would skip the repo's rules (project rule;
-        # for `ccmux` universal: it launches into the code root, or into
-        # HARNESS_PROJECT_DIR for a harness clone elsewhere).
-        # Without managed settings the repo file is the only rule source, and
-        # these flags replace or bypass it for the child session (`--bare`
-        # skips every hook); `--add-dir` widens the child's working
+        # 6. nested sessions that would skip the rules. These flags replace
+        # or bypass settings for the child session (`--bare` skips every
+        # hook); `--add-dir` widens the child's working
         # directories, which the sandbox lets it write. `ccmux [<project>]`
         # hands the rest to `claude`. Arguments stop at a command separator
         # so a flag in a later command does not count; one inside quotes or
@@ -325,12 +294,12 @@ ENV
         # `2>&1` and `&>`, so this rule reads the command with those turned
         # into `_`, which only adds matches. A renamed copy of the binary
         # gets past this; the sandbox is the layer for that.
-        launcher=ccmux; [ "$in_scope" = 0 ] || launcher='claude|ccmux'
+        launcher='claude|ccmux'
         q=$(printf '%s' "$cmd" | jq -Rsj 'gsub("(?<q>\"(\\\\.|[^\"\\\\])*\"|\\x27[^\\x27]*\\x27|\\\\.|>&|&>)"; .q | gsub("[;&|]"; "_"))' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
         re="(^|[^a-z])($launcher)( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions|add-dir)( |=|$)"
         [[ "${q,,}" =~ $re ]] && deny "claude launch flag blocked"
 
-        # 7. the tmux server (project rule; roadmap 2.8a). It runs outside
+        # 7. the tmux server (roadmap 2.8a). It runs outside
         # the sandbox and allowAllUnixSockets reaches its socket, so most
         # tmux commands run something there with no sandbox and no hook
         # (`run-shell`, `new-window`, `send-keys` into another session's
@@ -350,7 +319,6 @@ ENV
         # tmux 3.8, refused anyway); and `$`, backticks and globs in the
         # arguments, which can expand to a `;`. Text only: a script or
         # `python` on the socket gets past this; roadmap 2.8b is the socket.
-        if [ "$in_scope" = 1 ]; then
         tm=$(printf '%s' "$cmd" | jq -Rsj 'gsub("(?<q>\"(\\\\.|[^\"\\\\])*\"|\\x27[^\\x27]*\\x27|\\\\.|>&|&>)"; .q | if test("^[\"\\x27\\\\]") then gsub("[;&|]"; "\u0001") else gsub("&"; "_") end)' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"" | tr '<>' '  ')
         tmux_ro='^(ls|list-(sessions|windows|panes|clients|buffers|keys|commands)|lsw|lsp|lsc|lsb|lsk|lscm|has|has-session|show|show-(options|window-options|environment|buffer|messages|hooks)|showw|showenv|showb|showmsgs|display|display-message)$'
         call='(^|[^a-zA-Z0-9_.-])tmux( |$)(.*)'
@@ -384,10 +352,9 @@ ENV
             deny "tmux $sub blocked: only display-message -p, without -I"
           fi
         done
-        fi
 
-        # 8. the environment the command is about to run in must load
-        # (universal; the env-file preamble above is fail-open on its own).
+        # 8. the environment the command is about to run in must load (the
+        # env-file preamble above is fail-open on its own).
         check_env "$cwd"
         exit 0 ;;
     esac

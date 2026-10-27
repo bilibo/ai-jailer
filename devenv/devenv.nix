@@ -6,32 +6,22 @@
 #   imports:
 #     - harness/devenv
 #
-# It writes the repo's .claude/settings.json with everything a repo can
-# enforce on its own: the full deny set, every hook (store paths), the
-# sandbox and the SSH rule. On a host without managed settings (an unmanaged
-# host) that file is the whole harness; on a managed host the root-owned
-# copy adds what only it can (mod policy, immunity to user settings) and
-# `allowManagedHooksOnly` keeps the repo's hooks from running twice.
+# It writes the repo's .claude/settings.json, the project layer
+# (`projectSettings` in lib/settings.nix): the allow rules from `settings`,
+# the deny rules from `extraDeny`, the project's domains, the read fence
+# when on, literal `denyWrite` entries for the repo's own settings, hooks
+# and git files under the checkout, and a few scalars repeated as a belt.
+# The deny rules, the hooks and the sandbox with its credential and network
+# lists come from the host's managed settings (`managedSettingsPath`); on a
+# host without that file the repo has none of them, and every shell entry
+# says so.
 #
 # `harness.enable = false` is the repo owner's off switch: no settings file
-# (devenv's files cleanup removes the link it wrote before), so no deny
-# rules, hook or sandbox from the repo, and no HARNESS_* exports; a notice
-# at every shell entry says so. The packages stay: they are tools, not
-# rules. A session cannot set it: the deny rules and the hook refuse its
-# edits to devenv.nix, the same as for every other option here. The
-# command center can write it into another repo's devenv.nix; it takes
-# effect when you `direnv allow` that repo, so read the diff first.
-#
-# `harness.role = "center"` is the command center (docs/command-center.md):
-# the harness checkout, where you launch and review the work repos'
-# sessions, and set up and change the work repos. Its file is a work
-# repo's with the sandbox off, so Bash commands are prompted instead of
-# confined, and with other repos' setup files open: the deny rules and the
-# hook refuse devenv.nix, devenv.yaml, devenv.lock, .envrc and .claude/
-# hooks and skills in this checkout only (`centerRoot`), and every repo's
-# .claude/settings*.json and devenv.local.* as before. Memory is writable
-# by default there, and the shell adds the harness's own dev tools. Work
-# repos keep the default, `work`.
+# (devenv's files cleanup removes the link it wrote before), so none of the
+# project layer, and no HARNESS_* exports; a notice at every shell entry
+# says so. The packages stay: they are tools, not rules. A session cannot
+# set it where the managed settings are in place: their deny rules and hook
+# refuse its edits to devenv.nix, the same as for every other option here.
 #
 # direnv runs `devenv direnv-export` for humans and for every Claude Code
 # Bash command alike, so everything in enterShell happens on both paths.
@@ -45,29 +35,8 @@
 }:
 let
   cfg = config.harness;
-  center = cfg.role == "center";
   harnessLib = import ../lib { inherit lib; };
   projectName = if config.name == null then "project" else config.name;
-
-  # The hook's `direnv export` evaluates the .envrc, whose `require_allowed`
-  # needs direnv >= 2.38. This is devenv.lock's nixpkgs, not flake.lock's:
-  # bump both (changelog 2026-10-26).
-  direnvPackage = pkgs.direnv;
-
-  # The command center's checkout; null in a work repo, whose hook and
-  # deny rules then carry nothing of the center's (same store paths).
-  centerRoot = if center then config.devenv.root else null;
-
-  # Roots empty: this file only loads in sessions started inside the repo.
-  hooks = import ../lib/hooks.nix {
-    inherit
-      pkgs
-      lib
-      direnvPackage
-      centerRoot
-      ;
-    inherit (cfg) allowLocalCommits allowMemoryEdits;
-  };
 
   ccmux = import ../pkgs/ccmux.nix { inherit pkgs; };
   # nixpkgs' claude-code without the LD_LIBRARY_PATH its wrapper leaks into
@@ -80,57 +49,13 @@ in
       type = lib.types.bool;
       default = true;
       description = ''
-        The guard rails for this repo. `false` turns them off: no
+        The project layer for this repo. `false` turns it off: no
         .claude/settings.json (devenv removes the one it wrote before), so
-        none of the repo's deny rules, hooks or sandbox, no HARNESS_*
-        exports, and a one-line notice at shell entry. The packages (ccmux,
-        claudeCode.enable's, the center's tools) stay. A managed host's
-        root-owned settings apply either way.
+        none of the repo's allow rules, extra deny rules, domains or read
+        fence, no HARNESS_* exports, and a one-line notice at shell entry.
+        The packages (ccmux, claudeCode.enable's) stay. The host's managed
+        settings apply either way.
       '';
-    };
-
-    role = lib.mkOption {
-      type = lib.types.enum [
-        "work"
-        "center"
-      ];
-      default = "work";
-      description = ''
-        `work`: a repo sessions work in, under the full set. `center`: the
-        command center (docs/command-center.md), the harness checkout from
-        which you launch and review the work repos' sessions. Its sandbox is
-        off (`sandbox.enabled = false`): no network allowlist, no filesystem
-        confinement, and Bash commands go through Claude Code's ordinary
-        permission prompts instead of the sandbox's auto-allow. The
-        deny rules and the hook are a work repo's but for the setup files
-        of other repos: devenv.nix, devenv.yaml, devenv.lock, .envrc and
-        .claude/ skills and hooks are refused in this checkout only, so
-        the center can set up and change the work repos; every repo's
-        .claude/settings*.json and devenv.local.* stay refused. There
-        `allowMemoryEdits` and `claudeCode.enable` default to true,
-        `readFence` is ignored (the center reads the whole code root),
-        `extraAllowRead` and `extraAllowedDomains` have nothing to apply
-        to, and the shell adds nixfmt, statix, deadnix and shellcheck. If
-        the prompts annoy you, `settings.permissions.allow = [ "Bash(*)" ]`
-        allows every command without one; the deny rules and the hook still
-        win over it, but they match command text, and with neither sandbox
-        nor prompt nothing else stands between a command and the network or
-        the credential files. A managed host's settings keep the sandbox on
-        whatever this says. Exported to the shell as HARNESS_ROLE.
-      '';
-    };
-
-    allowLocalCommits = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Let agents commit on their worktree branch (push stays impossible with the sandbox on; the center has only the hook's git rule). Match the host's harness.allowLocalCommits where there is one.";
-    };
-
-    allowMemoryEdits = lib.mkOption {
-      type = lib.types.bool;
-      default = center;
-      defaultText = lib.literalExpression ''config.harness.role == "center"'';
-      description = "Let agents write their auto-memory under ~/.claude/projects. On by default in the command center only (`role`). Match the host's harness.allowMemoryEdits where there is one.";
     };
 
     allowConnectors = lib.mkOption {
@@ -152,7 +77,7 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [ "Bash(az devops *)" ];
-      description = "Additional permission deny rules appended to the harness set.";
+      description = "Additional permission deny rules, the repo file's `permissions.deny`; deny lists merge across scopes, so they add to the managed set.";
     };
 
     readFence = lib.mkOption {
@@ -164,7 +89,6 @@ in
         devenv shell entry needs (lib/settings.nix). Sibling repos and
         `~/.claude/.credentials.json` become unreadable from the shell. Add
         what the project itself reads under `$HOME` with `extraAllowRead`.
-        Ignored with `role = "center"`.
       '';
     };
 
@@ -180,10 +104,12 @@ in
       default = [ ];
       example = [ "dev.azure.com" ];
       description = ''
-        Additional sandbox network allowlist entries for this repo. Effective
-        on a host without managed settings; a managed host makes the sandbox
-        admin-required and Claude Code then ignores a repo's allowlist, so
-        add the host there (`harness.extraAllowedDomains` in the NixOS module).
+        Project domains, written to the repo file's
+        `sandbox.network.allowedDomains`. Whether a managed sandbox honours
+        a project entry (merged, ignored or prompted) is open: live check V2
+        of the 2026-10-27 redesign, pending. Until it passes, a domain the
+        project cannot work without also belongs in the host's list
+        (`harness.extraAllowedDomains` in the NixOS module).
       '';
     };
 
@@ -202,16 +128,15 @@ in
 
     claudeCode.enable = lib.mkOption {
       type = lib.types.bool;
-      default = center;
-      defaultText = lib.literalExpression ''config.harness.role == "center"'';
+      default = false;
       example = true;
-      description = "claude-code, tmux and jq in the project shell, for hosts where no home module installs them; on by default in the command center. Needs `allow_unfree: true` in devenv.yaml.";
+      description = "claude-code, tmux and jq in the project shell, for hosts where no home module installs them. Needs `allow_unfree: true` in devenv.yaml.";
     };
 
     managedSettingsPath = lib.mkOption {
       type = lib.types.str;
       default = "/etc/claude-code/managed-settings.json";
-      description = "Where a managed host keeps the managed settings; checked at shell entry when HARNESS_EXPECT_MANAGED is set.";
+      description = "Where the host keeps the managed settings; every shell entry warns when it is unreadable.";
     };
 
   };
@@ -228,29 +153,16 @@ in
         claudeCode
         pkgs.tmux
         pkgs.jq # reason not recorded; harness init gets its own jq (pkgs/harness.nix)
-      ]
-      # The command center maintains the harness: CLAUDE.md's lint tools.
-      ++ lib.optionals center [
-        pkgs.nixfmt
-        pkgs.statix
-        pkgs.deadnix
-        pkgs.shellcheck
       ];
     }
 
     (lib.mkIf cfg.enable {
       files.".claude/settings.json".json = lib.recursiveUpdate (harnessLib.projectSettings {
-        hookDir = "${hooks}";
         repoRoot = config.devenv.root;
-        inherit centerRoot;
-        # The center: no sandbox, and so no read fence to put in it.
-        sandbox = !center;
-        readFence = cfg.readFence && !center;
         inherit (cfg)
           platform
+          readFence
           extraAllowRead
-          allowLocalCommits
-          allowMemoryEdits
           allowConnectors
           extraDeny
           extraAllowedDomains
@@ -258,12 +170,7 @@ in
       }) cfg.settings;
 
       enterShell = ''
-        # The harness home module exports HARNESS_EXPECT_MANAGED on hosts that
-        # are meant to carry managed settings; an unmanaged host without the
-        # module runs on the repo file alone and stays quiet.
-        if [ -n "''${HARNESS_EXPECT_MANAGED:-}" ] && [ ! -r "${cfg.managedSettingsPath}" ]; then
-          echo "harness: ${cfg.managedSettingsPath} is missing: repo rules only, no mod policy on this host" >&2
-        fi
+        [ -r "${cfg.managedSettingsPath}" ] || echo "harness: ${cfg.managedSettingsPath} is missing: no deny rules, hook or sandbox on this host (NixOS: harness.enable in the host configuration; other Linux: harness bootstrap)" >&2
         # Name this project for `ccmux`: <customer>/<repo> relative to the code
         # root, from the main checkout or any worktree under it, else
         # local/<name> with the directory alongside. A bare `ccmux` in this
@@ -279,8 +186,6 @@ in
           export HARNESS_PROJECT_DIR="$DEVENV_ROOT"
         fi
         unset _harness_root
-        # harness.role: `center` in the command center, `work` elsewhere.
-        export HARNESS_ROLE=${cfg.role}
       '';
     })
 

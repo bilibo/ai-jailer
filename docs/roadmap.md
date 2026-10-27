@@ -35,6 +35,9 @@ sessions worked the audit board); since 2026-10-24 the checkout has its
 own role (`center`), but its hook is a work repo's, so it still refuses
 its `devenv.nix` and the module source `devenv/devenv.nix`.
 3 works, with a guide since 2026-10-24 (gap C). 4 works by hand.
+Added 2026-10-27: item 11 replaces the center and the role with one
+Linux user per customer and host-wide managed rules; point 2 above is
+superseded by it.
 
 The gaps, in order:
 
@@ -87,7 +90,8 @@ The gaps, in order:
   root without a devenv. The broker's stage B it also named (item 8) was
   dropped on 2026-10-24; proposals stay the CLAUDE.md contract and the
   center's permission prompt (`docs/sessions.md` section 4). What the
-  command center is and does: `docs/command-center.md`.
+  command center is and does: `docs/command-center.md`. Added 2026-10-27:
+  item 11 drops `harness.role` and the center; this gap is closed by it.
 
 ## Next, in order
 
@@ -280,6 +284,10 @@ The gaps, in order:
       display-message -p '#S'` prints the session name today; after (a)
       the hook refuses `tmux new-window`; after (b) the client cannot
       connect.
+      Added 2026-10-27 (item 11): with one Linux user per customer the
+      tmux socket is per UID, so a worker's session reaches only its own
+      worker's server; that server still runs unsandboxed as the worker,
+      so (b) stays open.
    9. **Memory carve-out to the session's own project** (2026-10-24).
       Done 2026-10-26 (changelog); open: whether a worktree session's
       `CLAUDE_PROJECT_DIR` is the worktree path, which the rule refuses.
@@ -350,7 +358,8 @@ The gaps, in order:
      the runbook's verification section starts with it.
    - A center on a managed host: a managed `sandbox.enabled = true` wins
      over the repo file, so `center` turns nothing off there. Undecided
-     whether a managed host has a center at all.
+     whether a managed host has a center at all. Closed by item 11
+     (2026-10-27): there is no center.
    - Platform roots without a harness devenv (`~/nixos-config`): no role,
      no generated file; the planned `ccmux --settings` route was not built.
    - Customer module (`imports: - harness/devenv/customer`, with items 3
@@ -396,6 +405,88 @@ The gaps, in order:
       the role lookup and the role half of `check-parser-test`.
     - `harness init` writes `# role = "center";` commented into every work
       repo's `devenv.nix`; only this checkout can ever set it, so stop.
+
+11. **Worker users and managed-only rules (2026-10-27).** Reopens item
+    10 ("Role design reviewed and kept, 2026-10-26"): the owner
+    verified that `harness bootstrap` then `harness init` on a fresh
+    host ends with a repo that enforces nothing, and a review of the
+    tree at `ce6bd9f` found why (changelog 2026-10-27). Item 10's three
+    trims are overtaken: the role, the lookup and the template line are
+    gone. Decisions, the owner's:
+    - Hard rules live in the host-wide managed tree (`/etc/claude-code`,
+      root-owned), on every host shape; the owner's sessions are bound
+      too. The repo file carries the project layer only, no hooks.
+    - One Linux user per customer from `harness.workers` in the NixOS
+      module: `w-<customer>`, 0750 home, group `w-<customer>` with the
+      owner as member, marker group `agents`, linger, never in
+      `trusted-users`, Home Manager per worker, user settings seeded
+      once, never a store symlink. `ccmux <customer>/<repo>` hands over
+      with `sudo -u w-<customer> -i`.
+    - The host matrix stays; `harness bootstrap` mirrors the module on
+      Fedora and Ubuntu (`--workers`, `--owner`, `--owner-sudo`).
+    - Claude Code's own sandbox stays; every `strictAllowlist` piece and
+      the egress-filter idea are dropped; `allowedDomains` stays as a
+      prompt-avoiding list.
+    - Dropped: `harness.role`, `hooks/center-guard.sh`,
+      `enforcementRoots`, the universal/project deny split,
+      `HARNESS_ROLE`, `packages.managed-scoped`,
+      `packages.project-settings-center`, the center and scoped checks,
+      `docs/command-center.md`, bootstrap's user-scope settings block
+      and `--account-sync`.
+    - The sudo rule is owner to workers only (`<owner> ALL=(%agents)
+      NOPASSWD: ALL`), never a rule with `%agents` as the user list.
+    - Accepted costs: the owner's sessions lose the unsandboxed center
+      (`gh`, `~/.ssh` and pushes from a session stop working);
+      `syncClaudeAiSkills = false` in managed settings binds the owner's
+      account too.
+
+    Staged, not committed: the managed/repo split in `lib/`, hook
+    scoping removed, the NixOS module's `owner`, `workers`,
+    `ownerSudo` and `devenvCache`, the home module's settings seed,
+    ccmux handover, `harness init`, `check` (18 cases) and `bootstrap`
+    with the root steps, and the tests (changelog 2026-10-27 has the
+    list and the results). Open:
+    - [ ] V1 managed sandbox in a worker session with no repo file:
+      `claude -p 'grep -i nonewprivs /proc/self/status'` from a bare
+      directory shows `NoNewPrivs: 1`, and `--debug-file` names the
+      managed hook. Decides whether the 2026-10-27 failure is moot.
+    - [ ] V2 project-scope `allowedDomains` under a managed sandbox:
+      merged, ignored or prompting. Decides whether
+      `harness.extraAllowedDomains` stays in the devenv module or
+      becomes host-wide only.
+    - [ ] V3 `allowedDomains = ["*"]`: open network or a literal host.
+      Decides whether a no-prompt network setting exists.
+    - [ ] V4 owner watching a worker: `sudo -u w-x -i tmux attach`
+      against tmux `server-access` on a group-readable `-S` socket.
+      Decides how the owner attaches.
+    - [ ] V5 `XDG_RUNTIME_DIR` under `sudo -u w-x -i` with linger:
+      devenv, direnv and `tmux-notify.sh` work when ccmux exports
+      `/run/user/$(id -u)`. Decides whether that export is enough.
+    - [ ] V6 Home Manager seed: `~/.claude/settings.json` is a plain
+      0600 file after activation, `/model` rewrites it, a second
+      activation leaves it; also whether Claude Code needs the file when
+      absent, whether `harnessSeedClaudeSettings` after `linkGeneration`
+      removes an older generation's store symlink first (suspected, not
+      verified), whether `programs.git.userName` moved to
+      `programs.git.settings.user.*` in recent Home Manager, and whether
+      `home.stateVersion` accepts "26.05".
+    - [ ] V7 group reads: the owner reads `/home/w-x/code/...`; `w-x`
+      cannot list `/home/<owner>` or another worker's home.
+    - [ ] V8 a baseline `harness check` transcript in a worker repo.
+    - [ ] V9 managed `syncClaudeAiSkills = false` honoured.
+    - [ ] Human steps: apply the two patches `c1-devenv-module.patch`
+      and `f1-claude-md.patch` from the session scratchpad (the hook
+      refuses those files; until the first is applied this checkout's
+      shell does not evaluate), commit, rebuild the host with
+      `harness.owner` and `harness.workers`, run `harness check` as a
+      worker.
+    - [ ] Untested: `nix build --out-link /etc/claude-code` as root
+      through the daemon; the whole `home-manager.users.<w>` branch
+      (Home Manager is not an input of this flake).
+    - [ ] Follow-ups: `check_env`'s `fix: direnv allow <dir>` advice now
+      names a command the hook refuses; place `extraAllowedDomains`
+      after V2; the `grep 'direnv allow'` false positive; a `harness
+      check` case for the direnv rule.
 
 ## Open questions
 
@@ -447,9 +538,11 @@ The gaps, in order:
 - Tighten the hook with the gaps listed in the runbook's known-gaps section:
   gh and package publishing as project rules, git exec-vector config keys,
   az transfer verbs, and a fail-closed rule for dynamic shell constructs
-  (`$IFS`, `$(`, `base64 -d |`) inside the enforcement roots. Each one
+  (`$IFS`, `$(`, `base64 -d |`). Each one
   starts as a test case. Also: stop matching `*/devenv.nix` when the path
   is the harness's own `devenv/devenv.nix`, which the hook refuses today.
+  Also: the `direnv allow|permit|grant|edit` rule (item 11) refuses a
+  quoted mention (`grep 'direnv allow' docs/`).
 - Edit-rule asymmetry: the hook refuses Edit on `.envrc`, `devenv.*`,
   `.claude/settings*`, `.claude/hooks`, `.claude/skills` and
   `.claude-plugin`; Claude Code's own sandbox also protects `.mcp.json`,

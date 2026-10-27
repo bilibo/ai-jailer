@@ -1,9 +1,11 @@
 # Links the managed tree at /etc/claude-code, root-owned, so every Claude
-# Code session on the host is bound by it. The same module serves NixOS-WSL
-# at work and native NixOS at home; the options decide how far it reaches.
+# Code session on the host is bound by it, and creates one worker user per
+# customer from `harness.workers` (2026-10-27). The same module serves
+# NixOS-WSL at work and native NixOS at home.
 {
   config,
   lib,
+  options,
   pkgs,
   ...
 }:
@@ -16,15 +18,25 @@ let
       allowLocalCommits
       allowMemoryEdits
       allowConnectors
-      enforcementRoots
       extraDeny
       extraAllowedDomains
       allowManagedHooksOnly
       direnvPackage
+      extraKnownMarketplaces
       ;
-    strictAllowlist = cfg.sandboxStrictAllowlist;
-    inherit (cfg) extraKnownMarketplaces;
   };
+  devenvCache = import ../pkgs/devenv-cache.nix;
+  workerUsers = lib.mapAttrsToList (_: w: w.user) cfg.workers;
+  hmWorkers = lib.filterAttrs (_: w: w.homeManager) cfg.workers;
+  # trusted-users takes `@group` entries too: each worker's primary group
+  # (named after it), its extraGroups, and `agents`, which holds every worker.
+  untrustable = lib.unique (
+    lib.concatMap (w: [ w.user ] ++ map (g: "@${g}") ([ w.user ] ++ w.extraGroups)) (
+      lib.attrValues cfg.workers
+    )
+    ++ lib.optional (cfg.workers != { }) "@agents"
+  );
+  trustedWorkers = lib.intersectLists untrustable config.nix.settings.trusted-users;
 in
 {
   options.harness = {
@@ -40,22 +52,93 @@ in
       description = "Host kind. `wsl` adds the Windows-interop mitigations to the sandbox.";
     };
 
-    enforcementRoots = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [ "~/code/git" ];
+    owner = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "raul";
       description = ''
-        Directories under which the project rules apply. `~` is the session
-        user's home. Empty: project rules apply everywhere (a dedicated work
-        host). Non-empty: a mixed host whose other sessions keep
-        `git commit` and friends.
+        The human's login. Member of every worker's primary group, so it can
+        read worker homes, and the one account with a sudo rule to the
+        workers (`ownerSudo`). Required when `workers` is non-empty.
       '';
     };
 
-    sandboxStrictAllowlist = lib.mkOption {
+    workers = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule (
+          { name, ... }:
+          {
+            options = {
+              user = lib.mkOption {
+                type = lib.types.str;
+                default = "w-${name}";
+                defaultText = lib.literalExpression ''"w-''${name}"'';
+                description = "The worker's login. Its primary group has the same name.";
+              };
+              uid = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+                description = "Fixed UID; null lets NixOS allocate one.";
+              };
+              gitName = lib.mkOption {
+                type = lib.types.str;
+                example = "Claude (acme)";
+                description = "Git author name in the worker's Home Manager config.";
+              };
+              gitEmail = lib.mkOption {
+                type = lib.types.str;
+                example = "claude-acme@example.invalid";
+                description = "Git author email in the worker's Home Manager config.";
+              };
+              extraGroups = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                description = "Groups besides `agents`. Never `wheel`: the worker would gain sudo.";
+              };
+              homeManager = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Give the worker a Home Manager config importing `home/`. Takes effect only where the host imports the Home Manager NixOS module.";
+              };
+              codeRoot = lib.mkOption {
+                type = lib.types.str;
+                default = "code/git";
+                description = "The worker's clone directory, relative to its home.";
+              };
+            };
+          }
+        )
+      );
+      default = { };
+      example = lib.literalExpression ''
+        {
+          acme = {
+            gitName = "Claude (acme)";
+            gitEmail = "claude-acme@example.invalid";
+          };
+        }
+      '';
+      description = ''
+        One Linux user per customer, keyed by customer name: own 0750 home,
+        own Claude login, own git identity, lingering on, member of the
+        marker group `agents`, never in `nix.settings.trusted-users`.
+      '';
+    };
+
+    ownerSudo = lib.mkOption {
+      type = lib.types.enum [
+        "nopasswd"
+        "password"
+        "none"
+      ];
+      default = "nopasswd";
+      description = "The owner's sudo rule to every `agents` member: without a password, with one, or no rule.";
+    };
+
+    devenvCache = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Refuse network access to hosts outside the allowlist (true) or prompt for them (false).";
+      description = "Add devenv.cachix.org (`pkgs/devenv-cache.nix`) to the root nix.conf. Workers are not trusted users, so they cannot add it themselves.";
     };
 
     extraKnownMarketplaces = lib.mkOption {
@@ -136,15 +219,111 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
       {
-        assertion = config.security.allowUserNamespaces;
-        message = "harness: the Claude Code sandbox (bubblewrap) needs security.allowUserNamespaces = true.";
-      }
-    ];
+        assertions = [
+          {
+            assertion = config.security.allowUserNamespaces;
+            message = "harness: the Claude Code sandbox (bubblewrap) needs security.allowUserNamespaces = true.";
+          }
+          {
+            assertion = cfg.workers == { } || cfg.owner != null;
+            message = "harness: harness.workers is set, so harness.owner must name the human's login.";
+          }
+          {
+            assertion = !(lib.elem cfg.owner workerUsers);
+            message = "harness: harness.owner (${toString cfg.owner}) must not be a worker user.";
+          }
+          {
+            assertion = trustedWorkers == [ ];
+            message = "harness: worker users and their groups must not be in nix.settings.trusted-users: ${lib.concatStringsSep ", " trustedWorkers}.";
+          }
+          {
+            assertion = lib.all (u: builtins.match "[a-z_][a-z0-9_-]*" u != null) workerUsers;
+            message = "harness: worker user names must match ^[a-z_][a-z0-9_-]*$: ${lib.concatStringsSep ", " workerUsers}.";
+          }
+          {
+            assertion = lib.length (lib.unique workerUsers) == lib.length workerUsers;
+            message = "harness: worker user names must be distinct: ${lib.concatStringsSep ", " workerUsers}.";
+          }
+        ];
 
-    # A symlink into the store: root-owned, read-only, replaced atomically on rebuild.
-    environment.etc."claude-code".source = package;
-  };
+        # A symlink into the store: root-owned, read-only, replaced atomically on rebuild.
+        environment.etc."claude-code".source = package;
+
+        nix.settings = lib.mkIf cfg.devenvCache {
+          extra-substituters = [ devenvCache.url ];
+          extra-trusted-public-keys = [ devenvCache.key ];
+        };
+      }
+
+      (lib.mkIf (cfg.workers != { }) {
+        users.groups = {
+          agents = { };
+        }
+        // lib.mapAttrs' (
+          _: w:
+          lib.nameValuePair w.user {
+            # The null guards here and on the sudo rule let the owner
+            # assertion report a missing owner instead of a type error.
+            members = [ w.user ] ++ lib.optional (cfg.owner != null) cfg.owner;
+          }
+        ) cfg.workers;
+
+        users.users = lib.mapAttrs' (
+          name: w:
+          lib.nameValuePair w.user (
+            {
+              isNormalUser = true;
+              group = w.user;
+              extraGroups = [ "agents" ] ++ w.extraGroups;
+              home = "/home/${w.user}";
+              homeMode = "0750";
+              createHome = true;
+              linger = true;
+              shell = pkgs.bashInteractive;
+              # The GECOS field: no colons, no newlines.
+              description = "claude-nix-harness worker for ${name}";
+            }
+            // lib.optionalAttrs (w.uid != null) { inherit (w) uid; }
+          )
+        ) cfg.workers;
+
+        # The sudo module splices runAs verbatim into the sudoers Runas list,
+        # so "%agents" means any member of the agents group.
+        security.sudo.extraRules = lib.optional (cfg.ownerSudo != "none" && cfg.owner != null) {
+          users = [ cfg.owner ];
+          runAs = "%agents";
+          commands = [
+            {
+              command = "ALL";
+              options = lib.optional (cfg.ownerSudo == "nopasswd") "NOPASSWD";
+            }
+          ];
+        };
+      })
+
+      # Keyed on the option tree, not on config, so a host without the Home
+      # Manager NixOS module still evaluates.
+      (lib.optionalAttrs (options ? home-manager) {
+        home-manager.users = lib.mapAttrs' (
+          _: w:
+          lib.nameValuePair w.user {
+            imports = [ ../home ];
+            harness = {
+              enable = true;
+              codeRoot = "/home/${w.user}/${w.codeRoot}";
+            };
+            programs.git = {
+              enable = true;
+              userName = w.gitName;
+              userEmail = w.gitEmail;
+            };
+            home.stateVersion = config.system.stateVersion;
+          }
+        ) hmWorkers;
+      })
+    ]
+  );
 }

@@ -6,9 +6,13 @@
 # It must report MISSING lines, run to its summary and exit 1, never stop
 # early; no claude is an info line and no tmux a warning, neither MISSING.
 # Then the repo part, in three fake repos: the settings file as a
-# store symlink (its hooks must run), as a dangling symlink, as a plain file.
+# store symlink, as a dangling symlink, as a plain file.
 # The host line for a NixOS and a WSL os-release (fake markers; the build
 # sandbox has no /etc/os-release, so the plain case has no host at all).
+# The managed rules (absent: MISSING; present: ok, and every hook it names
+# runs), the worker accounts (agents group, linger per member, the sudoers
+# file checked with visudo -cf) and the caller's standing (worker, owner,
+# neither), with getent, loginctl, sudo and visudo stubbed.
 set -uo pipefail
 harness="${1:?usage: harness-doctor-test.sh <harness> <project-settings.json>}"
 settings="${2:?usage: harness-doctor-test.sh <harness> <project-settings.json>}"
@@ -19,10 +23,11 @@ mkdir -p "$tmp/home"
 # doctor <dir> [<path>]: harness doctor in <dir> with nothing (or only <path>)
 # on PATH; sets out and rc.
 doctor() {
-  out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" \
+  out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" USER="${T_USER:-tester}" \
     HARNESS_OS_RELEASE="${OS_RELEASE:-/var/empty/none}" HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
+    HARNESS_MANAGED_DIR="${MANAGED:-$tmp/no-managed}" HARNESS_SUDOERS="${SUDOERS:-$tmp/no-sudoers}" HARNESS_STORE_DIR="$tmp/store" \
     HARNESS_SYSTEM_BASHRC="${SYSTEM_BASHRC:-/var/empty/none}" ${DIRENV_CONFIG:+"DIRENV_CONFIG=$DIRENV_CONFIG"} \
-    ${T_CODE_ROOT:+"HARNESS_CODE_ROOT=$T_CODE_ROOT"} ${T_PROJECT:+"HARNESS_PROJECT=$T_PROJECT"} ${T_ROLE:+"HARNESS_ROLE=$T_ROLE"} \
+    ${T_CODE_ROOT:+"HARNESS_CODE_ROOT=$T_CODE_ROOT"} ${T_PROJECT:+"HARNESS_PROJECT=$T_PROJECT"} \
     "$harness" doctor 2>&1); rc=$?
 }
 check() { # check <description> <want-regex>
@@ -43,6 +48,14 @@ check "direnv reported missing" 'MISSING direnv'
 check "ran to the summary"      'harness doctor: [0-9]+ missing, [0-9]+ warnings'
 refute "no shell error"         'unbound variable|syntax error|line [0-9]+:|command not found'
 refute "no repo part outside a repo" 'repo: '
+# No managed settings: this host enforces nothing, and says so.
+check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(NixOS: harness\.enable; other Linux: harness bootstrap --workers \.\.\.\)'
+check "no getent: no agents group" 'info  no agents group: no worker users on this host'
+refute "no sudoers verdict without the file" 'visudo'
+refute "strictAllowlist is gone"  'strictAllowlist|strict network'
+refute "account sync verdicts are gone" 'account-synced'
+refute "role and managed-env lines are gone" 'HARNESS_ROLE|HARNESS_EXPECT_MANAGED'
+refute "no store-wide managed warning" 'this host carries managed settings'
 # No host claude is a supported shape (the plain WSL host: the VS Code
 # extension's binary, the CLI from a repo's harness.claudeCode.enable): an
 # info line, no claude doctor. No host tmux is a warning: ccmux carries its
@@ -77,9 +90,8 @@ doctor "$tmp/repo"
 exits "doctor in a repo, nothing on PATH" 1
 check "repo part runs"          'repo: '
 check "store symlink accepted"  'ok    \.claude/settings\.json -> /nix/store/'
-check "hooks run"               'ok    [1-9][0-9]* hooks in \.claude/settings\.json runnable'
 check "direnv missing in repo"  'MISSING direnv not on PATH'
-refute "no unrunnable hook"     'hook not runnable'
+refute "the repo file carries no hooks to check" 'hooks in \.claude/settings\.json|hook not runnable'
 
 rm "$tmp/repo/.claude/settings.json"; ln -s /nix/store/does-not-exist "$tmp/repo/.claude/settings.json"
 doctor "$tmp/repo"
@@ -88,7 +100,6 @@ check "dangling symlink"        'MISSING \.claude/settings\.json is a dangling s
 rm "$tmp/repo/.claude/settings.json"; echo '{}' >"$tmp/repo/.claude/settings.json"
 doctor "$tmp/repo"
 check "plain file"              'MISSING \.claude/settings\.json is a plain file'
-check "plain file without hooks" 'MISSING no runnable hook'
 
 # Inside a session the sandbox masks the file as a character device: say so,
 # never report the repo as broken. (-c follows the symlink.)
@@ -110,8 +121,6 @@ OS_RELEASE="$tmp/os-release" doctor "$tmp/empty"
 check "nixos host line"         'host: NixOS 26.11 \(Xantusia\) .*nix from the system configuration, 0 home-manager owned files skipped'
 check "nixos without a receipt is an info line" 'info  no receipt: harness bootstrap has not run here'
 refute "nixos without a receipt is no warning" 'warn  no receipt'
-check "no allowlist without a receipt is a warning" 'warn  sandbox\.network\.strictAllowlist is not true'
-refute "no allowlist without a receipt is not missing" 'MISSING sandbox\.network\.strictAllowlist'
 # The user side from the system configuration (NixOS programs.direnv):
 # direnv.toml under DIRENV_CONFIG and the hook in /etc/bashrc, nothing in HOME.
 mkdir -p "$tmp/etc-direnv"; printf '[global]\nload_dotenv = false\nstrict_env = true\nwarn_timeout = "2m"\n' >"$tmp/etc-direnv/direnv.toml"
@@ -139,25 +148,75 @@ refute "no mkhl.direnv on WSL is not missing" 'MISSING VS Code extension mkhl\.d
 doctor "$tmp/empty" "$tmp/vbin"
 check "no mkhl.direnv elsewhere is missing" 'MISSING VS Code extension mkhl\.direnv'
 
-# The environment lines: facts (info), counted nowhere; a role without a
-# project is the one warning.
+# The environment lines: facts (info), counted nowhere.
 doctor "$tmp/empty"
 read -r miss1 warn1 < <(summary_of)
 check "code root default"       "info  HARNESS_CODE_ROOT $tmp/home/code/git \\(default\\)"
 check "project unset"           "info  HARNESS_PROJECT unset: not inside a harness repo's shell"
-check "role unset"              'info  HARNESS_ROLE unset'
-refute "unset is no role warning" 'HARNESS_ROLE is set but'
-T_CODE_ROOT=/srv/code T_PROJECT=acme/app T_ROLE=work doctor "$tmp/empty"
+T_CODE_ROOT=/srv/code T_PROJECT=acme/app doctor "$tmp/empty"
 read -r miss2 warn2 < <(summary_of)
 check "code root set"           'info  HARNESS_CODE_ROOT /srv/code[[:space:]]'
 check "project set"             'info  HARNESS_PROJECT acme/app[[:space:]]'
-check "role set"                'info  HARNESS_ROLE work[[:space:]]'
-refute "set pair is no warning" 'HARNESS_ROLE is set but'
-T_ROLE=work doctor "$tmp/empty"
-read -r miss3 warn3 < <(summary_of)
-check "role without project is a warning" 'warn  HARNESS_ROLE is set but HARNESS_PROJECT is not'
-refute "role without project is not missing" 'MISSING HARNESS'
-if [ "$miss1" = "$miss2" ] && [ "$miss1" = "$miss3" ] && [ "$warn1" = "$warn2" ] && [ "$((warn1+1))" = "$warn3" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: counts: missing $miss1/$miss2/$miss3, warnings $warn1/$warn2/$warn3 (want equal missing, one more warning only for the inconsistent pair)"; fi
+if [ "$miss1" = "$miss2" ] && [ "$warn1" = "$warn2" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: counts: missing $miss1/$miss2, warnings $warn1/$warn2 (want the same: the environment lines count nowhere)"; fi
+
+# The managed rules present: ok, and every hook they name must run.
+mkdir -p "$tmp/managed/hooks"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/managed/hooks/env-guard.sh"; chmod +x "$tmp/managed/hooks/env-guard.sh"
+printf '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"%s/managed/hooks/env-guard.sh"}]}]}}\n' "$tmp" >"$tmp/managed/managed-settings.json"
+MANAGED="$tmp/managed" doctor "$tmp/empty"
+check "managed settings present" "ok    managed settings $tmp/managed/managed-settings\\.json"
+check "managed hooks run"       "ok    1 hooks in $tmp/managed/managed-settings\\.json runnable"
+refute "managed present is not missing" 'MISSING no managed settings|hook not runnable'
+chmod -x "$tmp/managed/hooks/env-guard.sh"
+MANAGED="$tmp/managed" doctor "$tmp/empty"
+check "a hook that cannot run"  "MISSING hook not runnable: $tmp/managed/hooks/env-guard\\.sh"
+check "no runnable hook left"   'MISSING no runnable hook in '
+chmod +x "$tmp/managed/hooks/env-guard.sh"
+
+# The worker accounts, with getent, loginctl, sudo and visudo stubbed. Group
+# lines are getent's: name:x:gid:members.
+mkdir -p "$tmp/abin"
+printf 'agents:x:100:w-acme,w-beta\nw-acme:x:101:raul\nw-beta:x:102:raul\nusers:x:103:stranger\n' >"$tmp/groups"
+cat >"$tmp/abin/getent" <<EOF
+#!/bin/sh
+[ "\$1" = group ] || exit 2
+[ -n "\$2" ] || { cat "$tmp/groups"; exit 0; }
+grep "^\$2:" "$tmp/groups" || exit 2
+EOF
+cat >"$tmp/abin/loginctl" <<EOF
+#!/bin/sh
+[ "\$1" = show-user ] || exit 1
+if grep -q -x "\$2" "$tmp/lingering"; then echo Linger=yes; else echo Linger=no; fi
+EOF
+# shellcheck disable=SC2016  # the stub's own $1
+printf '#!/bin/sh\n[ "$1" = -n ] && shift\nexec "$@"\n' >"$tmp/abin/sudo"
+cat >"$tmp/abin/visudo" <<EOF
+#!/bin/sh
+if [ -e "$tmp/visudo-bad" ]; then echo "parse error in \$2 near line 1"; exit 1; fi
+EOF
+chmod +x "$tmp/abin/getent" "$tmp/abin/loginctl" "$tmp/abin/sudo" "$tmp/abin/visudo"
+echo w-acme >"$tmp/lingering"
+doctor "$tmp/empty" "$tmp/abin"
+check "agents members"          'info  agents group members: w-acme,w-beta'
+check "linger on"               'ok    linger on for w-acme'
+check "linger off is a warning" 'warn  linger is off for w-beta: .*loginctl enable-linger w-beta'
+refute "linger off is not missing" 'MISSING linger'
+refute "no sudoers verdict while the file is absent" 'visudo'
+# Standing: in agents is a worker; in a w-* group an owner; else neither.
+T_USER=w-acme doctor "$tmp/empty" "$tmp/abin"
+check "standing: worker"        'info  standing: worker \(w-acme is in agents\)'
+T_USER=raul doctor "$tmp/empty" "$tmp/abin"
+check "standing: owner"         'info  standing: owner \(raul is a member of w-acme w-beta\)'
+T_USER=stranger doctor "$tmp/empty" "$tmp/abin"
+check "standing: neither"       'info  standing: neither worker nor owner \(stranger is in no agents group and no w-\* group\)'
+# The sudoers file, checked with visudo -cf through sudo.
+echo 'raul ALL=(%agents) NOPASSWD: ALL' >"$tmp/sudoers"
+SUDOERS="$tmp/sudoers" doctor "$tmp/empty" "$tmp/abin"
+check "sudoers passes visudo"   "ok    $tmp/sudoers passes visudo -cf"
+touch "$tmp/visudo-bad"
+SUDOERS="$tmp/sudoers" doctor "$tmp/empty" "$tmp/abin"
+check "sudoers that fails"      "MISSING $tmp/sudoers fails visudo -cf"
+rm "$tmp/visudo-bad"
 
 out=$("$harness" --version 2>&1); rc=$?
 exits "--version" 0; check "--version prints the revision" '^harness .+'

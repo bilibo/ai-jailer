@@ -14,6 +14,8 @@ let
     inherit pkgs;
     inherit (cfg) codeRoot;
   };
+
+  seedFile = pkgs.writeText "claude-settings-seed.json" (builtins.toJSON cfg.userSettingsSeed);
 in
 {
   options.harness = {
@@ -23,7 +25,22 @@ in
       type = lib.types.str;
       default = "${config.home.homeDirectory}/code/git";
       defaultText = lib.literalExpression ''"''${config.home.homeDirectory}/code/git"'';
-      description = "Directory holding <customer>/<repo> checkouts; `ccmux` resolves project names under it. Usually one of the NixOS module's enforcementRoots.";
+      description = "Directory holding <customer>/<repo> checkouts; `ccmux` resolves project names under it.";
+    };
+
+    userSettingsSeed = lib.mkOption {
+      type = lib.types.attrs;
+      default = { };
+      example = {
+        model = "sonnet";
+      };
+      description = ''
+        Keys written into `~/.claude/settings.json` once, at activation, when
+        that file does not exist; an existing file is never touched. Claude
+        Code owns the file afterwards (`/model` writes it), so it is a 0600
+        copy, never a store symlink. Not a place for rules: deny rules, hooks
+        and the sandbox come from the managed settings.
+      '';
     };
 
     direnvPackage = lib.mkOption {
@@ -79,19 +96,33 @@ in
       };
     };
 
-    home.packages = [
-      # Every repo's .envrc runs `devenv direnvrc`.
-      pkgs.devenv
-      pkgs.jq
-      ccmux
-    ];
+    home = {
+      packages = [
+        # Every repo's .envrc runs `devenv direnvrc`.
+        pkgs.devenv
+        pkgs.jq
+        ccmux
+      ];
 
-    home.sessionVariables = {
-      # `ccmux` and the devenv module's HARNESS_PROJECT export agree on the root.
-      HARNESS_CODE_ROOT = cfg.codeRoot;
-      # This module goes with the NixOS module; the devenv module warns at
-      # shell entry when it sees this but no /etc/claude-code.
-      HARNESS_EXPECT_MANAGED = "1";
+      sessionVariables = {
+        # `ccmux` and the devenv module's HARNESS_PROJECT export agree on the root.
+        HARNESS_CODE_ROOT = cfg.codeRoot;
+      };
+
+      # Runs even with the empty default seed, writing `{}`: whether Claude
+      # Code needs the file to exist at all is live check V6 (2026-10-27,
+      # pending), which decides if an empty seed can be skipped. After
+      # linkGeneration, which removes the links the new generation dropped,
+      # so the store symlink an older generation of this module wrote here
+      # (changelog 2026-10-24) is gone first; a symlink still in place is
+      # left alone rather than written through. `run` makes
+      # `home-manager switch --dry-run` print the commands instead.
+      activation.harnessSeedClaudeSettings = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+        if [ ! -e "$HOME/.claude/settings.json" ] && [ ! -L "$HOME/.claude/settings.json" ]; then
+          run mkdir -p "$HOME/.claude"
+          run install -m 0600 ${seedFile} "$HOME/.claude/settings.json"
+        fi
+      '';
     };
   };
 }

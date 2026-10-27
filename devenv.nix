@@ -8,10 +8,6 @@ _: {
   name = "claude-nix-harness";
   harness = {
     claudeCode.enable = true;
-    # Auto-memory under ~/.claude/projects/<slug>/memory stays writable;
-    # nothing else under ~/.claude opens up.
-    allowMemoryEdits = true;
-    # allowLocalCommits = true;        # commits on the worktree branch; push stays impossible
     # readFence = true;                # hide the rest of $HOME from sandboxed commands (roadmap 2.1)
     # extraAllowRead = [ "~/.cargo" ]; # with readFence: what the project reads under $HOME
     # allowConnectors = true;          # claude.ai connectors, MCP servers outside the sandbox

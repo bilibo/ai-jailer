@@ -9,15 +9,11 @@
 # pattern must match. The pattern is check.sh's `blocked` plus the hook's
 # own message, as the credential case expects it.
 #
-# Then `harness check --dry-run` on fake repos, one per sandbox state and
-# role. In the command center (the settings file's sandbox off, the repo's
-# HARNESS_ROLE center) the seven cases only the sandbox holds print one
-# `skip` line each and are not listed to run; the hook cases are. A repo
-# with the sandbox on, or off without role center, lists every case, the
-# latter with a warning; another repo's HARNESS_ROLE in this shell does not
-# count; a masked settings file (/dev/null) leaves it to the role. Last,
-# which claude the sessions would run (stub direnv), and the exit 69 when
-# there is none.
+# Then `harness check --dry-run` on fake repos, one per sandbox state. Every
+# case is listed in each, none skipped, including sudo-text and home-fence; a
+# repo file with the sandbox off draws one warning and changes nothing else; a
+# masked settings file (/dev/null) draws none. Last, which claude the
+# sessions would run (stub direnv), and the exit 69 when there is none.
 set -uo pipefail
 harness="${1:?usage: check-parser-test.sh <harness> <fixtures-dir>}"
 fixtures="${2:?usage: check-parser-test.sh <harness> <fixtures-dir>}"
@@ -47,12 +43,11 @@ refute "the model's comment not seen"         'the file was not read'
 out=$("$harness" check --parse "$fixtures/does-not-exist.jsonl" 2>&1); rc=$?
 if [ "$rc" = 66 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a missing transcript exits $rc, want 66"; fi
 
-# --dry-run by role. No direnv on PATH: the role comes from the shell's
-# HARNESS_ROLE when DEVENV_ROOT is the repo, else there is none.
+# --dry-run by sandbox state. No direnv on PATH, so no claude is resolved
+# from the repo's shell; the dry run lists the cases regardless.
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 tmp=$(cd "$tmp" && pwd -P)
-sandbox_cases="sandbox ssh-agent home-write repo-write env-deny cred-sandbox git-hookspath"
-hook_cases="devenv-env git-commit cred-read config-write edit-envrc nested-flags hooks-registered tmux-socket tmux-display"
+all_cases="sandbox devenv-env git-commit cred-read config-write edit-envrc nested-flags ssh-agent home-write hooks-registered repo-write env-deny cred-sandbox git-hookspath tmux-socket tmux-display sudo-text home-fence"
 fake_repo() { # fake_repo <name> <settings JSON | @symlink target>
   mkdir -p "$tmp/$1/.claude"; : >"$tmp/$1/.envrc"
   case "$2" in @*) ln -s "${2#@}" "$tmp/$1/.claude/settings.json" ;; *) printf '%s\n' "$2" >"$tmp/$1/.claude/settings.json" ;; esac
@@ -63,48 +58,29 @@ dry_run() { # dry_run <name> [VAR=value...]: harness check --dry-run on the fake
 }
 all_listed() { # all_listed <label>: every case listed to run, none skipped
   local c
-  for c in $sandbox_cases $hook_cases; do check "$1: $c listed" "would +$c "; done
+  for c in $all_cases; do check "$1: $c listed" "would +$c "; done
   refute "$1: nothing skipped" 'skip  '
   check  "$1: summary" 'dry run, no session started, 0 skipped'
+  refute "$1: no role text" 'role:'
 }
 
-fake_repo center '{"sandbox":{"enabled":false}}'
-dry_run center DEVENV_ROOT="$tmp/center" HARNESS_ROLE=center
-if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: --dry-run in the center exits $rc"; fi
-check "center: role line" 'role: center, sandbox off: the cases only the sandbox holds are skipped'
-for c in $sandbox_cases; do
-  check  "center: $c skipped"  "skip  $c +sandbox off \\(role center\\): [[:alpha:]]"
-  refute "center: $c not run"  "would +$c "
-done
-for c in $hook_cases; do check "center: $c listed" "would +$c "; done
-check  "center: summary"      'dry run, no session started, 7 skipped'
-refute "center: no warning"   'warn  '
-
 fake_repo work '{"sandbox":{"enabled":true}}'
-dry_run work DEVENV_ROOT="$tmp/work" HARNESS_ROLE=work
-all_listed "work"
 dry_run work
-all_listed "work, no role"
-refute "work: no warning" 'warn  '
-dry_run work DEVENV_ROOT="$tmp/work" HARNESS_ROLE=center
-all_listed "sandbox on, role center"
+if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: --dry-run exits $rc"; fi
+all_listed "sandbox on"
+refute "sandbox on: no warning" 'warn  the repo file'
 
-fake_repo broken '{"sandbox":{"enabled":false}}'
-dry_run broken DEVENV_ROOT="$tmp/broken" HARNESS_ROLE=work
-all_listed "sandbox off, role work"
-check "sandbox off, role work: warned" 'warn  sandbox off in \.claude/settings\.json and the role is work: only the command center'
-dry_run broken
-all_listed "sandbox off, no role"
-check "sandbox off, no role: warned" 'warn  sandbox off .* the role is work'
-dry_run broken DEVENV_ROOT="$tmp/work" HARNESS_ROLE=center
-all_listed "another repo's role"
+# A repo file with the sandbox off draws one warning and every case still
+# runs: the managed settings keep the sandbox on whatever the repo says.
+fake_repo off '{"sandbox":{"enabled":false}}'
+dry_run off
+all_listed "sandbox off"
+check "sandbox off: warned" 'warn  the repo file has the sandbox off; a managed host keeps it on regardless'
 
 fake_repo masked @/dev/null
-dry_run masked DEVENV_ROOT="$tmp/masked" HARNESS_ROLE=center
-check "masked, role center: summary" 'dry run, no session started, 7 skipped'
 dry_run masked
-all_listed "masked, no role"
-refute "masked: no warning" 'warn  '
+all_listed "masked file"
+refute "masked file: no warning" 'warn  '
 
 # The claude the sessions run, in the header: from the repo's own shell, its
 # PATH's (a store directory included); else `direnv exec <repo>`'s, the

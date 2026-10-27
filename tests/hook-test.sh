@@ -2,18 +2,14 @@
 #   hook-test.sh <path-to-env-guard.sh> [--direnv-stub]
 #
 # Feeds hook JSON on stdin, no Claude Code needed (0 = allow, 2 = block).
-# Add a case per hard limit you rely on; a case that stops passing after a
-# regex change is the point of this file.
+# Every rule applies in every directory: the hook has no enforcement roots
+# and no command-center mode. With --direnv-stub (a hook built against the
+# stub direnv) the worktree .envrc and pre-command environment sections run
+# too. Add a case per hard limit you rely on; a case that stops passing after
+# a regex change is the point of this file.
 set -uo pipefail
 hook="${1:?usage: hook-test.sh <env-guard.sh>}"
-# The roots come from the built hook; with none, everything is in scope and
-# the out-of-scope section is skipped. A command center's hook (CENTER_ROOT,
-# lib/hooks.nix) runs every case from inside its checkout, then its own
-# section; HOOK_TEST_CENTER runs that section against any hook.
-ROOTS=$(sed -n 's/^ENFORCEMENT_ROOTS="\(.*\)"$/\1/p' "$hook")
-CENTER="${HOOK_TEST_CENTER:-$(sed -n 's/^CENTER_ROOT="\(.*\)"$/\1/p' "$hook")}"
-IN="${HOOK_TEST_IN:-${CENTER:-${ROOTS%%:*}/acme/infra}}"; IN="${IN/#\~/$HOME}"
-OUT="${HOOK_TEST_OUT:-/tmp/p}"
+IN="${HOOK_TEST_IN:-$HOME/code/git/acme/infra}"
 pass=0; fail=0
 
 run() { # run <expected-exit> <json>
@@ -129,11 +125,8 @@ block 'cat .env'
 block 'cat ./.env.local'
 block 'cat terraform.tfvars'
 block 'head -c 100 terraform.tfstate'
-block 'cat ~/.azure/msal_token_cache.json'
-block 'cat ~/.ssh/id_ed25519'
 block 'python3 -c "print(open(\".env\").read())"'
 block 'source .env'
-block 'grep -r token ~/.azure/'
 block 'base64 .env'
 block 'diff /dev/null .env'
 block 'sort terraform.tfvars'
@@ -159,9 +152,19 @@ block 'du --files0-from=.env'
 block 'git rm --pathspec-from-file=.env'
 block 'file -b -f .env'
 block 'file --files-from .env'
-block 'cat ~/.aws/credentials'
-block 'cat ~/.git-credentials'
-block 'cat ~/.config/gh/hosts.yml'
+block 'cat ~/.claude/.credentials.json'
+block 'cat ~/.claude.json'
+block 'cat prod.tfvars'
+# Home-directory credentials are the sandbox's denyRead and the 0750 home's
+# job now (managed settings), not rule 3's: the hook no longer matches them.
+allow 'cat ~/.azure/msal_token_cache.json'
+allow 'cat ~/.ssh/id_ed25519'
+allow 'grep -r token ~/.azure/'
+allow 'cat ~/.aws/credentials'
+allow 'cat ~/.git-credentials'
+allow 'cat ~/.config/gh/hosts.yml'
+allow 'cat ~/.netrc'
+allow 'cat ~/.npmrc'
 allow 'ls -la .env'
 allow 'stat .env'
 allow 'rm .env.bak'
@@ -211,6 +214,15 @@ allow 'ls .claude/ 2>/dev/null'
 allow 'cat devenv.nix >/dev/null 2>&1'
 allow 'cat devenv.nix'
 allow 'git diff devenv.nix'
+# direnv approval is the human's (`allow`, `permit`, `grant`, `edit`).
+block 'direnv allow'
+block 'direnv permit'
+block 'direnv grant'
+block 'direnv edit'
+block 'bash -c "direnv allow"'
+allow 'direnv status'
+allow 'direnv reload'
+allow 'direnv export json'
 
 # --- 5. plugins / mods ----------------------------------------------------
 allow 'claude --version'
@@ -223,8 +235,7 @@ block 'claude --mcp-config ./m.json -p hi'
 block 'claude --agents ./a.json -p hi'
 block 'CLAUDE_CODE_PLUGIN_DIRS=/tmp/x claude -p hi'
 # A nested session launched with these flags would load none of the repo's
-# rules (project rule; on a host without managed settings the repo is all
-# there is).
+# rules.
 block 'claude -p hi --setting-sources user'
 block 'claude --setting-sources=user,local -p hi'
 block 'claude --settings /tmp/loose.json -p hi'
@@ -283,7 +294,7 @@ allow 'tmux list-panes -a'
 allow 'tmux has-session -t =acme-infra'
 allow 'tmux display-message -p "#S"'
 allow 'tmux display -p "#{window_name}"'
-allow 'tmux show-environment -g HARNESS_ROLE'
+allow 'tmux show-environment -g TERM'
 allow 'tmux showw -g'
 allow 'tmux -L other ls'
 allow 'tmux -S /tmp/tmux-1000/default list-windows'
@@ -423,165 +434,26 @@ run 2 "$(edit_file notes.txt)"
 run 2 "$(edit_file s.json)"
 cwd="$IN"; rm -rf "$ln_dir"
 
-# --- Outside the enforcement roots: project rules off, universal rules on --
-if [ -n "$ROOTS" ]; then
-cwd="$OUT"
-allow 'git commit -m "personal"'
-allow 'git push origin main'
-allow 'terraform apply'
-allow 'echo x > devenv.nix'
-allow 'az group create -n x'
-run 0 "$(edit_file "$OUT/devenv.nix")"
-run 0 "$(edit_file "$OUT/.envrc")"
-run 0 "$(edit_file "$OUT/.claude/settings.json")"
+# --- A repo is a repo wherever it is: no roots to be outside of -------------
+cwd="$HOME/elsewhere/x"
+block 'git push origin main'
+block 'git -C ~/elsewhere/x push origin main'
+block 'git commit -m "personal"'
+block 'terraform apply'
+block 'echo x > devenv.nix'
 block 'sudo ls'
-block 'az login'
-block 'cat .env'
-block 'nixos-rebuild switch'
-block 'claude --plugin-dir ./evil -p hi'
-block 'cmd.exe /c dir'
-run 2 "$(edit_file "$HOME/.claude/settings.json")"
-run 2 "$(edit_file "$HOME/.bashrc")"
-# Sessions outside the roots keep their launch flags and settings.local.json.
-allow 'claude --dangerously-skip-permissions -p hi'
-allow 'claude --settings /tmp/mine.json -p hi'
-# ccmux launches into harness repos only: its flags count everywhere.
-block 'ccmux acme/infra --bare'
-allow 'ccmux acme/infra --worktree'
-# The tmux rule is a project rule: no harness sandbox out here to escape.
-allow 'tmux new-window x'
-block "tmux -S $IN/sock new-window x"
-run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$OUT\"}"
-run 2 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"user_settings\",\"cwd\":\"$OUT\"}"
-# A session outside the roots that reaches into a repo under them.
-block "git -C $IN push"
-block "cd $IN && terraform apply"
-block "bash -c 'cd ~${IN#"$HOME"} && git commit -m x'"
-run 2 "$(edit_file "$IN/devenv.nix")"
-run 2 "$(edit_file "$IN/.envrc")"
-run 2 "$(edit_file "/x/..$IN/devenv.nix")"
+run 2 "$(edit_file "$cwd/devenv.nix")"
+run 2 "$(edit_file "$cwd/.envrc")"
 # Unknown cwd fails closed.
 run 2 '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}'
 cwd="$IN"
-fi
-
-# --- The command center: other repos' setup files open, its own closed ----
-# (docs/command-center.md). Every case above ran from inside the checkout.
-if [ -n "$CENTER" ]; then
-cwd="$CENTER"; other="${CENTER%/*/*}/acme/infra"
-# Its own root, under any spelling, stays a work repo's.
-run 2 "$(edit_file "$CENTER/devenv.nix")"
-run 2 "$(edit_file "$CENTER/devenv.yaml")"
-run 2 "$(edit_file "$CENTER/devenv.lock")"
-run 2 "$(edit_file "$CENTER/.envrc")"
-run 2 "$(edit_file "$CENTER/devenv/devenv.nix")"
-run 2 "$(edit_file "$CENTER/.claude/settings.local.json")"
-run 2 "$(edit_file "$CENTER/.claude/hooks/x.sh")"
-run 2 "$(edit_file "$CENTER/.claude/skills/x/SKILL.md")"
-run 2 "$(edit_file "${CENTER^^}/devenv.nix")"
-run 2 "$(edit_file "$other/../../bilibo/claude-nix-harness/devenv.nix")"
-# Every repo: the files that turn its rules off unseen, credentials, git's
-# exec vectors, plugin manifests, your own config.
-run 2 "$(edit_file "$other/.claude/settings.json")"
-run 2 "$(edit_file "$other/.claude/settings.local.json")"
-run 2 "$(edit_file "$other/devenv.local.nix")"
-run 2 "$(edit_file "$other/devenv.local.yaml")"
-run 2 "$(edit_file "$other/.env")"
-run 2 "$(edit_file "$other/terraform.tfvars")"
-run 2 "$(edit_file "$other/.git/hooks/pre-commit")"
-run 2 "$(edit_file "$other/.git/config")"
-run 2 "$(edit_file "$other/.claude/skills/x/.claude-plugin/plugin.json")"
-run 2 "$(edit_file "$HOME/.claude/skills/x/SKILL.md")"
-# Other repos' setup files: open to the Edit and Write tools.
-run 0 "$(edit_file "$other/devenv.nix")"
-run 0 "$(edit_file "$other/devenv.yaml")"
-run 0 "$(edit_file "$other/devenv.lock")"
-run 0 "$(edit_file "$other/.envrc")"
-run 0 "$(edit_file "$other/.claude/skills/x/SKILL.md")"
-run 0 "$(edit_file "$other/.claude/hooks/x.sh")"
-run 0 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$CENTER\",\"tool_input\":{\"file_path\":\"$other/.envrc\",\"content\":\"use devenv\"}}"
-# A link from elsewhere into the root is the root; an unknown cwd fails closed.
-ln_dir=$(mktemp -d); ln -s "$CENTER/devenv.nix" "$ln_dir/devenv.nix"
-run 2 "$(edit_file "$ln_dir/devenv.nix")"
-block "echo x >> $ln_dir/devenv.nix"
-rm -rf "$ln_dir"
-run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$other/devenv.nix\"}}"
-# Shell writes: only one simple command naming another repo's file by an
-# absolute path. A relative name is the root's: no following `cd`.
-block 'echo x >> devenv.nix'
-block 'cd ../../acme/infra && echo x >> devenv.nix'
-block "echo x >> $CENTER/devenv.nix"
-block "echo x >> $other/../../bilibo/claude-nix-harness/devenv.nix"
-block "echo x >> \$(echo $CENTER)/devenv.nix"
-block "echo x >> \$PWD/devenv.nix"
-block "echo x >> ${CENTER%/*}/*/devenv.nix"
-block "echo x >> ${CENTER%/*/*}/{acme/infra,bilibo/claude-nix-harness}/devenv.nix"
-block 'echo x >> ~+/devenv.nix'
-block 'echo x >> /proc/self/cwd/devenv.nix'
-block "echo x >> $other/devenv.nix; echo y >> devenv.nix"
-block "echo x >> $other/devenv.nix && cp $other/devenv.nix ."
-block "echo x >> $other/devenv.nix"$'\n'"echo y >> devenv.nix"
-block "printf x | tee $other/devenv.nix"
-block "echo x >> $other/.claude/settings.json"
-block "echo x >> $other/devenv.local.nix"
-block "echo x >> $other/.git/hooks/pre-commit"
-block "rm -rf $other/.claude/"
-block "mv $other/.claude/settings.local.json /tmp/"
-block "dd if=/tmp/x of=$other/devenv.nix"
-block 'echo x >> ~/.claude/CLAUDE.md'
-block 'echo x >> ~/.claude/projects/-home-x-repo/memory/MEMORY.md'
-# A copy's destination counts too: it could carry a config file into the root.
-block "cp $other/devenv.nix ."
-block "cp $other/devenv.nix $CENTER"
-block "mv $other/.envrc $CENTER/"
-block "cp -t $CENTER $other/devenv.nix"
-block "cp -t$CENTER $other/devenv.nix"
-block "ln -sf $other/devenv.nix devenv"
-allow "echo x >> $other/devenv.nix"
-allow "echo 'use devenv' > $other/.envrc"
-allow 'echo x >> ~/code/git/acme/infra/devenv.yaml'
-allow "echo x >> $other/.claude/agents/a.md"
-allow "sed -i s/a/b/ $other/devenv.yaml"
-allow "rm $other/.envrc"
-allow "rm -rf $other/.claude/skills/old"
-allow "cp $other/devenv.nix $other/devenv.nix.bak"
-allow "mv /tmp/x/devenv.lock $other/devenv.lock"
-allow "cat $other/devenv.nix > /tmp/infra-devenv.nix"
-allow 'harness init acme/new'
-# Unchanged: git history in any repo, nested launches, the universal rules.
-block "git -C $other push"
-block "git -C $other commit -m x"
-block "cd $other && git push"
-block "bash -c 'cd $other && git reset --hard'"
-block 'ccmux acme/infra --bare'
-block "claude -p hi --settings $other/x.json"
-block 'sudo ls'
-block 'terraform apply'
-allow "git -C $other diff --cached"
-allow 'ccmux acme/infra'
-# Started from (or moved into) another repo: its files by the Edit tool, any
-# name; the shell still only by absolute path.
-cwd="$other"
-run 0 "$(edit_file devenv.nix)"
-run 2 "$(edit_file "$CENTER/devenv.nix")"
-block 'echo x >> devenv.nix'
-allow "echo x >> $other/devenv.nix"
-cwd="$IN"
-fi
-
-# --- Roots with capitals: the `~` form of a path under them still counts ---
-upper=$(mktemp); sed 's|^ENFORCEMENT_ROOTS=.*|ENFORCEMENT_ROOTS="~/Code"|' "$hook" > "$upper"; chmod +x "$upper"
-hook_main="$hook"; hook="$upper"; cwd="$OUT"
-block 'git -C ~/Code/x push origin main'
-allow 'git -C ~/elsewhere/x push origin main'
-hook="$hook_main"; cwd="$IN"; rm -f "$upper"
 
 # --- ConfigChange ---------------------------------------------------------
 run 2 '{"hook_event_name":"ConfigChange","source":"user_settings"}'
 run 2 '{"hook_event_name":"ConfigChange","source":"policy_settings"}'
 run 0 '{"hook_event_name":"ConfigChange","source":"project_settings"}'
 # settings.local.json outranks the repo file for scalar keys and hot-reloads;
-# under the roots it is blocked, with no cwd it fails closed.
+# it is blocked, with or without a cwd.
 run 2 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"local_settings\",\"cwd\":\"$IN\"}"
 run 2 '{"hook_event_name":"ConfigChange","source":"local_settings"}'
 run 0 "{\"hook_event_name\":\"ConfigChange\",\"source\":\"project_settings\",\"cwd\":\"$IN\"}"

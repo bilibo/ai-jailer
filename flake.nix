@@ -36,18 +36,6 @@
         pkgs:
         let
           direnvPackage = pkgs.direnv;
-          hooks = import ./lib/hooks.nix {
-            inherit pkgs direnvPackage;
-            inherit (pkgs) lib;
-          };
-          # The command center's hook at /repo: memory writable, its default
-          # there, and center-guard.sh spliced in.
-          centerHooks = import ./lib/hooks.nix {
-            inherit pkgs direnvPackage;
-            inherit (pkgs) lib;
-            allowMemoryEdits = true;
-            centerRoot = "/repo";
-          };
         in
         {
           # Host tools for an unmanaged host, pinned by this flake's lock:
@@ -56,25 +44,18 @@
           # call, the same devenv the modules assume.
           direnv = direnvPackage;
           inherit (pkgs) devenv;
-          # A dedicated work host: every rule everywhere.
+          # The managed tree: every rule, for every user on the host.
           managed = managedTree pkgs { };
-          # A mixed host: project rules only under the roots.
-          managed-scoped = managedTree pkgs {
-            enforcementRoots = [ "~/code/git" ];
-            strictAllowlist = false;
-          };
           # What the devenv module writes into a repo, with default options;
           # `/repo` stands for the checkout path devenv passes.
           project-settings = (pkgs.formats.json { }).generate "claude-settings.json" (
             (harnessLib pkgs).projectSettings {
-              hookDir = "${hooks}";
               repoRoot = "/repo";
             }
           );
           # The same with the read fence on (`harness.readFence = true`).
           project-settings-fenced = (pkgs.formats.json { }).generate "claude-settings-fenced.json" (
             (harnessLib pkgs).projectSettings {
-              hookDir = "${hooks}";
               repoRoot = "/repo";
               readFence = true;
               extraAllowRead = [ "~/.cargo" ];
@@ -84,20 +65,7 @@
           # file devenv wrote for the actual repo, never at /repo.
           project-settings-elsewhere = (pkgs.formats.json { }).generate "claude-settings-elsewhere.json" (
             (harnessLib pkgs).projectSettings {
-              hookDir = "${hooks}";
               repoRoot = "/home/acme/code/git/acme/demo";
-            }
-          );
-          # What the module writes for `harness.role = "center"` with its
-          # defaults: the sandbox off, memory writable, the setup-file rules
-          # for /repo only, the rest as above.
-          project-settings-center = (pkgs.formats.json { }).generate "claude-settings-center.json" (
-            (harnessLib pkgs).projectSettings {
-              hookDir = "${centerHooks}";
-              repoRoot = "/repo";
-              centerRoot = "/repo";
-              sandbox = false;
-              allowMemoryEdits = true;
             }
           );
           ccmux = import ./pkgs/ccmux.nix { inherit pkgs; };
@@ -131,7 +99,6 @@
         };
       });
 
-      # The hook's out-of-root cases only run with roots set, hence both trees.
       checks = forAll (
         pkgs:
         let
@@ -155,37 +122,105 @@
             inherit (pkgs) lib;
             direnvPackage = direnvStub;
           };
-          # The command center's hook at a real-looking checkout, memory on
-          # as there: hook-test.sh runs every case from inside it, then the
-          # center's own (other repos' setup files open).
-          centerTestHooks = import ./lib/hooks.nix {
-            inherit pkgs;
-            inherit (pkgs) lib;
-            direnvPackage = p.direnv;
-            allowMemoryEdits = true;
-            centerRoot = "/home/u/code/git/bilibo/claude-nix-harness";
-          };
-          # The NixOS module evaluated, never built into a system: only the
-          # tree it links at /etc/claude-code is forced, and, for the
-          # assertion, config.assertions, which needs no toplevel either.
-          nixosConfig =
-            allowUserNamespaces:
-            (nixpkgs.lib.nixosSystem {
+          # The NixOS module evaluated with `extra` merged in, never built
+          # into a system: only the slices the checks read are forced (the
+          # tree linked at /etc/claude-code, the worker users, groups, sudo
+          # rule and substituters, config.assertions), none needs a
+          # toplevel. The root filesystem and grub lines are what a toplevel
+          # would need; they keep a forced one from failing on the fixture.
+          # Home Manager is not an input of this flake, so `options ?
+          # home-manager` is false here and the module's worker HM branch is
+          # never evaluated; that branch is live check V6.
+          nixosSystemWith =
+            extra:
+            nixpkgs.lib.nixosSystem {
               inherit system;
               modules = [
                 self.nixosModules.harness
                 {
                   nixpkgs.pkgs = pkgs;
                   harness.enable = true;
-                  security.allowUserNamespaces = allowUserNamespaces;
                   system.stateVersion = "26.05";
+                  fileSystems."/" = {
+                    device = "x";
+                    fsType = "ext4";
+                  };
+                  boot.loader.grub.enable = false;
                 }
+                extra
               ];
-            }).config;
-          managedEtc = (nixosConfig true).environment.etc."claude-code".source;
-          harnessAssertion = pkgs.lib.findFirst (a: pkgs.lib.hasPrefix "harness:" a.message) null (
-            builtins.filter (a: !a.assertion) (nixosConfig false).assertions
-          );
+            };
+          nixosConfig = extra: (nixosSystemWith extra).config;
+          managedEtc = (nixosConfig { }).environment.etc."claude-code".source;
+          workerFixture.harness = {
+            owner = "raul";
+            workers = {
+              acme = {
+                gitName = "Claude (acme)";
+                gitEmail = "claude-acme@example.invalid";
+              };
+              beta = {
+                uid = 1101;
+                gitName = "Claude (beta)";
+                gitEmail = "claude-beta@example.invalid";
+                homeManager = false;
+              };
+            };
+          };
+          workerSystem = nixosSystemWith workerFixture;
+          workerSlices =
+            let
+              c = workerSystem.config;
+            in
+            pkgs.writeText "nixos-workers.json" (
+              builtins.toJSON {
+                acme = {
+                  inherit (c.users.users."w-acme")
+                    group
+                    extraGroups
+                    homeMode
+                    linger
+                    ;
+                };
+                betaUid = c.users.users."w-beta".uid;
+                acmeMembers = c.users.groups."w-acme".members;
+                hasAgents = c.users.groups ? agents;
+                sudoRules = c.security.sudo.extraRules;
+                inherit (c.nix.settings) extra-substituters;
+                etc = "${c.environment.etc."claude-code".source}";
+                hasHomeManager = workerSystem.options ? home-manager;
+                failed = map (a: a.message) (builtins.filter (a: !a.assertion) c.assertions);
+              }
+            );
+          # Each case: module config and a substring of the first failing
+          # `harness:` assertion message it must produce (nixos/default.nix).
+          assertionCases = [
+            {
+              config.security.allowUserNamespaces = false;
+              expect = "harness: the Claude Code sandbox (bubblewrap) needs security.allowUserNamespaces = true.";
+            }
+            {
+              config = workerFixture // {
+                nix.settings.trusted-users = [ "w-acme" ];
+              };
+              expect = "harness: worker users and their groups must not be in nix.settings.trusted-users: w-acme.";
+            }
+            {
+              config = workerFixture // {
+                nix.settings.trusted-users = [ "@agents" ];
+              };
+              expect = "harness: worker users and their groups must not be in nix.settings.trusted-users: @agents.";
+            }
+            {
+              config.harness = { inherit (workerFixture.harness) workers; };
+              expect = "harness: harness.workers is set, so harness.owner must name the human's login.";
+            }
+          ];
+          harnessAssertion =
+            extra:
+            pkgs.lib.findFirst (a: pkgs.lib.hasPrefix "harness:" a.message) null (
+              builtins.filter (a: !a.assertion) (nixosConfig extra).assertions
+            );
           # The devenv module under lib.evalModules, not devenv: stand-ins
           # for the devenv options it sets or reads, the checkout at /repo.
           # The file it would write, its packages and its enterShell as JSON.
@@ -253,9 +288,6 @@
         in
         {
           hook-test = test "hook-test" ./tests/hook-test.sh "${p.managed}/hooks/env-guard.sh";
-          hook-test-scoped =
-            test "hook-test-scoped" ./tests/hook-test.sh
-              "${p.managed-scoped}/hooks/env-guard.sh";
           project-settings-test =
             test "project-settings-test" ./tests/project-settings-test.sh
               "${p.project-settings}";
@@ -265,14 +297,10 @@
           project-settings-root-test =
             test "project-settings-root-test" ./tests/project-settings-test.sh
               "${p.project-settings-elsewhere} /home/acme/code/git/acme/demo";
-          project-settings-center-test =
-            test "project-settings-center-test" ./tests/project-settings-test.sh
-              "${p.project-settings-center} center";
           ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
           hook-test-worktree =
             test "hook-test-worktree" ./tests/hook-test.sh
               "${stubHooks}/env-guard.sh --direnv-stub";
-          hook-test-center = test "hook-test-center" ./tests/hook-test.sh "${centerTestHooks}/env-guard.sh";
           host-config-test =
             test "host-config-test" ./tests/host-config-test.sh
               "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
@@ -295,91 +323,90 @@
               "${p.harness}/bin/harness ${./tests/fixtures}";
           # The module's managed tree: the sandbox block, the hook by its
           # stable path, the deny rules, the mod policy with no marketplace
-          # directory; and the user-namespace assertion.
+          # directory. Then the worker fixture: users, groups, the owner's
+          # sudo rule, the devenv substituter, no failed assertion, and no
+          # Home Manager in the option tree (see nixosSystemWith).
           nixos-module-eval = pkgs.runCommand "nixos-module-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
             s=${managedEtc}/managed-settings.json
-            jq -e '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and .sandbox.network.strictAllowlist == true' "$s"
+            jq -e '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and .syncClaudeAiSkills == false and .syncClaudeAiPlugins == false and (.sandbox.network | has("strictAllowlist") | not)' "$s"
             jq -e '[.hooks[][].hooks[].command] | length > 0 and all(startswith("/etc/claude-code/hooks/"))' "$s"
             jq -e '.permissions.deny | index("Bash(git push)") and index("Bash(nh os switch)")' "$s"
             jq -e '.allowManagedHooksOnly == true and .disableSideloadFlags == true and .strictKnownMarketplaces == [] and (has("enabledPlugins") or has("extraKnownMarketplaces") | not)' "$s"
             test -x ${managedEtc}/hooks/env-guard.sh
             test ! -e ${managedEtc}/plugins
-            echo "nixos-module-eval: managed tree ${managedEtc}" | tee $out
+            w=${workerSlices}
+            jq -e '.acme.group == "w-acme" and (.acme.extraGroups | index("agents")) and .acme.homeMode == "0750" and .acme.linger == true' "$w"
+            jq -e '.betaUid == 1101 and (.acmeMembers | index("raul") and index("w-acme")) and .hasAgents' "$w"
+            jq -e '[.sudoRules[] | select(.runAs == "%agents")] | length == 1 and (.[0].users == ["raul"]) and (.[0].commands[0].options | index("NOPASSWD"))' "$w"
+            jq -e '(."extra-substituters" | index("https://devenv.cachix.org")) and (.etc | startswith("${builtins.storeDir}/")) and .hasHomeManager == false and .failed == []' "$w"
+            test -e "$(jq -r .etc "$w")/managed-settings.json"
+            echo "nixos-module-eval: managed tree ${managedEtc}, workers ok" | tee $out
           '';
           nixos-module-assertion = pkgs.runCommand "nixos-module-assertion" { } (
-            if harnessAssertion == null then
-              "echo 'security.allowUserNamespaces = false did not fire the harness assertion' >&2; exit 1"
-            else
-              "echo ${pkgs.lib.escapeShellArg harnessAssertion.message} | tee $out"
+            pkgs.lib.concatMapStrings (
+              case:
+              let
+                a = harnessAssertion case.config;
+              in
+              if a == null || !pkgs.lib.hasInfix case.expect a.message then
+                ''
+                  echo ${pkgs.lib.escapeShellArg "expected: ${case.expect}"} >&2
+                  echo ${pkgs.lib.escapeShellArg "got: ${if a == null then "no failed harness assertion" else a.message}"} >&2
+                  exit 1
+                ''
+              else
+                ''
+                  echo ${pkgs.lib.escapeShellArg a.message} | tee -a $out
+                ''
+            ) assertionCases
           );
-          # harness.enable in a repo's devenv.nix. On (the default): the
-          # module writes exactly the project-settings file the settings tests
-          # check and exports HARNESS_PROJECT and HARNESS_ROLE=work. Off: no
-          # file, no HARNESS_* export, the notice instead, the packages kept.
-          # harness.role = "center": exactly the project-settings-center
-          # file, which is a work repo's file with memory on except for the
-          # sandbox block, the hook's store path (center-guard.sh spliced
-          # in, CENTER_ROOT the checkout) and the six setup-file rules,
-          # which name the checkout instead of every directory; memory off
-          # only when set so, readFence ignored, HARNESS_ROLE=center, the
-          # harness's own dev tools in the shell. A work repo's hook carries
-          # nothing of the center's.
+          # The devenv module writes the project layer only: no hooks, no deny
+          # rule but extraDeny, the sandbox scalars, the seven literal
+          # denyWrite paths under the checkout (/repo), the project domains,
+          # the read fence when on, `settings` merged in. enterShell checks
+          # for the managed file and exports HARNESS_PROJECT, never
+          # HARNESS_ROLE. `enable = false`: no file, no HARNESS_* export, the
+          # notice instead, the packages kept.
           devenv-module-eval = pkgs.runCommand "devenv-module-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
             on=${devenvRender "on" { }}
-            off=${devenvRender "off" { enable = false; }}
-            work=${devenvRender "work" { role = "work"; }}
-            memory=${devenvRender "memory" { allowMemoryEdits = true; }}
-            center=${devenvRender "center" { role = "center"; }}
-            centerMemoryOff=${
-              devenvRender "center-memory-off" {
-                role = "center";
-                allowMemoryEdits = false;
-              }
-            }
-            centerFence=${
-              devenvRender "center-fence" {
-                role = "center";
+            fenced=${
+              devenvRender "fenced" {
                 readFence = true;
+                extraAllowRead = [ "~/.cargo" ];
               }
             }
-            jq -e --slurpfile want ${p.project-settings} '.files | keys == [".claude/settings.json"] and .[".claude/settings.json"] == $want[0]' "$on"
-            jq -e '.enterShell | test("export HARNESS_PROJECT=") and test("export HARNESS_ROLE=work\n")' "$on"
-            jq -e --slurpfile w "$on" '. == $w[0]' "$work"
+            off=${devenvRender "off" { enable = false; }}
+            extra=${
+              devenvRender "extra" {
+                extraDeny = [ "Bash(x)" ];
+                extraAllowedDomains = [ "example.com" ];
+                settings.permissions.allow = [ "Bash(terraform plan *)" ];
+              }
+            }
+            tools=${devenvRender "tools" { claudeCode.enable = true; }}
+            S='def s: .files[".claude/settings.json"];'
+            protected='["/repo/.git/hooks", "/repo/.git/config", "/repo/.claude/settings.json", "/repo/.claude/settings.local.json", "/repo/.claude/hooks", "/repo/.claude/skills", "/repo/.claude-plugin"]'
+            for f in "$on" "$fenced" "$extra"; do
+              jq -e "$S"' .files | keys == [".claude/settings.json"]' "$f"
+              jq -e "$S"' s | (has("hooks") | not) and .sandbox.enabled == true' "$f"
+              jq -e --argjson want "$protected" "$S"' s.sandbox.filesystem.denyWrite == $want' "$f"
+            done
+            jq -e "$S"' s | .permissions.deny == [] and (.permissions | has("allow") | not)' "$on"
+            jq -e "$S"' s.sandbox | .network.allowedDomains == [] and (.filesystem | has("denyRead") or has("allowRead") | not)' "$on"
+            jq -e "$S"' s | .permissions.deny == ["Bash(x)"] and .permissions.allow == ["Bash(terraform plan *)"]' "$extra"
+            jq -e "$S"' s.sandbox.network.allowedDomains == ["example.com"]' "$extra"
+            jq -e "$S"' s.sandbox.filesystem | .denyRead == ["~/"] and (.allowRead | index("~/.cargo") and index("/repo"))' "$fenced"
+            jq -e '.enterShell | test("export HARNESS_PROJECT=") and test("/etc/claude-code/managed-settings.json is missing") and (test("HARNESS_ROLE") | not)' "$on"
             jq -e '.files == {}' "$off"
             jq -e '.enterShell | test("guard rails off for this repo") and (test("HARNESS_") | not)' "$off"
             jq -e '.packages == ["ccmux"]' "$on"
             jq -e '.packages == ["ccmux"]' "$off"
-
-            hook() { jq -r '.files[".claude/settings.json"].hooks.PreToolUse[0].hooks[0].command' "$1"; }
-            if grep -q 'CENTER_ROOT\|center_' "$(hook "$on")"; then echo "the work hook carries the center's code" >&2; exit 1; fi
-            # The center's file against the work file with the same memory
-            # setting: equal but for the sandbox, the hook directory and the
-            # setup-file rules, `**/X` swapped for `//repo/X` and
-            # `//repo/**/X`.
-            vs_work='.files[".claude/settings.json"] as $c | $w[0].files[".claude/settings.json"] as $m
-              | ($c | del(.sandbox, .hooks, .permissions.deny)) == ($m | del(.sandbox, .hooks, .permissions.deny))
-              and [$c.hooks[][].hooks[].command | sub("^/nix/store/[^/]*/"; "")] == [$m.hooks[][].hooks[].command | sub("^/nix/store/[^/]*/"; "")]
-              and ($m.permissions.deny - $c.permissions.deny | length) == 6
-              and ($c.permissions.deny - $m.permissions.deny) == ($m.permissions.deny - $c.permissions.deny
-                | map(sub("^Edit\\(\\*\\*/"; "Edit(//repo/"), sub("^Edit\\(\\*\\*/"; "Edit(//repo/**/")))'
-
-            jq -e --slurpfile want ${p.project-settings-center} '.files | keys == [".claude/settings.json"] and .[".claude/settings.json"] == $want[0]' "$center"
-            jq -e --slurpfile w "$memory" '.files[".claude/settings.json"].sandbox == {enabled: false, credentials: $w[0].files[".claude/settings.json"].sandbox.credentials}' "$center"
-            jq -e --slurpfile w "$memory" "$vs_work" "$center"
-            jq -e '.files[".claude/settings.json"].permissions | (.deny | index("Edit(~/.claude/**)") | not) and (has("allow") | not)' "$center"
-            grep -qx 'ALLOW_MEMORY_EDITS="1"' "$(hook "$center")"
-            grep -qx 'CENTER_ROOT="/repo"' "$(hook "$center")"
-            jq -e --slurpfile w "$on" "$vs_work" "$centerMemoryOff"
-            grep -qx 'ALLOW_MEMORY_EDITS="0"' "$(hook "$centerMemoryOff")"
-            jq -e --slurpfile w "$center" '.files == $w[0].files' "$centerFence"
-            jq -e '.enterShell | test("export HARNESS_PROJECT=") and test("export HARNESS_ROLE=center\n") and (test("HARNESS_ROLE=work") | not)' "$center"
-            jq -e '.packages == ["ccmux", "claude-code", "tmux", "jq", "nixfmt", "statix", "deadnix", "ShellCheck"]' "$center"
-            echo "devenv-module-eval: enable = true writes ${p.project-settings}; enable = false writes nothing; role = center writes ${p.project-settings-center}" | tee $out
+            jq -e '.packages == ["ccmux", "claude-code", "tmux", "jq"]' "$tools"
+            echo "devenv-module-eval: defaults, read fence, extra rules, claudeCode and enable = false render as expected" | tee $out
           '';
-          # The mod policy in both trees: no mods shipped, every mod refused.
-          managed-tree-test =
-            test "managed-tree-test" ./tests/managed-tree-test.sh
-              "${p.managed} ${p.managed-scoped}";
+          # The managed tree: the host-wide rules, runnable hooks, and the mod
+          # policy (no mods shipped, every mod refused).
+          managed-tree-test = test "managed-tree-test" ./tests/managed-tree-test.sh "${p.managed}";
         }
         # claude-code is unfree in nixpkgs: its check exists only when the
         # evaluator allows it (NIXPKGS_ALLOW_UNFREE=1 with --impure, or

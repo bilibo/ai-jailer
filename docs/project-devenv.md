@@ -15,7 +15,7 @@ Everything below is a change to `devenv.nix` or `devenv.yaml`.
 | `devenv.yaml` | Where the inputs come from (the harness, nixpkgs), plus `allow_unfree` | you, rarely; `harness init --force` rewrites it |
 | `devenv.lock` | The exact revision of every input, nixpkgs included. Commit it | nobody: `devenv update` writes it |
 | `.envrc` | Makes direnv load the shell, ask before loading changes, and refuse a `devenv.local.*` (below) | nobody: `harness init --force` rewrites it |
-| `.claude/settings.json` | The rules Claude Code runs under, generated at every shell entry, gitignored; absent with the guard rails off (below) | nobody; edits are overwritten |
+| `.claude/settings.json` | The project layer of the rules Claude Code runs under (your allow rules, extra deny rules and hosts, the repo's protected paths), generated at every shell entry, gitignored; absent with the guard rails off (below). The deny rules, hook and sandbox come from the host's managed settings, not from this file | nobody; edits are overwritten |
 
 There is no per-developer file beside them. devenv imports a
 `devenv.local.nix` or `devenv.local.yaml` without a `direnv allow`, so
@@ -30,9 +30,12 @@ The same four steps, whatever the change:
 1. An agent that needs a tool or a rule proposes the diff to `devenv.nix`
    and stops: the hook refuses its edits to these files and the shell
    commands that write them. You can also write the change yourself.
-2. You apply it in your editor and read it: this file runs as you,
-   outside any sandbox, at the next shell entry.
-3. `direnv allow` in the repo. `.envrc` ends with `require_allowed
+2. You apply it in your editor and read it: this file runs as the repo's
+   Linux user (the worker, `w-<customer>`), outside any sandbox, at the
+   next shell entry. Edit it as yourself through the worker's group or as
+   the worker (`sudo -u w-<customer> -i`).
+3. `direnv allow` in the repo, as the worker: the hook refuses `direnv
+   allow` to a session, so it is yours to run. `.envrc` ends with `require_allowed
    devenv.nix devenv.yaml devenv.lock`, so after a change to any of the
    three direnv says they `require approval` until you do. It flags, it
    does not block: the shell loads the new content either way (runbook,
@@ -147,9 +150,13 @@ the host. A project that needs more lists them:
   harness.extraAllowedDomains = [ "dev.azure.com" "index.crates.io" "static.crates.io" ];
 ```
 
-That works on a host set up with `scripts/install.sh`. A managed host
-(the NixOS module) ignores a repo's allowlist; there the host goes into
-the system configuration's `harness.extraAllowedDomains` instead.
+Whether a managed sandbox honours a repo's list, merges it with the
+managed base list or ignores it is not settled: check V2 in the runbook
+(section 5) is pending as of 2026-10-27. Until it has run, treat this
+option as unconfirmed, and expect to put the host in the host-wide
+`harness.extraAllowedDomains` of the NixOS module if it turns out to be
+ignored. Hosts not on either list prompt in an interactive session and are
+refused in a `-p` one.
 
 ## The other harness options
 
@@ -160,13 +167,17 @@ descriptions.
 | Option | What it does |
 |---|---|
 | `enable = false` | the guard rails off for this repo (next section) |
-| `role` | `"work"`, the default and the only value a project sets. `"center"` belongs to the harness checkout alone (the command center, `docs/command-center.md`) and turns the sandbox off there, so never in a customer repo; `harness init` warns about a repo that has it |
-| `allowMemoryEdits` | Claude keeps its auto-memory under `~/.claude/projects` |
-| `allowLocalCommits` | agents commit on their worktree branch; push stays impossible |
 | `readFence`, `extraAllowRead` | hide the rest of `$HOME` from sandboxed commands, and say what the project still reads there |
 | `allowConnectors` | the claude.ai account's connectors load in this repo's sessions |
 | `platform = "wsl"` | hide `/mnt/c` and `/run/WSL` from the sandbox; `harness init` sets it on a WSL host |
-| `claudeCode.enable` | Claude Code's CLI, tmux and jq from this shell, for `ccmux` and tmux sessions on a host with no `claude` of its own; needs `allow_unfree: true`. `harness init` turns both on when it finds no `claude` on the host's `PATH`, as on the plain WSL host, where the VS Code extension runs its own bundled copy and the repo's shell is the only CLI there is; with one there, it leaves them commented out |
+| `claudeCode.enable` | Claude Code's CLI, tmux and jq from this shell, for `ccmux` and tmux sessions on a host with no `claude` of its own (default false); needs `allow_unfree: true`. `harness init` turns both on when it finds no `claude` on the host's `PATH`; with one there, it leaves them commented out |
+| `extraDeny`, `extraAllowedDomains`, `settings` | add deny rules, sandbox hosts and allow rules (above) |
+| `managedSettingsPath` | where the host keeps the managed settings (`/etc/claude-code/managed-settings.json`); every shell entry warns when it cannot be read |
+
+Whether agents may commit locally, whether Claude keeps its auto-memory
+and the account's connectors by default are host decisions now
+(`allowLocalCommits`, `allowMemoryEdits` and `allowConnectors` in the NixOS
+module); a repo no longer sets the first two.
 
 ## Turning the guard rails off (and on)
 
@@ -186,9 +197,9 @@ Outside that block the same line is `harness.enable = false;`. Then
 
 - `.claude/settings.json` is gone: devenv removes the link it wrote
   before (if one is still there after the next `cd`, delete it by hand).
-  Sessions started in the repo run under your own settings only:
-  none of the repo's deny rules, no hook, no sandbox, and Claude Code's
-  usual permission prompts.
+  Sessions started in the repo lose the project layer only: your allow
+  rules, extra deny rules and hosts, and the literal protected paths. The
+  host's managed settings (deny rules, hook, sandbox) still apply.
 - Every shell entry says so: `harness: guard rails off for this repo
   (harness.enable = false in devenv.nix)`.
 - The tools stay: `packages`, toolchains, `env.` variables, `ccmux`, and
@@ -215,10 +226,10 @@ Committed, the switch applies to everyone who uses the repo. There is
 no per-developer form: a `devenv.local.nix` stops the shell from loading
 ("The files" above).
 
-On a managed host (the NixOS module) this only turns off the repo's own
-copy of the rules. The managed settings under `/etc/claude-code` are
-root-owned: their deny rules, hook and sandbox apply in this repo
-whatever `devenv.nix` says.
+This only turns off the repo's project layer. The managed settings under
+`/etc/claude-code` are root-owned: their deny rules, hook and sandbox apply
+in this repo whatever `devenv.nix` says. On a host with no managed file
+nothing applies at all, and the shell warns at every entry.
 
 ## When the shell does not load
 

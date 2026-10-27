@@ -2,22 +2,49 @@
 #   ccmux-test.sh <path-to-ccmux>
 #
 # `ccmux -n` prints the resolution instead of touching tmux, so most of this
-# runs anywhere; the live cases at the end start a private tmux server (the
+# runs anywhere; the live cases at the end start private tmux servers (the
 # tmux ccmux runs) and never touch the user's. The claude ccmux puts in the
 # window: from PATH (a stub first on it, for every case that is not about
 # where claude comes from), else from the repo's devenv shell through a
 # stub direnv, else an error naming harness.claudeCode.enable.
+#
+# The worker handover runs without root: stubs for id (the caller is
+# $STUB_USER, default tester), getent (the users in $STUB_USERS exist) and
+# sudo (records its argv, then runs ccmux as the worker would see it: its
+# own HOME, code root and tmux server).
 set -uo pipefail
 ccmux="${1:?usage: ccmux-test.sh <ccmux>}"
 pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 root="$tmp/code/git"
-mkdir -p "$root/acme/infra/modules/net" "$root/acme/infra/.claude/worktrees/wt1" "$root/acme/app" "$tmp/elsewhere" "$tmp/hostbin"
+mkdir -p "$root/acme/infra/modules/net" "$root/acme/infra/.claude/worktrees/wt1" "$root/acme/app" "$tmp/elsewhere" "$tmp/hostbin" "$tmp/ubin"
 export HARNESS_CODE_ROOT="$root"
-unset HARNESS_PROJECT HARNESS_PROJECT_DIR HARNESS_ROLE
+unset HARNESS_PROJECT HARNESS_PROJECT_DIR HARNESS_WORKER_PREFIX STUB_USER STUB_USERS
 nl=$'\n'
 printf '#!/bin/sh\nexit 0\n' >"$tmp/hostbin/claude"; chmod +x "$tmp/hostbin/claude"
-export PATH="$tmp/hostbin:$PATH"
+realid=$(type -P id) || { echo "ccmux-test: no id on PATH"; exit 1; }
+cat >"$tmp/ubin/id" <<EOF
+#!$BASH
+[ "\${1:-}" = -un ] || exec "$realid" "\$@"
+echo "\${STUB_USER:-tester}"
+EOF
+cat >"$tmp/ubin/getent" <<EOF
+#!$BASH
+[ "\${1:-}" = passwd ] || exit 2
+for u in \${STUB_USERS:-}; do [ "\$u" != "\${2:-}" ] || { echo "\$u:x:1001:1001::$tmp/home/\$u:$BASH"; exit 0; }; done
+exit 2
+EOF
+cat >"$tmp/ubin/sudo" <<EOF
+#!$BASH
+printf '%s\n' "\$*" >>"$tmp/sudo.args"
+[ "\${1:-}" = -u ] && [ "\${3:-}" = -i ] && [ "\${4:-}" = ccmux ] || { echo "sudo stub: unexpected argv: \$*" >&2; exit 1; }
+w=\$2; shift 4
+export HOME="$tmp/home/\$w" STUB_USER="\$w" HARNESS_CODE_ROOT="$tmp/home/\$w/code/git" TMUX_TMPDIR="$tmp/home/\$w/tmux"
+unset HARNESS_PROJECT HARNESS_PROJECT_DIR TMUX TMUX_PANE
+exec "$ccmux" "\$@"
+EOF
+chmod +x "$tmp/ubin/id" "$tmp/ubin/getent" "$tmp/ubin/sudo"
+export PATH="$tmp/ubin:$tmp/hostbin:$PATH"
 cl="${nl}claude=$tmp/hostbin/claude \\(PATH\\)$" # the last line of -n, with claude from PATH
 
 # check <want-exit> <want-output-regex> <cwd> <args...>
@@ -60,33 +87,48 @@ HARNESS_PROJECT=local/harness HARNESS_PROJECT_DIR="$tmp/elsewhere/harness" ok "s
 HARNESS_PROJECT=local/harness HARNESS_PROJECT_DIR="$tmp/elsewhere/harness" ok "session=local-harness repo=$tmp/elsewhere/harness args=-p hi" "$tmp" -p hi
 # An explicit project still wins over the exported one.
 HARNESS_PROJECT=local/harness HARNESS_PROJECT_DIR="$tmp/elsewhere/harness" ok "session=acme-app repo=$root/acme/app" "$tmp" acme/app
-# HARNESS_ROLE (exported with HARNESS_PROJECT) names the window and goes into
-# it when the window opens the shell's own project, named or not.
-ok "session=acme-infra repo=$root/acme/infra${nl}role=unset window=claude${cl}" "$root/acme/infra"
-HARNESS_PROJECT=acme/infra HARNESS_ROLE=work ok "session=acme-infra repo=$root/acme/infra${nl}role=work window=work${cl}" "$root/acme/infra/modules"
-HARNESS_PROJECT=acme/infra HARNESS_ROLE=work ok "args=--worktree${nl}role=work window=work${cl}" "$tmp/elsewhere" acme/infra --worktree
-HARNESS_PROJECT=local/harness HARNESS_PROJECT_DIR="$tmp/elsewhere/harness" HARNESS_ROLE=center ok "session=local-harness repo=$tmp/elsewhere/harness${nl}role=center window=center${cl}" "$tmp/elsewhere/harness"
-# The center launching a work repo: the window does not get `center`.
-HARNESS_PROJECT=local/harness HARNESS_PROJECT_DIR="$tmp/elsewhere/harness" HARNESS_ROLE=center ok "session=acme-app repo=$root/acme/app args=--worktree${nl}role=unset window=claude \(HARNESS_ROLE=center is for local/harness\)${cl}" "$tmp/elsewhere/harness" acme/app --worktree
-HARNESS_PROJECT=acme/infra HARNESS_ROLE=center ok "session=acme-app .*${nl}role=unset window=claude " "$root/acme/infra" ../app
-# A role that is not a word never reaches tmux.
-HARNESS_PROJECT=acme/infra HARNESS_ROLE='x; y' check 66 "HARNESS_ROLE is not a role name" "$root/acme/infra"
+# The whole -n output of a direct run: no window or role line.
+ok "^session=acme-infra repo=$root/acme/infra${cl}" "$root/acme/infra"
 # Failures: outside the root, missing repo, customer only.
 check 64 "usage" "$tmp/elsewhere"
 # No HARNESS_CODE_ROOT at all (install.sh route): the default root under $HOME, and usage still prints.
 out=$(cd "$tmp/elsewhere" && env -u HARNESS_CODE_ROOT HOME="$tmp" "$ccmux" -n 2>&1); got=$?
 if [ "$got" = 64 ] && [[ "$out" =~ usage ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: without HARNESS_CODE_ROOT: got $got: $out"; fi
-check 66 "no such repo" "$tmp/elsewhere" acme/missing
+check 66 "no such repo: $root/acme/missing \(give" "$tmp/elsewhere" acme/missing
 check 66 "no such repo" "$tmp/elsewhere" infra
 check 66 "not under" "$tmp" elsewhere
 check 66 "not under" "$root" acme
+
+# The worker handover. The caller is not w-acme and w-acme exists: hand
+# over by name, also for a repo the caller has no copy of, and for a path
+# or cwd under the caller's own root.
+handover="^session=acme-x project=acme/x user=w-acme \(sudo -u w-acme -i ccmux acme/x\)$"
+STUB_USERS=w-acme ok "$handover" "$tmp/elsewhere" acme/x
+STUB_USERS="w-beta w-acme" ok "$handover" "$tmp/elsewhere" acme/x/sub
+STUB_USERS=w-acme ok "^session=acme-infra project=acme/infra user=w-acme \(sudo -u w-acme -i ccmux acme/infra --worktree -p hi\)$" "$root/acme/infra/modules" --worktree -p hi
+STUB_USERS=w-acme ok "^session=acme-infra project=acme/infra user=w-acme \(sudo -u w-acme -i ccmux acme/infra\)$" "$tmp/elsewhere" "$root/acme/infra"
+STUB_USERS=w-acme HARNESS_PROJECT=local/harness HARNESS_PROJECT_DIR="$tmp/elsewhere/harness" ok "^session=acme-app project=acme/app user=w-acme " "$tmp/elsewhere/harness" acme/app
+# The worker itself: a direct run, no user= in the output.
+STUB_USER=w-acme STUB_USERS=w-acme ok "^session=acme-infra repo=$root/acme/infra${cl}" "$tmp/elsewhere" acme/infra
+STUB_USER=w-acme STUB_USERS=w-acme check 66 "^ccmux: no such repo: $root/acme/x \(give" "$tmp/elsewhere" acme/x
+# Another customer's worker is refused, before anything else.
+STUB_USER=w-beta STUB_USERS="w-acme w-beta" check 66 "^ccmux: a worker cannot open another customer's session \(w-acme\)$" "$tmp/elsewhere" acme/x
+STUB_USER=w-beta STUB_USERS="w-acme w-beta" check 66 "^ccmux: a worker cannot open another customer's session \(w-acme\)$" "$tmp/elsewhere" acme/infra
+# No such user on the host: a direct run for the caller.
+STUB_USERS=w-other ok "^session=acme-infra repo=$root/acme/infra${cl}" "$tmp/elsewhere" acme/infra
+STUB_USERS=w-other check 66 "^ccmux: no such repo: $root/acme/x \(give" "$tmp/elsewhere" acme/x
+# HARNESS_WORKER_PREFIX names the users; w-acme is then just another user.
+HARNESS_WORKER_PREFIX=agent- STUB_USERS="w-acme agent-acme" ok "^session=acme-x project=acme/x user=agent-acme \(sudo -u agent-acme -i ccmux acme/x\)$" "$tmp/elsewhere" acme/x
+HARNESS_WORKER_PREFIX=agent- STUB_USERS=w-acme check 66 "^ccmux: no such repo" "$tmp/elsewhere" acme/x
+HARNESS_WORKER_PREFIX=agent- STUB_USER=agent-beta STUB_USERS=agent-acme check 66 "another customer's session \(agent-acme\)$" "$tmp/elsewhere" acme/x
+HARNESS_WORKER_PREFIX=agent- STUB_USER=w-beta STUB_USERS=agent-acme ok "user=agent-acme " "$tmp/elsewhere" acme/x
 
 # Where the window's claude comes from. PATH first, by absolute path (the
 # window gets the tmux server's PATH, not this one), even for a repo whose
 # shell has one too.
 mkdir -p "$tmp/dbin" "$root/acme/cli/.shell/bin" "$root/acme/blocked"; : >"$root/acme/blocked/.blocked"
 printf '#!/bin/sh\nexit 0\n' >"$root/acme/cli/.shell/bin/claude"; chmod +x "$root/acme/cli/.shell/bin/claude"
-ok "session=acme-app repo=$root/acme/app${nl}role=unset window=claude${cl}" "$tmp/elsewhere" acme/app
+ok "session=acme-app repo=$root/acme/app${cl}" "$tmp/elsewhere" acme/app
 ok "session=acme-cli .*${cl}" "$tmp/elsewhere" acme/cli
 # No claude on PATH (the VS Code extension's host): the repo's devenv shell,
 # through direnv exec. The stub direnv puts <repo>/.shell/bin first on PATH,
@@ -101,32 +143,34 @@ echo "direnv: loading $d/.envrc" >&2
 PATH="$d/.shell/bin:$PATH" exec "$@"
 EOF
 chmod +x "$tmp/dbin/direnv"
-PATH="$tmp/dbin" ok "session=acme-cli repo=$root/acme/cli${nl}role=unset window=claude${nl}claude=$root/acme/cli/\.shell/bin/claude \(direnv exec $root/acme/cli\)$" "$tmp/elsewhere" acme/cli
-PATH="$tmp/dbin" HARNESS_PROJECT=acme/cli HARNESS_ROLE=work ok "${nl}role=work window=work${nl}claude=$root/acme/cli/\.shell/bin/claude \(direnv exec $root/acme/cli\)$" "$root/acme/cli"
+PATH="$tmp/ubin:$tmp/dbin" ok "^session=acme-cli repo=$root/acme/cli${nl}claude=$root/acme/cli/\.shell/bin/claude \(direnv exec $root/acme/cli\)$" "$tmp/elsewhere" acme/cli
+PATH="$tmp/ubin:$tmp/dbin" HARNESS_PROJECT=acme/cli ok "^session=acme-cli repo=$root/acme/cli${nl}claude=$root/acme/cli/\.shell/bin/claude \(direnv exec $root/acme/cli\)$" "$root/acme/cli"
 # Neither: an error that names the option, never `command not found`.
 nocli="; harness\.claudeCode\.enable = true in $root/acme/[a-z]+/devenv\.nix puts claude in its shell \(with allow_unfree: true in devenv\.yaml\), then direnv allow$"
-PATH="$tmp/dbin" check 69 "^ccmux: no claude on PATH or in $root/acme/app's devenv shell${nocli}" "$tmp/elsewhere" acme/app
-PATH="$tmp/dbin" check 69 "^ccmux: no claude on PATH, and $root/acme/blocked's devenv shell does not load \(.*direnv allow $root/acme/blocked\)${nocli}" "$tmp/elsewhere" acme/blocked
-PATH=/var/empty check 69 "^ccmux: no claude on PATH, and no direnv on PATH to load $root/acme/cli's devenv shell${nocli}" "$tmp/elsewhere" acme/cli
+PATH="$tmp/ubin:$tmp/dbin" check 69 "^ccmux: no claude on PATH or in $root/acme/app's devenv shell${nocli}" "$tmp/elsewhere" acme/app
+PATH="$tmp/ubin:$tmp/dbin" check 69 "^ccmux: no claude on PATH, and $root/acme/blocked's devenv shell does not load \(.*direnv allow $root/acme/blocked\)${nocli}" "$tmp/elsewhere" acme/blocked
+PATH="$tmp/ubin" check 69 "^ccmux: no claude on PATH, and no direnv on PATH to load $root/acme/cli's devenv shell${nocli}" "$tmp/elsewhere" acme/cli
 
-# --- Live: the role in real windows, on a private tmux server -------------
-# A stub claude records the role its window got, the window's name and the
-# server's global role, then closes its window. The tmux is the one ccmux
-# runs; TMUX_TMPDIR and the unset TMUX keep it off the user's server, and
-# stdin from /dev/null makes the final attach fail instead of taking a
-# terminal. HOME keeps the user's tmux.conf and shell rc out.
+# --- Live: real windows, on private tmux servers --------------------------
+# A stub claude records its window's name, directory, user and arguments,
+# then closes its window. The tmux is the one ccmux runs; TMUX_TMPDIR and
+# the unset TMUX keep it off the user's server (the sudo stub gives each
+# worker its own TMUX_TMPDIR, as its own UID would), and stdin from
+# /dev/null makes the final attach fail instead of taking a terminal. HOME
+# keeps the user's tmux.conf and shell rc out.
 unset TMUX TMUX_PANE
-export TMUX_TMPDIR="$tmp/tmux"; mkdir -p "$TMUX_TMPDIR" "$tmp/bin" "$root/bilibo/harness"
+wroot="$tmp/home/w-acme/code/git"
+export TMUX_TMPDIR="$tmp/tmux"; mkdir -p "$TMUX_TMPDIR" "$tmp/bin" "$wroot/acme/x" "$tmp/home/w-acme/tmux"
 # shellcheck disable=SC2016  # writeShellApplication's literal `export PATH="<runtime inputs>:$PATH"`
 tmux_path=$(sed -n 's/^export PATH="\(.*\):\$PATH"$/\1/p' "$ccmux")
-live_env=(HOME="$tmp" XDG_CONFIG_HOME="$tmp/.config" PATH="$tmp/bin:$tmux_path:$PATH")
-trap 'env "${live_env[@]}" tmux kill-server 2>/dev/null; rm -rf "$tmp"' EXIT
+live_env=(HOME="$tmp" XDG_CONFIG_HOME="$tmp/.config" PATH="$tmp/ubin:$tmp/bin:$tmux_path:$PATH")
+trap 'env "${live_env[@]}" tmux kill-server 2>/dev/null; env "${live_env[@]}" TMUX_TMPDIR="$tmp/home/w-acme/tmux" tmux kill-server 2>/dev/null; rm -rf "$tmp"' EXIT
 cat >"$tmp/bin/claude" <<EOF
 #!$BASH
-printf 'role=%s window=%s global=%s\n' "\${HARNESS_ROLE-unset}" "\$(tmux display-message -p '#{window_name}')" "\$(tmux show-environment -g HARNESS_ROLE 2>/dev/null || echo unset)" >>"$tmp/ran"
+printf 'window=%s pwd=%s user=%s args=%s\n' "\$(tmux display-message -p '#{window_name}')" "\$(pwd -P)" "\${STUB_USER:-tester}" "\$*" >>"$tmp/ran"
 tmux kill-window
 EOF
-chmod +x "$tmp/bin/claude"; : >"$tmp/ran"
+chmod +x "$tmp/bin/claude"; : >"$tmp/ran" ; : >"$tmp/sudo.args"
 # live <want-regex> <cwd> [VAR=value...] <ccmux> [args...]
 live() {
   local want="$1" dir="$2" before line i; shift 2
@@ -137,29 +181,27 @@ live() {
   if [[ "$line" =~ $want ]]; then pass=$((pass+1)); else
     fail=$((fail+1)); echo "FAIL (want /$want/): cd $dir && ${*/#"$ccmux"/ccmux}"; echo "  ${line:-no window ran (after ${i}x0.1 s)}"; fi
 }
-center=(HARNESS_PROJECT=bilibo/harness HARNESS_ROLE=center)
-# No server yet: the center's own window carries the role; the server it
-# starts has none in its global environment.
-live '^role=center window=center global=unset$' "$root/bilibo/harness" "${center[@]}" "$ccmux"
-# The center launching a work repo, in a new server and session.
-live '^role=unset window=claude global=unset$' "$root/bilibo/harness" "${center[@]}" "$ccmux" acme/app --worktree
-# A server some center shell started (global HARNESS_ROLE=center), holding
-# acme-infra already: new session and new window both drop it.
-env "${live_env[@]}" tmux kill-server 2>/dev/null
-for i in $(seq 50); do env "${live_env[@]}" tmux ls >/dev/null 2>&1 || break; sleep 0.1; done
-env "${live_env[@]}" HARNESS_ROLE=center tmux new-session -d -s acme-infra -c "$tmp" 'sleep 60'
-live '^role=unset window=claude global=HARNESS_ROLE=center$' "$root/bilibo/harness" "${center[@]}" "$ccmux" acme/app
-live '^role=unset window=claude global=HARNESS_ROLE=center$' "$root/bilibo/harness" "${center[@]}" "$ccmux" acme/infra
-# And a work repo's own shell, into that existing session: its role.
-live '^role=work window=work global=HARNESS_ROLE=center$' "$root/acme/infra" HARNESS_PROJECT=acme/infra HARNESS_ROLE=work "$ccmux"
+# No server yet: a new server and session, the window named claude.
+live "^window=claude pwd=$root/acme/infra user=tester args=$" "$root/acme/infra" "$ccmux"
+live "^window=claude pwd=$root/acme/app user=tester args=--worktree$" "$tmp/elsewhere" "$ccmux" acme/app --worktree
+# A session that already exists gets a new window.
+env "${live_env[@]}" tmux new-session -d -s acme-infra -c "$tmp" 'sleep 60'
+live "^window=claude pwd=$root/acme/infra user=tester args=-p hi$" "$tmp/elsewhere" "$ccmux" acme/infra -p hi
 # No claude where ccmux runs: the window runs the repo shell's, through the
-# stub direnv, and the role handling is the same.
+# stub direnv.
 cat >"$root/acme/cli/.shell/bin/claude" <<EOF
 #!$BASH
-printf 'shell-claude role=%s window=%s\n' "\${HARNESS_ROLE-unset}" "\$(tmux display-message -p '#{window_name}')" >>"$tmp/ran"
+printf 'shell-claude window=%s\n' "\$(tmux display-message -p '#{window_name}')" >>"$tmp/ran"
 tmux kill-window
 EOF
-live '^shell-claude role=unset window=claude$' "$tmp/elsewhere" PATH="$tmp/dbin:$tmux_path" "$ccmux" acme/cli
+live '^shell-claude window=claude$' "$tmp/elsewhere" PATH="$tmp/ubin:$tmp/dbin:$tmux_path" "$ccmux" acme/cli
+# The handover end to end: sudo gets exactly the name and the claude args,
+# and the window runs as w-acme in w-acme's own code root, which the
+# caller's root does not hold.
+live "^window=claude pwd=$wroot/acme/x user=w-acme args=--worktree -p hi$" "$tmp/elsewhere" STUB_USERS=w-acme "$ccmux" acme/x --worktree -p hi
+argv=$(cat "$tmp/sudo.args")
+if [ "$argv" = "-u w-acme -i ccmux acme/x --worktree -p hi" ]; then pass=$((pass+1)); else
+  fail=$((fail+1)); echo "FAIL: sudo argv: want '-u w-acme -i ccmux acme/x --worktree -p hi', got '$argv'"; fi
 
 echo "ccmux-test ($(basename "$ccmux")): $pass passed, $fail failed"
 [ "$fail" = 0 ]

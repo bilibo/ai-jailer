@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#   harness bootstrap [--no-root] [--no-profile] [--trusted-user] [--account-sync]
+#   harness bootstrap [--no-root] [--no-profile] [--trusted-user]
+#                     [--workers <a,b,...>] [--worker <name>] [--owner <login>]
+#                     [--owner-sudo nopasswd|password|none]
 #                     [--code-root <dir>] [--harness <flakeref>]
 #   harness upgrade   [the bootstrap flags]
 #   harness doctor    [--code-root <dir>]
@@ -8,99 +10,136 @@
 #
 # Takes a Linux host that has Nix (scripts/install.sh puts it there: on
 # Fedora 44 or newer from Fedora's own packages, on any other distro with the
-# nix-installer) and Claude Code to the unmanaged-host shape of the README:
-# direnv >= 2.38, devenv, ccmux and harness from this flake (`nix profile
-# add`, pinned by flake.lock), and the user-side configuration the home
-# module would write on a managed host: direnv.toml, the tmux rules, the
-# direnv hook for bash and zsh, HARNESS_CODE_ROOT, the session PATH for
-# GUI-launched VS Code, mkhl.direnv. No harness module and no managed
-# settings: repos that import `harness/devenv` carry the rules (`harness
-# init` sets one up). scripts/install.sh does the root steps `nix run`
-# needs, then runs `harness bootstrap`, which finds them done and does the
-# rest.
+# nix-installer) and Claude Code to the shape of the README: the host-wide
+# managed rules at /etc/claude-code (the flake's `managed` package, linked
+# there), optionally one Linux user per customer, direnv >= 2.38, devenv,
+# ccmux and harness from this flake (`nix profile add`, pinned by flake.lock),
+# and the user-side configuration the home module would write on a managed
+# host: direnv.toml, the tmux rules, the direnv hook for bash and zsh,
+# HARNESS_CODE_ROOT, the session PATH for GUI-launched VS Code, mkhl.direnv.
+# This mirrors the NixOS module (harness.enable, harness.owner,
+# harness.workers) on Fedora, Ubuntu and other non-NixOS Linux.
+# scripts/install.sh does the root steps `nix run` needs, then runs `harness
+# bootstrap`, which finds them done and does the rest.
 #
 # NixOS (/etc/NIXOS, or ID=nixos in os-release: the marker is not visible
-# from inside a sandboxed session) is the unmanaged shape without root
-# steps: /etc/nix/nix.conf and the sysctls belong to the system
-# configuration, so --no-root is implied and the nix.settings and
-# boot.kernel.sysctl lines are printed where the host lacks them. A user file
-# that is a symlink into the Nix store is home-manager's: it is skipped and
-# the option that sets it is printed; the rest is written as on any host.
-# Independently of detection, root_write refuses any target that resolves
-# into the store. WSL (binfmt WSLInterop, or WSL_DISTRO_NAME) is reported in
-# the host line; `harness init` sets harness.platform = "wsl" there.
+# from inside a sandboxed session) has no root steps: /etc/nix/nix.conf, the
+# sysctls, /etc/claude-code, the users and the sudo rule belong to the system
+# configuration, so --no-root is implied and the nix.settings,
+# boot.kernel.sysctl and harness.* lines are printed where the host lacks
+# them (harness.enable; harness.owner and harness.workers.<customer> when
+# --workers is given). A user file that is a symlink into the Nix store is
+# home-manager's: it is skipped and the option that sets it is printed; the
+# rest is written as on any host. Independently of detection, root_write
+# refuses any target that resolves into the store. WSL (binfmt WSLInterop, or
+# WSL_DISTRO_NAME) is reported in the host line; `harness init` sets
+# harness.platform = "wsl" there.
 #
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
-# harness ref's current flake.lock. scripts/install.sh owns the root steps
-# that come before Nix (dnf on Fedora, the SELinux label, the nix-daemon
-# socket); root is needed here for /etc/nix/nix.conf (the devenv cache;
-# flakes where the installer left them off) and the one kernel setting the
-# Claude Code sandbox cannot run without: where the kernel confines unprivileged user
-# namespaces. Ubuntu 23.10 and later do it through AppArmor
-# (kernel.apparmor_restrict_unprivileged_userns = 1): the fix is the
-# profile from the Claude Code sandboxing docs, /etc/apparmor.d/bwrap, an
-# unconfined profile for /usr/bin/bwrap with `userns`, then an AppArmor
-# reload; the machine-wide sysctl stays as it is. Older Debian kernels gate
-# them with kernel.unprivileged_userns_clone: a sysctl plus a drop-in under
-# /etc/sysctl.d. Either is asked for on its own (--yes answers it);
-# declined, the command is printed for later and doctor keeps reporting it.
-# Those steps go
-# through sudo and say what they do first. --no-root skips them; --no-profile
+# harness ref's current flake.lock (and relinks /etc/claude-code when the
+# ref's rules changed). scripts/install.sh owns the root steps that come
+# before Nix (dnf on Fedora, the SELinux label, the nix-daemon socket); root
+# is needed here for the steps below. All go through sudo and say what they
+# do first; --no-root skips them (and with them --workers); --no-profile
 # skips the `nix profile` step for a host that gets direnv, devenv and ccmux
 # some other way (the README's "your own configuration"). `doctor` changes
-# nothing and reports every prerequisite, `claude doctor`, and, run in a
-# harness repo, the repo's settings symlink, direnv approval and hooks; exit
-# 1 when one the harness needs is missing. claude and tmux are not among
-# them: no host claude is an info line (the VS Code extension brings its
-# own, a repo's harness.claudeCode.enable the CLI), no tmux a warning
-# (ccmux brings its own; attaching by hand needs one). That is the host
-# half of the runbook's verification section. --dry-run prints every step
-# and the command it would run, runs none of them and never calls sudo;
+# nothing and reports every prerequisite, `claude doctor`, the managed rules,
+# the worker accounts and, run in a harness repo, the repo's settings symlink
+# and direnv approval; exit 1 when one the harness needs is missing. claude
+# and tmux are not among them: no host claude is an info line (the VS Code
+# extension brings its own, a repo's harness.claudeCode.enable the CLI), no
+# tmux a warning (ccmux brings its own; attaching by hand needs one). That is
+# the host half of the runbook's verification section. --dry-run prints every
+# step and the command it would run, runs none of them and never calls sudo;
 # --verbose prints each command first.
+#
+# Root steps, in this order:
+#  - /etc/nix/nix.conf: the devenv cache (also flakes where the installer
+#    left them off). DEVENV_CACHE and DEVENV_KEY below must match
+#    pkgs/devenv-cache.nix, which the NixOS module reads.
+#  - The user-namespace setting the Claude Code sandbox cannot run without,
+#    where the kernel confines unprivileged user namespaces. Ubuntu 23.10 and
+#    later do it through AppArmor (kernel.apparmor_restrict_unprivileged_userns
+#    = 1): the fix is the profile from the Claude Code sandboxing docs,
+#    /etc/apparmor.d/bwrap, an unconfined profile for /usr/bin/bwrap with
+#    `userns`, then an AppArmor reload; the machine-wide sysctl stays as it
+#    is. Older Debian kernels gate them with kernel.unprivileged_userns_clone:
+#    a sysctl plus a drop-in under /etc/sysctl.d. Either is asked for on its
+#    own (--yes answers it); declined, the command is printed for later and
+#    doctor keeps reporting it.
+#  - `managed`: /etc/claude-code is linked to the managed tree (`sudo nix
+#    build <ref>#managed --out-link /etc/claude-code`; the out-link is an
+#    indirect GC root). Claude Code reads /etc/claude-code/managed-settings.json
+#    for every user of the host, the owner's sessions included. A path that
+#    exists and is not a store symlink is never replaced. Untested
+#    (2026-10-27): `nix build --out-link` under sudo on a host where the
+#    daemon does the build.
+#  - With --workers (or --worker, repeatable): the group `agents`, and per
+#    customer c the user w-c (primary group w-c, member of agents, home 0750,
+#    shell bash), the owner added to group w-c so that the owner can read the
+#    worker's home, and `loginctl enable-linger w-c` so the worker's tmux
+#    survives logout. A user that exists is not recreated. Each command is
+#    guarded, so a second run runs none of them. The customers are recorded in
+#    the receipt (root.workers).
+#  - With --workers, unless --owner-sudo none: /etc/sudoers.d/claude-nix-harness
+#    holding `<owner> ALL=(%agents) NOPASSWD: ALL` (`password` drops
+#    NOPASSWD:), checked with `visudo -cf`; a file that fails the check is
+#    removed and the run stops. --owner is the login (default $USER). This is
+#    the rule ccmux needs to hand a session to a worker.
+# Then, per worker, `sudo -u w-c -i nix run <ref>#harness -- bootstrap
+# --no-root --yes --harness <ref>`: the profile packages and the user steps
+# below, as that user, plus a git identity default (user.name "Claude (c)",
+# user.email claude-c@<host>.invalid) where none is set. --harness is passed
+# because `sudo -i` drops HARNESS_REF. A failure there is a warning: the root
+# steps are already done. Home Manager standalone per worker is the
+# alternative to this step (the runbook describes it); bootstrap does not use
+# Home Manager.
+#
+# --account-sync and --no-account-sync are gone (2026-10-27): the claude.ai
+# sync keys now live in the managed settings, and bootstrap no longer writes a
+# user-scope settings block (strictAllowlist went with it). An old command
+# line fails with "unknown argument".
 #
 # The harness ref (what `nix profile add` installs from): --harness, else
 # HARNESS_REF, else the receipt's, else github:bilibo/claude-nix-harness. A `path:/nix/store/...` ref warns: a
 # later upgrade cannot move it.
 #
-# --trusted-user adds you to Nix's trusted-users. Not needed: the devenv
-# cache goes into the root-owned nix.conf as a substituter, which is what
-# devenv checks for. A trusted user can pass any option to the daemon
+# --trusted-user adds the owner (you) to Nix's trusted-users. Not needed: the
+# devenv cache goes into the root-owned nix.conf as a substituter, which is
+# what devenv checks for. A trusted user can pass any option to the daemon
 # (unsigned paths, other caches, sandbox off), and agents run as you, so the
-# default keeps that door shut.
+# default keeps that door shut. Workers are never trusted users.
 #
-# The user-scope ~/.claude/settings.json gets the keys a repo file cannot
-# carry: sandbox.network.strictAllowlist = true (an unlisted host is refused
-# inside the sandbox instead of prompting; user-or-managed scope), and
-# syncClaudeAiSkills = false and syncClaudeAiPlugins = false, so sessions
-# load no skills or plugins from the claude.ai account (the harness reviews
-# none of them, and a plugin can carry hooks). Only `false` is honoured,
-# from user scope or above. --account-sync opts back in: the two keys are
-# not written, and a `false` already there is removed. Account sync off is
-# the default since 2026-10-24; --no-account-sync, which turned it off
-# before, is still accepted and names the default (the later of the two
-# flags wins). The
-# other keys of that file are kept as they are. Never
-# env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: in user scope it turns the sandbox's
-# Bash auto-allow off, so every command prompts (2026-10-22, changelog); a
-# copy an earlier bootstrap wrote is removed.
+# Never env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in ~/.claude/settings.json: in
+# user scope it turns the sandbox's Bash auto-allow off, so every command
+# prompts (2026-10-22, changelog); a copy an earlier bootstrap wrote is
+# removed.
 #
 # The receipt, ~/.local/state/claude-nix-harness/receipt.json, lists what
 # bootstrap put on the host: profile packages, files (whole files, marker
-# blocks, merged keys), dnf packages and root steps, the VS Code extension,
-# the harness ref and revision. Each bootstrap and upgrade adds to it.
+# blocks, merged keys), dnf packages, root steps and worker customers, the
+# VS Code extension, the harness ref and revision. Each bootstrap and upgrade
+# adds to it. Receipts written before 2026-10-27 may list the strictAllowlist
+# and sync keys of ~/.claude/settings.json; reset still strips them.
 #
 # `reset` reverses what the receipt lists and removes the receipt last;
-# without a receipt nothing is recorded and it does nothing. When the
-# receipt says scripts/install.sh ran the nix-installer, Nix goes
-# too (/nix/nix-installer uninstall); the dnf packages likewise. It asks
-# before it starts unless --yes; it never touches the code root, so delete a
-# test repo by hand.
+# without a receipt nothing is recorded and it does nothing. It removes the
+# sudoers file, /etc/claude-code (only a symlink into the store) and each
+# recorded worker's linger. It does not delete the worker users, whose homes
+# hold repos and a login: it prints `sudo userdel -r w-<c>` for each. When
+# the receipt says scripts/install.sh ran the nix-installer, Nix goes too
+# (/nix/nix-installer uninstall); the dnf packages likewise. It asks before
+# it starts unless --yes; it never touches the code root, so delete a test
+# repo by hand.
 # shellcheck disable=SC1091,SC2015,SC2016,SC2088  # system files are not inputs; `x && ok || miss` reports, ok never fails; jq filters go through jq_edit; ~ in messages is text
 set -euo pipefail
 
 CMD="${HARNESS_CMD:-bootstrap}"   # bootstrap, upgrade, doctor or reset: pkgs/harness.nix sets it
-NO_ROOT=0; NO_PROFILE=0; TRUSTED_USER=0; ACCOUNT_SYNC=0; YES=0; DRY_RUN=0; VERBOSE=0
+NO_ROOT=0; NO_PROFILE=0; TRUSTED_USER=0; YES=0; DRY_RUN=0; VERBOSE=0
+WORKERS=()   # customers (--workers); the Linux user of customer c is $WORKER_PREFIX$c
+OWNER="${USER:-$(id -un)}"; OWNER_SUDO=nopasswd
+WORKER_PREFIX="${HARNESS_WORKER_PREFIX:-w-}"
 CODE_ROOT="${HARNESS_CODE_ROOT:-$HOME/code/git}"
 # Run straight from a checkout (bash pkgs/harness/bootstrap.sh), the checkout is the ref.
 HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -108,6 +147,15 @@ HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
 HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
 usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 ORIG_ARGS=("$@")   # upgrade hands them to the upgraded harness (handover_steps)
+add_workers() { # add_workers <comma list>: customers, in order, no repeats
+  local -a names; local w x seen
+  IFS=, read -r -a names <<<"$1"
+  for w in "${names[@]}"; do
+    [[ "$w" =~ ^[a-z][a-z0-9_-]*$ ]] || { echo "harness $CMD: worker name '$w' must be lower case letters, digits, - or _, starting with a letter" >&2; exit 64; }
+    seen=0; for x in "${WORKERS[@]}"; do [ "$x" != "$w" ] || seen=1; done
+    [ "$seen" = 1 ] || WORKERS+=("$w")
+  done
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
@@ -116,8 +164,9 @@ while [ $# -gt 0 ]; do
     --no-root) NO_ROOT=1 ;;
     --no-profile) NO_PROFILE=1 ;;
     --trusted-user) TRUSTED_USER=1 ;;
-    --account-sync) ACCOUNT_SYNC=1 ;;
-    --no-account-sync) ACCOUNT_SYNC=0 ;;   # the default since 2026-10-24; kept for old command lines
+    --workers|--worker) add_workers "${2:?$1 needs a customer name (--workers takes a comma-separated list)}"; shift ;;
+    --owner) OWNER="${2:?--owner needs a login}"; shift ;;
+    --owner-sudo) OWNER_SUDO="${2:?--owner-sudo needs nopasswd, password or none}"; shift ;;
     --code-root) CODE_ROOT="${2:?--code-root needs a directory}"; shift ;;
     --harness) HARNESS_REF="${2:?--harness needs a flake reference}"; HARNESS_REF_FROM=--harness; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -126,11 +175,13 @@ while [ $# -gt 0 ]; do
   shift
 done
 CODE_ROOT="${CODE_ROOT%/}"
+case "$OWNER_SUDO" in nopasswd|password|none) ;; *) echo "harness $CMD: --owner-sudo is nopasswd, password or none, not '$OWNER_SUDO'" >&2; exit 64 ;; esac
 
 # The marker text predates the harness CLI; it stays so that blocks written by
 # earlier versions are still found.
 MARK_BEGIN="# --- claude-nix-harness (scripts/bootstrap-fedora.sh) ---"
 MARK_END="# --- end claude-nix-harness ---"
+# Same url and key as pkgs/devenv-cache.nix (the NixOS module's copy); change both.
 DEVENV_CACHE="https://devenv.cachix.org"
 DEVENV_KEY="devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
 MIN_CLAUDE="2.1.295"   # onFailure: block in hook registrations
@@ -151,6 +202,10 @@ APPARMOR_PROFILE="${HARNESS_APPARMOR_PROFILE:-/etc/apparmor.d/bwrap}"
 NIX_INSTALLER="${HARNESS_NIX_INSTALLER:-/nix/nix-installer}"
 OS_RELEASE="${HARNESS_OS_RELEASE:-/etc/os-release}"
 NIXOS_MARKER="${HARNESS_NIXOS_MARKER:-/etc/NIXOS}"
+MANAGED_DIR="${HARNESS_MANAGED_DIR:-/etc/claude-code}"
+SUDOERS_FILE="${HARNESS_SUDOERS:-/etc/sudoers.d/claude-nix-harness}"
+STORE_DIR="${HARNESS_STORE_DIR:-/nix/store}"
+HOME_BASE="${HARNESS_HOME_BASE:-/home}"   # where useradd -m puts a home; only the tests move it
 # Where NixOS programs.direnv puts the bash hook; doctor accepts it there.
 SYSTEM_BASHRC="${HARNESS_SYSTEM_BASHRC:-/etc/bashrc}"
 WSL_MARKER="${HARNESS_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
@@ -236,15 +291,36 @@ jq_edit() { # jq_edit <file> <jq args...>: rewrite a JSON file, the rest of it k
   jq "$@" "$f" >"$tmp" && mv "$tmp" "$f"
 }
 
-root_write() { # root_write <path> <content> [<NixOS option>]: a root-owned 0644 file, through sudo
-  local tmp real
+root_write() { # root_write <path> <content> [<NixOS option> [<mode>]]: a root-owned file (0644 unless <mode>), through sudo
+  local tmp real mode="${4:-0644}"
   # A store symlink is the NixOS configuration's: `install` would replace it
   # with a plain file that the next rebuild silently restores.
   real=$(readlink -f "$1" 2>/dev/null || true)
   [[ "$real" != /nix/store/* ]] || die "$1 is a symlink into the Nix store ($real): the system configuration owns it; set ${3:-the matching option} in configuration.nix instead"
-  if [ "$DRY_RUN" = 1 ]; then echo "    would run: sudo install -m 0644 -o root -g root <new content> $1"; return 0; fi
+  if [ "$DRY_RUN" = 1 ]; then echo "    would run: sudo install -m $mode -o root -g root <new content> $1"; return 0; fi
   tmp=$(mktemp); printf '%s\n' "$2" >"$tmp"
-  run sudo install -m 0644 -o root -g root "$tmp" "$1"; rm -f "$tmp"
+  run sudo install -m "$mode" -o root -g root "$tmp" "$1"; rm -f "$tmp"
+}
+
+# root_link <path> <flakeref#attr>: <path> becomes an out-link of the build,
+# through sudo. A path that exists and is not a symlink into the store is
+# someone else's and is never replaced; a link that already resolves to the
+# build's store path is left alone. The nix binary is passed by full path
+# because sudo's secure_path may not list the nix profile (suspected, not
+# checked on a Fedora host). Untested (2026-10-27): `nix build --out-link` as
+# root where the daemon does the build.
+root_link() {
+  local path="$1" ref="$2" want nixbin
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    [ -L "$path" ] || die "$path exists and is not a symlink: bootstrap does not replace it (move it aside, then run again)"
+    [[ "$(readlink "$path")" == "$STORE_DIR"/* ]] || die "$path is a symlink to $(readlink "$path"), not into $STORE_DIR: bootstrap does not replace it"
+    want=$(nix build --no-link --print-out-paths "$ref" 2>/dev/null | head -n1 || true)
+    if [ -n "$want" ] && [ "$(readlink -f "$path")" = "$(readlink -f "$want")" ]; then
+      echo "    $path already links $want"; return 0
+    fi
+  fi
+  nixbin=$(command -v nix 2>/dev/null || echo nix)
+  run sudo "$nixbin" build "$ref" --out-link "$path"
 }
 
 # without_block <file>: the file without the harness block.
@@ -282,7 +358,7 @@ hm_skip() { # hm_skip <file> <home-manager option that sets it>
 # How many of the user files the bootstrap writes are home-manager's (the host line).
 hm_owned_count() {
   local f n=0
-  for f in "$HOME/.config/direnv/direnv.toml" "$(tmux_file)" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.claude/settings.json" \
+  for f in "$HOME/.config/direnv/direnv.toml" "$(tmux_file)" "$HOME/.bashrc" "$HOME/.zshrc" \
            "$HOME/.config/environment.d/50-claude-nix-harness.conf" "$HOME/.config/Code/User/settings.json"; do
     hm_owned "$f" && n=$((n+1))
   done
@@ -295,7 +371,7 @@ selinux_on() { command -v getenforce >/dev/null 2>&1 && command -v matchpathcon 
 # What this run put on the host, or found there in the harness's shape;
 # write_receipt adds it to the receipt. scripts/install.sh hands over its own
 # root steps in HARNESS_ROOT_PACKAGES and HARNESS_ROOT_STEPS.
-R_PROFILE=(); R_FILES=(); R_EXT=()
+R_PROFILE=(); R_FILES=(); R_EXT=(); R_WORKERS=()
 read -r -a R_ROOT_PKGS <<<"${HARNESS_ROOT_PACKAGES:-}"
 read -r -a R_ROOT_STEPS <<<"${HARNESS_ROOT_STEPS:-}"
 
@@ -312,6 +388,7 @@ write_receipt() {
     --argjson files "$(printf '%s\n' "${R_FILES[@]}" | jq -s .)" \
     --argjson pkgs "$(json_list "${R_ROOT_PKGS[@]}")" \
     --argjson steps "$(json_list "${R_ROOT_STEPS[@]}")" \
+    --argjson workers "$(json_list "${R_WORKERS[@]}")" \
     --argjson ext "$(json_list "${R_EXT[@]}")" '
     def union(a; b): (a // []) + b | unique;
     { version: 1,
@@ -322,7 +399,8 @@ write_receipt() {
       profile: union($old.profile; $profile),
       files: (($old.files // []) + $files | group_by(.path)
               | map(.[0] + {keys: (map(.keys // []) | add | unique)} | if .keys == [] then del(.keys) else . end)),
-      root: {packages: union($old.root.packages; $pkgs), steps: union($old.root.steps; $steps)},
+      root: {packages: union($old.root.packages; $pkgs), steps: union($old.root.steps; $steps),
+             workers: union($old.root.workers; $workers)},
       vscodeExtensions: union($old.vscodeExtensions; $ext) }')
   step "write the receipt $RECEIPT"
   [ "$VERBOSE" = 1 ] && printf '%s\n' "$new"
@@ -375,6 +453,77 @@ $MARK_END"
   R_ROOT_STEPS+=(nix.conf)
 
   userns_steps
+  managed_step
+  worker_steps
+  sudoers_step
+}
+
+# group_members <group>: comma-separated members, empty when the group is
+# absent or has none. The exit status says whether the group exists.
+group_members() {
+  local l
+  command -v getent >/dev/null 2>&1 || return 1
+  l=$(getent group "$1" 2>/dev/null) || return 1
+  printf '%s\n' "${l##*:}"
+}
+group_has() { [[ ",$(group_members "$1")," == *",$2,"* ]]; }   # group_has <group> <login>
+group_exists() { command -v getent >/dev/null 2>&1 && getent group "$1" >/dev/null 2>&1; }
+user_exists() { command -v getent >/dev/null 2>&1 && getent passwd "$1" >/dev/null 2>&1; }
+linger_on() { loginctl show-user "$1" -p Linger 2>/dev/null | grep -q '^Linger=yes$'; }
+
+managed_step() {
+  step "link the managed rules: $MANAGED_DIR -> $HARNESS_REF#managed"
+  root_link "$MANAGED_DIR" "$HARNESS_REF#managed"
+  R_ROOT_STEPS+=(managed)
+}
+
+# One Linux user per customer (the NixOS module's harness.workers). A user
+# that already exists is left as it is, whatever its groups.
+worker_steps() {
+  local c w home
+  [ ${#WORKERS[@]} -gt 0 ] || return 0
+  group_exists agents || { step "create the group agents (marks the worker users)"; run sudo groupadd agents; }
+  for c in "${WORKERS[@]}"; do
+    w="$WORKER_PREFIX$c"; home="$HOME_BASE/$w"
+    group_exists "$w" || { step "create the group $w"; run sudo groupadd "$w"; }
+    user_exists "$w" || { step "create the user $w"; run sudo useradd -m -g "$w" -G agents -s /bin/bash -c "claude-nix-harness worker for $c" "$w"; }
+    [ "$(stat -c %a "$home" 2>/dev/null || true)" = 750 ] || { step "chmod 0750 $home"; run sudo chmod 0750 "$home"; }
+    group_has "$w" "$OWNER" || { step "add $OWNER to the group $w (reads $home)"; run sudo usermod -aG "$w" "$OWNER"; }
+    linger_on "$w" || { step "enable linger for $w (its tmux survives logout)"; run sudo loginctl enable-linger "$w"; }
+    R_WORKERS+=("$c")
+  done
+}
+
+# The one sudo rule: the owner may run anything as a member of agents. The
+# file is root-only (0440), so the current content is read through sudo,
+# except under --dry-run, which never calls it.
+sudoers_step() {
+  local line tag="NOPASSWD: " cur
+  { [ "$OWNER_SUDO" != none ] && [ ${#WORKERS[@]} -gt 0 ]; } || return 0
+  [ "$OWNER_SUDO" != password ] || tag=""
+  line="$OWNER ALL=(%agents) ${tag}ALL"
+  if [ "$DRY_RUN" = 1 ]; then cur=$(cat "$SUDOERS_FILE" 2>/dev/null || true); else cur=$(sudo cat "$SUDOERS_FILE" 2>/dev/null || true); fi
+  if [ "$cur" != "$line" ]; then
+    step "write $SUDOERS_FILE: $line"
+    root_write "$SUDOERS_FILE" "$line" "security.sudo.extraRules" 0440
+    run sudo visudo -cf "$SUDOERS_FILE" || { run sudo rm -f "$SUDOERS_FILE"; die "visudo rejected $SUDOERS_FILE; it was removed"; }
+  fi
+  R_ROOT_STEPS+=(sudoers)
+}
+
+# Each worker's own user side, as that worker. `sudo -i` drops the
+# environment, so the ref goes in as a flag. A failure is a warning: the root
+# steps are done and recorded, and the command can be run again by hand.
+worker_user_steps() {
+  local c w flags=(--no-root --yes)
+  [ ${#WORKERS[@]} -gt 0 ] || return 0
+  [ "$VERBOSE" != 1 ] || flags+=(--verbose)
+  for c in "${WORKERS[@]}"; do
+    w="$WORKER_PREFIX$c"
+    step "bootstrap the user side of $w"
+    run sudo -u "$w" -i nix run "$HARNESS_REF#harness" -- bootstrap "${flags[@]}" --harness "$HARNESS_REF" \
+      || warn "the user steps for $w failed: run sudo -u $w -i nix run $HARNESS_REF#harness -- bootstrap --no-root --yes"
+  done
 }
 
 # The Claude Code sandbox is bubblewrap, which needs unprivileged user
@@ -415,7 +564,7 @@ NIXOS_NIX_SETTINGS='  nix.settings = {
     trusted-public-keys = [ "'$DEVENV_KEY'" ];
   };'
 nixos_steps() {
-  local lack=()
+  local lack=() c
   grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null || lack+=(flakes)
   grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null || lack+=("the devenv cache")
   if [ ${#lack[@]} -gt 0 ]; then
@@ -425,6 +574,18 @@ nixos_steps() {
   if userns_restricted; then
     step "NixOS: user namespaces are confined ($USERNS_KEY = $((1 - USERNS_VAL))), and the Claude Code sandbox (bubblewrap) needs them; in configuration.nix:"
     printf '  boot.kernel.sysctl."%s" = %s;\n' "$USERNS_KEY" "$USERNS_VAL"
+  fi
+  # The managed rules, the worker users, linger and the sudo rule are the
+  # module's (nixos/default.nix); this prints the options that do what
+  # root_steps does elsewhere.
+  step "NixOS: the managed rules at $MANAGED_DIR$([ ${#WORKERS[@]} -gt 0 ] && echo ", the worker users and the sudo rule") come from the harness module; in configuration.nix:"
+  printf '  harness.enable = true;\n'
+  if [ ${#WORKERS[@]} -gt 0 ]; then
+    printf '  harness.owner = "%s";\n' "$OWNER"
+    [ "$OWNER_SUDO" = nopasswd ] || printf '  harness.ownerSudo = "%s";\n' "$OWNER_SUDO"
+    for c in "${WORKERS[@]}"; do
+      printf '  harness.workers.%s = { gitName = "Claude (%s)"; gitEmail = "claude-%s@%s.invalid"; };\n' "$c" "$c" "$c" "$(uname -n)"
+    done
   fi
 }
 
@@ -542,8 +703,7 @@ $(cat "$DIRENV_TOML")"
 
   # bash: the direnv hook and the code root (home.sessionVariables), in
   # ~/.bashrc.d, which Fedora's stock ~/.bashrc sources after /etc/bashrc has
-  # run profile.d, so the nix profile is already on PATH here. No
-  # HARNESS_EXPECT_MANAGED: this host has no managed settings by design.
+  # run profile.d, so the nix profile is already on PATH here.
   local root_expr="$CODE_ROOT"
   [[ "$root_expr" == "$HOME/"* ]] && root_expr="\$HOME/${root_expr#"$HOME/"}"
   f="$HOME/.bashrc.d/claude-nix-harness.sh"
@@ -584,28 +744,26 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 
   [ -d "$CODE_ROOT" ] || { step "mkdir $CODE_ROOT"; run mkdir -p "$CODE_ROOT"; }
 
-  # Claude Code user settings: the keys a repo file cannot carry (header).
-  # Merged with jq so the rest of the file (theme, model, ...) stays.
-  local cs="$HOME/.claude/settings.json" want keys=('["sandbox","network","strictAllowlist"]')
-  want='{sandbox: {network: {strictAllowlist: true}}}'
-  if [ "$ACCOUNT_SYNC" = 0 ]; then
-    want="$want + {syncClaudeAiSkills: false, syncClaudeAiPlugins: false}"
-    keys+=('["syncClaudeAiSkills"]' '["syncClaudeAiPlugins"]')
+  # A worker's git identity, so its commits are not made under no name at all.
+  # Only where none is set, and only for a worker account; recorded as keys so
+  # reset removes exactly these defaults (strip_gitkeys).
+  local me="${USER:-$(id -un)}" c gf="$HOME/.gitconfig" gk=()
+  if [[ "$me" == "$WORKER_PREFIX"* ]]; then
+    c="${me#"$WORKER_PREFIX"}"
+    if [ -z "$(git config --global user.name 2>/dev/null)" ]; then
+      step "git: user.name \"Claude ($c)\" in $gf"
+      run git config --file "$gf" user.name "Claude ($c)"; gk+=('["user","name"]')
+    fi
+    if [ -z "$(git config --global user.email 2>/dev/null)" ]; then
+      step "git: user.email claude-$c@$(uname -n).invalid in $gf"
+      run git config --file "$gf" user.email "claude-$c@$(uname -n).invalid"; gk+=('["user","email"]')
+    fi
+    [ ${#gk[@]} -eq 0 ] || record_file keys "$gf" "${gk[@]}"
   fi
-  if hm_owned "$cs"; then hm_skip "$cs" "programs.claude-code.settings (sandbox.network.strictAllowlist = true$([ "$ACCOUNT_SYNC" = 0 ] && echo ", syncClaudeAiSkills and syncClaudeAiPlugins = false"))"
-  elif ! jq -e --argjson w "$(jq -n "$want")" '. as $s | ($s * $w) == $s' "$cs" >/dev/null 2>&1; then
-    step "set the user-scope keys in $cs (strict network allowlist$([ "$ACCOUNT_SYNC" = 0 ] && echo ", account sync off"))"
-    jq_edit "$cs" --argjson w "$(jq -n "$want")" '. * $w'
-  fi
-  record_file keys "$cs" "${keys[@]}"
-  # --account-sync: a `false` an earlier bootstrap (or anyone) wrote would
-  # keep sync off, so it goes; a key that is absent or true is left alone.
-  if [ "$ACCOUNT_SYNC" = 1 ] && ! hm_owned "$cs" \
-     && jq -e '.syncClaudeAiSkills == false or .syncClaudeAiPlugins == false' "$cs" >/dev/null 2>&1; then
-    step "remove syncClaudeAiSkills and syncClaudeAiPlugins = false from $cs (--account-sync)"
-    jq_edit "$cs" 'if .syncClaudeAiSkills == false then del(.syncClaudeAiSkills) else . end
-      | if .syncClaudeAiPlugins == false then del(.syncClaudeAiPlugins) else . end'
-  fi
+
+  # Claude Code's user settings carry no harness keys any more (the managed
+  # settings do); only the scrub key an earlier bootstrap wrote is removed.
+  local cs="$HOME/.claude/settings.json"
   # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
   # Code stops auto-allowing sandboxed Bash commands (header).
   if ! hm_owned "$cs" && jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
@@ -657,12 +815,27 @@ strip_keys() {
     | reduce ($k[] | . as $p | range(length - 1; 0; -1) | $p[:.]) as $q (.; if getpath($q) == {} then delpaths([$q]) else . end)'
 }
 
+# strip_gitkeys <file> <key paths, JSON>: the git config keys bootstrap
+# defaulted for a worker, and only while they still hold that default (a name
+# or address the person set since is theirs).
+strip_gitkeys() {
+  local f="$1" key v
+  [ -e "$f" ] || return 0
+  while IFS= read -r key; do
+    v=$(git config --file "$f" --get "$key" 2>/dev/null || true)
+    case "$v" in
+      "Claude ("*")"|claude-*@*.invalid) step "remove $key from $f"; run git config --file "$f" --unset "$key" ;;
+    esac
+  done < <(jq -r '.[] | join(".")' <<<"$2")
+}
+
 reset_steps() {
-  local pkgs=() steps=() profile=() exts=() nix_from="" i p f kind keys answer key
+  local pkgs=() steps=() profile=() exts=() workers=() nix_from="" i p f kind keys answer key c w
   load_receipt
   [ "$HAVE_RECEIPT" = 1 ] || { echo "no receipt at $RECEIPT: nothing recorded, nothing to reset"; exit 0; }
   mapfile -t pkgs < <(rq '.root.packages[]?')
   mapfile -t steps < <(rq '.root.steps[]?')
+  mapfile -t workers < <(rq '.root.workers[]?')
   mapfile -t profile < <(rq '.profile[]?')
   mapfile -t exts < <(rq '.vscodeExtensions[]?')
   # Who put Nix there: dnf (Fedora), the nix-installer, or nobody we know.
@@ -680,6 +853,9 @@ reset_steps() {
         in_list nix-daemon.socket "${steps[@]}" && echo "  root:  nix-daemon.socket disabled (Nix stays; install.sh enables it again)"
         in_list nix.conf "${steps[@]}" && echo "  root:  the harness block in $NIX_CONF" ;;
     esac
+    in_list sudoers "${steps[@]}" && echo "  root:  $SUDOERS_FILE"
+    in_list managed "${steps[@]}" && echo "  root:  the $MANAGED_DIR link (this host enforces nothing afterwards)"
+    for c in "${workers[@]}"; do echo "  root:  linger off for $WORKER_PREFIX$c (the user and its home stay)"; done
     in_list selinux "${steps[@]}" && echo "  root:  the SELinux rule for the daemon socket"
     in_list sysctl "${steps[@]}" && echo "  root:  $SYSCTL_DROPIN, and the kernel's user-namespace restriction back on"
     in_list apparmor "${steps[@]}" && echo "  root:  $APPARMOR_PROFILE (bwrap may no longer create user namespaces), AppArmor reloaded"
@@ -722,6 +898,18 @@ reset_steps() {
           root_write "$NIX_CONF" "$(without_block "$NIX_CONF")"
         fi ;;
     esac
+    if in_list sudoers "${steps[@]}"; then
+      step "remove $SUDOERS_FILE"
+      run sudo rm -f "$SUDOERS_FILE"
+    fi
+    if in_list managed "${steps[@]}" && [ -L "$MANAGED_DIR" ]; then
+      if [[ "$(readlink "$MANAGED_DIR")" == "$STORE_DIR"/* ]]; then step "remove the link $MANAGED_DIR"; run sudo rm -f "$MANAGED_DIR"
+      else warn "$MANAGED_DIR is not a link into $STORE_DIR any more: left alone"; fi
+    fi
+    for c in "${workers[@]}"; do
+      w="$WORKER_PREFIX$c"
+      if command -v loginctl >/dev/null 2>&1 && linger_on "$w"; then step "disable linger for $w"; run sudo loginctl disable-linger "$w"; fi
+    done
     if in_list selinux "${steps[@]}" && selinux_on; then
       step "remove the SELinux rule for the daemon socket"
       run sudo semanage fcontext -d '/nix/var/nix/daemon-socket(/.*)?' 2>/dev/null || true
@@ -767,7 +955,7 @@ reset_steps() {
         if grep -q -F "$MARK_BEGIN" "$f" 2>/dev/null; then step "remove $f"; run rm -f "$f"
         elif [ -e "$f" ]; then warn "$f no longer carries the harness marker: left alone"; fi ;;
       block) strip_block "$f" ;;
-      keys) strip_keys "$f" "$keys" ;;
+      keys) case "$f" in */.gitconfig) strip_gitkeys "$f" "$keys" ;; *) strip_keys "$f" "$keys" ;; esac ;;
     esac
   done < <(rq '.files[] | [.kind, .path, ((.keys // []) | tojson)] | @tsv')
   if [ ${#exts[@]} -gt 0 ] && command -v code >/dev/null 2>&1; then
@@ -780,6 +968,11 @@ reset_steps() {
   if [ -e "$RECEIPT" ]; then
     step "remove the receipt $RECEIPT"
     run rm -f "$RECEIPT"; run rmdir --ignore-fail-on-non-empty "$(dirname "$RECEIPT")"
+  fi
+  if [ "$NO_ROOT" != 1 ] && [ ${#workers[@]} -gt 0 ]; then
+    echo
+    echo "The worker users are kept: their homes hold repos and a Claude login. To delete one:"
+    for c in "${workers[@]}"; do echo "  sudo userdel -r $WORKER_PREFIX$c"; done
   fi
   cat <<NEXT
 
@@ -804,14 +997,11 @@ report() {
   [ "$WSL" = 0 ] || host="WSL2 ($host)"
   echo "host: $host ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
-  # The repo shell's direnv exports project and role (pkgs/ccmux.nix), so
-  # they are facts about this cwd, never MISSING. A role without a project
-  # means the environment was assembled by hand or leaked in.
+  # The repo shell's direnv exports the project (pkgs/ccmux.nix), so it is a
+  # fact about this cwd, never MISSING.
   info "HARNESS_CODE_ROOT ${HARNESS_CODE_ROOT:-$CODE_ROOT (default)}"
   no_project="unset: not inside a harness repo's shell"
   info "HARNESS_PROJECT ${HARNESS_PROJECT:-$no_project}"
-  info "HARNESS_ROLE ${HARNESS_ROLE:-unset}"
-  [ -z "${HARNESS_ROLE:-}" ] || [ -n "${HARNESS_PROJECT:-}" ] || warn "HARNESS_ROLE is set but HARNESS_PROJECT is not: the role names no project, so it did not come from a repo's shell (a stale or hand-set variable)"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
   # A NixOS configuration can carry the whole user side (the README's "your
   # own configuration"); the checks below say whether it does.
@@ -874,16 +1064,11 @@ report() {
   # No host-wide claude is a supported shape (the plain WSL host): VS Code's
   # extension runs its bundled binary, and repos bring the CLI.
   else info "claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from harness.claudeCode.enable (harness init turns it on on such a host)"; fi
-  local cs="$HOME/.claude/settings.json"
-  # Missing only where bootstrap wrote it; a host that leaves the file to
-  # Claude Code and account sync gets prompts instead of refusals.
-  if jq -e '.sandbox.network.strictAllowlist == true' "$cs" >/dev/null 2>&1; then ok "strict network allowlist in $cs (unlisted hosts refused, not prompted)"
-  elif [ -s "$RECEIPT" ]; then miss "sandbox.network.strictAllowlist is not true in $cs (user-or-managed scope; the repo file cannot set it; harness bootstrap writes it)"
-  else warn "sandbox.network.strictAllowlist is not true in $cs: an unlisted host prompts instead of being refused (user-or-managed scope; the repo file cannot set it)"; fi
+  local cs="$HOME/.claude/settings.json" ms="$MANAGED_DIR/managed-settings.json"
   if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (harness bootstrap removes it)"; fi
-  if jq -e '.syncClaudeAiSkills == false and .syncClaudeAiPlugins == false' "$cs" >/dev/null 2>&1; then ok "account-synced skills and plugins off in $cs"
-  else warn "account-synced skills and plugins load (syncClaudeAiSkills, syncClaudeAiPlugins not false in $cs; the harness reviews none of them): harness bootstrap turns them off, unless run with --account-sync"; fi
-  [ -r /etc/claude-code/managed-settings.json ] && warn "/etc/claude-code/managed-settings.json exists: this host carries managed settings, the harness assumed none" || ok "no managed settings (unmanaged host: the repo file is the whole harness)"
+  if [ -r "$ms" ]; then ok "managed settings $ms"; hooks_runnable "$ms"
+  else miss "no managed settings at $ms: this host enforces nothing (NixOS: harness.enable; other Linux: harness bootstrap --workers ...)"; fi
+  accounts_report
 
   # From inside a session `code` is on PATH but dies before printing (the
   # shell's LD_LIBRARY_PATH makes the host binary load a Nix glibc, measured
@@ -931,7 +1116,48 @@ report() {
   if [[ "$(command -v direnv 2>/dev/null)" == /run/current-system/* ]]; then :
   elif hm_owned "$HOME/.config/environment.d/50-claude-nix-harness.conf"; then ok "session PATH (home-manager)"
   else [ -r "$HOME/.config/environment.d/50-claude-nix-harness.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"; fi
-  [ -n "${HARNESS_EXPECT_MANAGED:-}" ] && warn "HARNESS_EXPECT_MANAGED is set but this host has no managed settings" || true
+}
+
+# hooks_runnable <settings file>: every hook command the file names exists,
+# is executable and accepts an event it does not handle
+# (tests/project-settings-test.sh does the same on the generated files).
+hooks_runnable() {
+  local s="$1" h n=0
+  while read -r h; do
+    if [ -x "$h" ] && printf '{"hook_event_name":"Stop"}' | "$h" >/dev/null 2>&1; then n=$((n+1))
+    else miss "hook not runnable: $h"; fi
+  done < <(jq -r '[.hooks[][].hooks[].command] | unique[]' "$s" 2>/dev/null)
+  [ "$n" -gt 0 ] && ok "$n hooks in $s runnable" || miss "no runnable hook in $s"
+}
+
+# The worker accounts (the agents group and its members' linger), the sudo
+# rule, and which side of them the caller stands on. Facts, not gaps, on a
+# host without workers.
+accounts_report() {
+  local members w me="${USER:-$(id -un)}" owned="" out
+  if ! group_exists agents; then info "no agents group: no worker users on this host"
+  else
+    members=$(group_members agents)
+    info "agents group members: ${members:-none}"
+    for w in ${members//,/ }; do
+      if linger_on "$w"; then ok "linger on for $w"
+      else warn "linger is off for $w: its tmux and devenv processes stop at logout (sudo loginctl enable-linger $w)"; fi
+    done
+  fi
+  # /etc/sudoers.d is root-only (0750) on most hosts, so a plain -e says
+  # "absent" for a file that is there; ask sudo, but only on a host with
+  # workers, and never under --dry-run. -n: no password prompt in a report.
+  if [ "$DRY_RUN" != 1 ] && { [ -e "$SUDOERS_FILE" ] || { group_exists agents && command -v sudo >/dev/null 2>&1 && sudo -n test -e "$SUDOERS_FILE" 2>/dev/null; }; }; then
+    if out=$(sudo -n visudo -cf "$SUDOERS_FILE" 2>&1); then ok "$SUDOERS_FILE passes visudo -cf"
+    elif grep -q -i 'password' <<<"$out"; then warn "$SUDOERS_FILE not checked: sudo wants a password (run sudo visudo -cf $SUDOERS_FILE)"
+    else miss "$SUDOERS_FILE fails visudo -cf: the owner's sudo rule is broken (sudo visudo -cf $SUDOERS_FILE)"; fi
+  fi
+  if group_has agents "$me"; then info "standing: worker ($me is in agents): the managed rules bind every session as this user"
+  else
+    command -v getent >/dev/null 2>&1 && owned=$(getent group 2>/dev/null | awk -F: -v u="$me" -v p="$WORKER_PREFIX" 'index($1, p) == 1 { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == u) printf "%s ", $1 }')
+    if [ -n "$owned" ]; then info "standing: owner ($me is a member of ${owned% }): sessions here reach the workers through ccmux"
+    else info "standing: neither worker nor owner ($me is in no agents group and no $WORKER_PREFIX* group)"; fi
+  fi
 }
 
 # claude doctor: Claude Code's own install and settings check, one line here
@@ -948,7 +1174,7 @@ claude_doctor() {
 # repo_report: the harness repo in the current directory, the same things
 # `harness init` checks after the first shell entry.
 repo_report() {
-  local s=.claude/settings.json h n=0
+  local s=.claude/settings.json
   echo; echo "repo: $PWD"
   # A session's sandbox masks the repo's own .claude files as character
   # devices (measured 2026-10-21): nothing about the repo can be read here.
@@ -960,14 +1186,6 @@ repo_report() {
   if ! command -v direnv >/dev/null 2>&1; then miss "direnv not on PATH: the repo shell cannot load"
   elif direnv status 2>/dev/null | grep -q -E '^Found RC allowed (0|true)$'; then ok "direnv: .envrc allowed"
   else miss "direnv: .envrc not allowed (read it, then direnv allow)"; fi
-  [ -e "$s" ] || return 0
-  # Every hook the file names exists, is executable and accepts an event it
-  # does not handle (tests/project-settings-test.sh).
-  while read -r h; do
-    if [ -x "$h" ] && printf '{"hook_event_name":"Stop"}' | "$h" >/dev/null 2>&1; then n=$((n+1))
-    else miss "hook not runnable: $h"; fi
-  done < <(jq -r '[.hooks[][].hooks[].command] | unique[]' "$s" 2>/dev/null)
-  [ "$n" -gt 0 ] && ok "$n hooks in $s runnable" || miss "no runnable hook in $s"
 }
 
 summary() { echo; echo "harness $CMD: $nmiss missing, $nwarn warnings"; }
@@ -992,6 +1210,7 @@ case "$CMD" in
     fi
     [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for /etc/nix/nix.conf and the user-namespace setting (or pass --no-root after doing those by hand)"; root_steps; }
     [ "$HOST" != nixos ] || nixos_steps
+    [ "$NO_ROOT" = 1 ] || worker_user_steps
     [ "$NO_PROFILE" = 1 ] || profile_steps
     handover_steps
     user_steps

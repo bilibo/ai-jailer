@@ -9,11 +9,9 @@
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
   allowConnectors ? false,
-  enforcementRoots ? [ ],
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
   allowManagedHooksOnly ? true,
-  strictAllowlist ? true,
   extraKnownMarketplaces ? [ ],
   direnvPackage ? pkgs.direnv,
   # The JSON refers to its own hooks by this stable path, not by store path.
@@ -29,7 +27,6 @@ let
       direnvPackage
       allowLocalCommits
       allowMemoryEdits
-      enforcementRoots
       ;
   };
 
@@ -40,14 +37,13 @@ let
       allowLocalCommits
       allowMemoryEdits
       allowConnectors
-      enforcementRoots
       extraDeny
       extraAllowedDomains
       allowManagedHooksOnly
-      strictAllowlist
       extraKnownMarketplaces
       ;
     hookDir = "${managedDir}/hooks";
+    syncClaudeAi = false;
   };
   settingsJson = (pkgs.formats.json { }).generate "managed-settings.json" settings;
 in

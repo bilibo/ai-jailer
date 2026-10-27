@@ -3,14 +3,8 @@
 # that open files themselves get past them; the hook and the sandbox exist
 # for that.
 #
-# Two sets because deny rules cannot be scoped by directory: with
-# enforcementRoots set, managed settings carry only `universal`, and
-# `project` comes from the repo's .claude/settings.json and from the hook,
-# which can see `cwd`.
-#
-# Path rules use `**/` or `~/` (the command center's own root: `//`, an
-# absolute path): in user-scope settings a leading `/` anchors at
-# ~/.claude, not at the project root.
+# Path rules use `**/` or `~/`: in user-scope settings a leading `/` anchors
+# at ~/.claude, not at the project root.
 { lib }:
 {
   allowLocalCommits ? false,
@@ -18,19 +12,7 @@
   # ~/.claude rule for an enumerated list; the hook keeps the rest of
   # ~/.claude/projects (transcripts) closed.
   allowMemoryEdits ? false,
-  # "all" or "universal"
-  scope ? "all",
-  # The command center's checkout (`harness.role = "center"`,
-  # docs/command-center.md), or null. It sets up and changes other repos,
-  # so their setup files (`centerOpen` below) are refused in its own root
-  # only, by absolute path: `//` and the path (`Read(//absolute)`, Claude
-  # Code permissions docs, checked 2026-10-18; a single leading `/` is
-  # project-relative). The rest of `projectConfig` stays `**/`: refused in every repo.
-  centerRoot ? null,
 }:
-assert lib.assertMsg (
-  centerRoot == null || lib.hasPrefix "/" centerRoot
-) "lib/deny-rules.nix: centerRoot must be an absolute path";
 let
   # Bare form and argument form both, since `git commit *` does not match a
   # plain `git commit` with no arguments.
@@ -41,7 +23,6 @@ let
       "Bash(${c} *)"
     ]) cmds;
 
-  # ---------------------------------------------------------------- universal
   credentials =
     bash [
       "az login"
@@ -64,15 +45,9 @@ let
       "Read(**/.terraform/**)"
       "Read(**/.git/devenv-base/**)"
       "Read(~/.azure/**)"
-      "Read(~/.terraform.d/**)"
       "Read(~/.ssh/**)"
-      "Read(~/.gnupg/**)"
-      "Read(~/.aws/**)"
-      "Read(~/.netrc)"
-      "Read(~/.git-credentials)"
       "Read(~/.config/gh/**)"
-      "Read(~/.npmrc)"
-      "Read(~/.pypirc)"
+      "Read(~/.git-credentials)"
       "Read(~/.claude/.credentials.json)"
       "Read(~/.claude.json)"
     ];
@@ -159,7 +134,6 @@ let
     "Edit(~/.local/bin/**)"
   ];
 
-  # ------------------------------------------------------------------ project
   gitHistory = bash (
     lib.optionals (!allowLocalCommits) [ "git commit" ]
     ++ [
@@ -257,29 +231,6 @@ let
     ".claude/skills/**"
     ".claude-plugin/**"
   ];
-  # What the command center may write in other repos: git shows it, and
-  # direnv asks again for the devenv files and .envrc. In its own root
-  # both forms, the top level and below it, so neither depends on `/**/`
-  # matching no directory.
-  centerOpen = [
-    "devenv.nix"
-    "devenv.yaml"
-    "devenv.lock"
-    ".envrc"
-    ".claude/hooks/**"
-    ".claude/skills/**"
-  ];
-  projectConfig =
-    if centerRoot == null then
-      map (p: "Edit(**/${p})") projectConfigPaths
-    else
-      map (p: "Edit(**/${p})") (lib.subtractLists centerOpen projectConfigPaths)
-      ++ lib.concatMap (p: [
-        "Edit(/${centerRoot}/${p})"
-        "Edit(/${centerRoot}/**/${p})"
-      ]) centerOpen;
-
-  universal = credentials ++ system ++ plugins ++ userConfig;
-  project = gitHistory ++ cloudWrite ++ projectConfig;
+  projectConfig = map (p: "Edit(**/${p})") projectConfigPaths;
 in
-if scope == "universal" then universal else universal ++ project
+credentials ++ system ++ plugins ++ userConfig ++ gitHistory ++ cloudWrite ++ projectConfig

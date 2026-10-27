@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#   scripts/install.sh [--check] [--no-init] [harness bootstrap flags]
+#   scripts/install.sh [--check] [--no-init] [--workers <a,b,...>] [--worker <name>]
+#                      [--owner <login>] [--owner-sudo nopasswd|password|none]
+#                      [other harness bootstrap flags]
 #   curl -fsSL https://raw.githubusercontent.com/bilibo/claude-nix-harness/main/scripts/install.sh | bash -s -- [flags]
 #
 # The one install route, run once on a plain Linux host: what has to happen
@@ -32,7 +34,12 @@
 # so `harness reset` reverses it. --check reports the root steps and changes
 # nothing; --dry-run does the same, then hands over to bootstrap's --dry-run
 # when Nix can already run. --no-init skips the checkout's shell. Every other
-# flag goes to bootstrap (--dry-run, --yes and --verbose to init as well).
+# flag goes to bootstrap (--dry-run, --yes and --verbose to init as well),
+# --workers, --worker, --owner and --owner-sudo included: bootstrap creates
+# the worker users, the managed link and the sudo rule (its header lists the
+# commands), and --check prints them as bootstrap would run them. They are
+# not done by this script: they need the harness ref built, which is Nix's
+# job.
 set -euo pipefail
 
 INSTALLER_URL=https://artifacts.nixos.org/nix-installer
@@ -118,6 +125,41 @@ installer_steps() {
   done_steps+=(nix-installer)
 }
 
+# worker_plan <ref>: under --check, the commands `harness bootstrap` runs for
+# --workers, read from the flags in $pass. Printed, never run: bootstrap owns
+# them (pkgs/harness/bootstrap.sh, "Root steps").
+worker_plan() {
+  local ref="$1" i c w owner="${USER:-$(id -un)}" mode=nopasswd tag="NOPASSWD: " prefix="${HARNESS_WORKER_PREFIX:-w-}"
+  local -a workers=() names
+  for ((i = 0; i < ${#pass[@]}; i++)); do
+    case "${pass[i]}" in
+      --workers|--worker) IFS=, read -r -a names <<<"${pass[i+1]:-}"; workers+=("${names[@]}") ;;
+      --owner) owner="${pass[i+1]:-$owner}" ;;
+      --owner-sudo) mode="${pass[i+1]:-$mode}" ;;
+    esac
+  done
+  printf '\n==> bootstrap'"'"'s root steps once Nix is there: the managed rules link%s\n' "$([ ${#workers[@]} -gt 0 ] && echo ", the worker users, linger, the sudo rule")"
+  echo "    would run: sudo nix build $ref#managed --out-link /etc/claude-code"
+  [ ${#workers[@]} -gt 0 ] || return 0
+  echo "    would run: sudo groupadd agents   (unless the group exists)"
+  for c in "${workers[@]}"; do
+    w="$prefix$c"
+    echo "    would run: sudo groupadd $w"
+    echo "    would run: sudo useradd -m -g $w -G agents -s /bin/bash -c 'claude-nix-harness worker for $c' $w"
+    echo "    would run: sudo chmod 0750 /home/$w"
+    echo "    would run: sudo usermod -aG $w $owner"
+    echo "    would run: sudo loginctl enable-linger $w"
+  done
+  if [ "$mode" != none ]; then
+    [ "$mode" != password ] || tag=""
+    echo "    would run: sudo install -m 0440 <new content> /etc/sudoers.d/claude-nix-harness   ($owner ALL=(%agents) ${tag}ALL)"
+    echo "    would run: sudo visudo -cf /etc/sudoers.d/claude-nix-harness"
+  fi
+  for c in "${workers[@]}"; do
+    echo "    would run: sudo -u $prefix$c -i nix run $ref#harness -- bootstrap --no-root --yes --harness $ref"
+  done
+}
+
 main() {
   local a f here="" ref
   for a in "$@"; do
@@ -145,6 +187,7 @@ main() {
   if [ -e "$nixos_marker" ] || [ "${ID:-}" = nixos ]; then nixos_steps
   elif [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null; then fedora_steps
   else installer_steps; fi
+  if [ "$CHECK" = 1 ] && [ ! -e "$nixos_marker" ] && [ "${ID:-}" != nixos ]; then worker_plan "$ref"; fi
   if [ "$CHECK" = 1 ]; then echo; echo "install.sh --check: nothing changed; next would be: nix run $ref#harness -- bootstrap"; exit 0; fi
 
   # Nix-built tools look for the CA bundle at the NixOS and Debian paths or

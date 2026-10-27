@@ -37,42 +37,40 @@ So the picture, before any test: in a harness repo, an SDK program with
 default options is governed exactly as a session is (`env-guard`, the
 deny set, the sandbox, the preamble). A program that opts out
 (`settingSources: []`, its own `sandbox`, bypass mode) escapes the repo
-file on an unmanaged host, because the repo file is project scope and
-the program's options rank above it. On a managed host the managed file
-still loads; whether it also stops the program's bypass mode is the one
-undocumented point, and it is the SDK form of the question
+file, because the repo file is project scope and the program's options
+rank above it. The managed file still loads; whether it also stops the
+program's bypass mode is the one undocumented point, and it is the SDK form of the question
 `docs/sessions.md` section 7 already asks about the CLI's
 `--permission-mode`.
 
 Two harness use cases fit the SDK, and three test cases come before
 either:
 
-- **The harness's own jobs.** `harness check` is fourteen `claude -p`
+- **The harness's own jobs.** `harness check` is eighteen `claude -p`
   sessions driven by a shell script and judged with `jq` over
   stream-json; roadmap item 6 (the limits suite) grows the same way. As
   an SDK program: a typed stream, the transcript already parsed, one
   process per case. Not the broker (dropped 2026-10-24): that was a hooks
   module inside the engine (`docs/sessions.md` section 5), not a client of
   it.
-- **Headless agents on the managed host.** A scheduled job on the WSL
+- **Headless agents on a managed host.** A scheduled job on the WSL
   host (a nightly `terraform plan` review, a dependency audit) is an SDK
-  program under a systemd timer, as the same user, in a harness repo.
+  program under a systemd timer, as a worker user, in a harness repo.
 
 The test cases, each a `harness check`-style verdict on tool results:
 
 1. Default options in a harness repo: `env-guard` refuses `git push`,
    `grep nonewprivs /proc/self/status` shows the sandbox, `DEVENV_ROOT`
    is set by the preamble. Expected to pass; the documentation says so.
-2. The opt-out program on a managed host: `settingSources: []`,
+2. The opt-out program on a host with the managed file: `settingSources: []`,
    `sandbox: { enabled: false }`, `permissionMode: 'bypassPermissions'`
    with `allowDangerouslySkipPermissions`. Expected: the managed file's
    deny set and `env-guard` still apply (documented), the sandbox still
    runs (managed settings make it admin-required), and bypass mode is
-   refused (not documented; the point of the test). On an unmanaged
-   host the same program is expected to succeed, and the README's "what
-   a repo cannot enforce on its own" gains the line: a program the user
-   runs can opt out of the repo file; the managed layer is the answer,
-   as it is for user-scope settings today.
+   refused (not documented; the point of the test). The README's "What
+   the repo file is for" gains the line: a program the user runs can opt
+   out of the repo file; the managed layer is the answer, as it is for
+   user-scope settings.
 3. `harness check` gains an SDK twin of cases 1, 3 and 7 and the case
    above, so a Claude Code release that changes SDK behaviour fails a
    check instead of a reader's assumption.

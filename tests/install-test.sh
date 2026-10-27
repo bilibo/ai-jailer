@@ -113,9 +113,17 @@ called "init on the checkout"      "github:bilibo/claude-nix-harness#harness -- 
 WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes --no-init
 uncalled "--no-init"               ' init '
 called "--no-init not passed on"   '-- bootstrap --yes$'
-WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --verbose --no-account-sync --yes
-called "bootstrap flags"           '-- bootstrap --verbose --no-account-sync --yes$'
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --verbose --trusted-user --yes
+called "bootstrap flags"           '-- bootstrap --verbose --trusted-user --yes$'
 called "init flags"                "-- init $tmp/checkout --verbose --yes$"
+
+# The worker flags reach bootstrap (and not init), in order.
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --workers acme,beta --owner raul --owner-sudo password --yes
+exits "worker flags"               0
+called "worker flags to bootstrap" '-- bootstrap --workers acme,beta --owner raul --owner-sudo password --yes$'
+called "init gets none of them"    "-- init $tmp/checkout --yes$"
+WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --worker acme --worker beta --yes
+called "--worker repeated"         '-- bootstrap --worker acme --worker beta --yes$'
 
 # --check: nothing runs. --dry-run without nix: the installer is reported,
 # nothing runs; with nix: bootstrap --dry-run, then init --dry-run.
@@ -123,6 +131,22 @@ run ubuntu 24.04 "$tmp/checkout" --check
 exits "--check" 0
 says "check reports"               'install.sh --check: nothing changed'
 uncalled "check runs nothing"      '^curl|^installer|^nix|^sudo'
+# With workers: bootstrap's root lines are printed, none run.
+run ubuntu 24.04 "$tmp/checkout" --check --workers acme --owner raul
+exits "--check with workers"       0
+says "check: managed link"         'would run: sudo nix build path:[^ ]*checkout#managed --out-link /etc/claude-code'
+says "check: agents group"         'would run: sudo groupadd agents'
+says "check: worker group"         'would run: sudo groupadd w-acme'
+says "check: worker user"          "would run: sudo useradd -m -g w-acme -G agents -s /bin/bash -c 'claude-nix-harness worker for acme' w-acme"
+says "check: home mode"            'would run: sudo chmod 0750 /home/w-acme'
+says "check: owner joins the group" 'would run: sudo usermod -aG w-acme raul'
+says "check: linger"               'would run: sudo loginctl enable-linger w-acme'
+says "check: sudoers rule"         'sudoers\.d/claude-nix-harness   \(raul ALL=\(%agents\) NOPASSWD: ALL\)'
+says "check: visudo"               'would run: sudo visudo -cf /etc/sudoers.d/claude-nix-harness'
+says "check: worker user steps"    'would run: sudo -u w-acme -i nix run path:[^ ]*checkout#harness -- bootstrap --no-root --yes --harness '
+uncalled "check with workers runs nothing" '^curl|^installer|^nix|^sudo'
+run ubuntu 24.04 "$tmp/checkout" --check --workers acme --owner raul --owner-sudo none
+if [[ "$out" =~ sudoers\.d ]]; then fail=$((fail+1)); echo "FAIL: --owner-sudo none still prints the sudoers lines"; else pass=$((pass+1)); fi
 run ubuntu 24.04 "$tmp/checkout" --dry-run
 exits "--dry-run" 0
 says "dry run names the installer" 'would run: curl'

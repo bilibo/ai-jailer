@@ -1,18 +1,35 @@
 # ccmux [-n] [<customer>/<repo> | <path>] [claude args...]
-# Starts or attaches the project's tmux session and runs claude in a window.
-# HARNESS_PROJECT is exported by the harness devenv shell, so inside a repo
-# (or its worktree) the project argument is optional; for a clone outside the
-# code root the shell also exports HARNESS_PROJECT_DIR. HARNESS_ROLE (center
-# or work), exported next to it, names the window and goes into its
-# environment. claude is the one on PATH, else the target repo's devenv
-# shell's (`direnv exec`), else an error naming harness.claudeCode.enable.
-# `-n` prints the resolution and exits, for tests/ccmux-test.sh.
+# Starts or attaches the project's tmux session and runs claude in a window
+# named `claude`. HARNESS_PROJECT is exported by the harness devenv shell, so
+# inside a repo (or its worktree) the project argument is optional; for a
+# clone outside the code root the shell also exports HARNESS_PROJECT_DIR.
+#
+# Each customer is a Linux user, ${HARNESS_WORKER_PREFIX:-w-}<customer>, with
+# its own tmux server. Run by anyone else, ccmux hands over with
+# `sudo -u <worker> -i ccmux <customer>/<repo> [claude args]` and does not
+# touch tmux itself; run by that worker, it starts the session. A worker
+# naming another customer's project is refused (exit 66). With no such user
+# on the host, ccmux runs directly for the caller.
+#
+# The handover always passes the name, never a path: a path under the
+# caller's own home resolves against the caller's code root, and the worker
+# resolves the name under its own HARNESS_CODE_ROOT, which comes from its
+# login shell (hence `-i`). A name the caller's root does not hold is
+# handed over unresolved; it is an error only on a direct run.
+#
+# claude is the one on PATH, else the target repo's devenv shell's
+# (`direnv exec`), else an error naming harness.claudeCode.enable.
+# `-n` prints the resolution (or the handover) and exits, for
+# tests/ccmux-test.sh. Exit codes: 64 usage, 66 no such repo or refused,
+# 69 no claude.
 {
   pkgs,
   codeRoot ? "$HOME/code/git",
 }:
 pkgs.writeShellApplication {
   name = "ccmux";
+  # sudo, getent and id come from the host's PATH, which writeShellApplication
+  # keeps after these: sudo has to be the host's setuid binary.
   runtimeInputs = [ pkgs.tmux ];
   text = ''
     usage() { echo "usage: ccmux [<customer>/<repo> | <path>] [claude args]  (inside a repo under $root, the project is optional)" >&2; exit 64; }
@@ -35,12 +52,16 @@ pkgs.writeShellApplication {
     dry=0
     if [ "''${1:-}" = "-n" ] || [ "''${1:-}" = "--dry-run" ]; then dry=1; shift; fi
 
+    missing=""
     if [ $# -ge 1 ] && [[ "$1" != -* ]]; then
       arg="$1"; shift
       if [[ "$arg" != /* && "$arg" != .* && -d "$root/$arg" ]]; then
         project=$(resolve "$root/$arg")
       elif [ -d "$arg" ]; then
         project=$(resolve "$arg")
+      elif [[ "$arg" =~ ^([^/.][^/]*/[^/]+) ]]; then
+        # Possibly a worker's repo the caller has no copy of.
+        project="''${BASH_REMATCH[1]}" missing="$root/$arg"
       else
         die "no such repo: $root/$arg (give <customer>/<repo>, or a path to a repo under $root)"
       fi
@@ -51,6 +72,21 @@ pkgs.writeShellApplication {
     else
       usage
     fi
+    session="''${project//\//-}"
+
+    prefix="''${HARNESS_WORKER_PREFIX:-w-}"
+    worker="$prefix''${project%%/*}"
+    me=$(id -un)
+    if [ "$me" != "$worker" ] && getent passwd "$worker" >/dev/null 2>&1; then
+      case "$me" in "$prefix"*) die "a worker cannot open another customer's session ($worker)" ;; esac
+      if [ "$dry" = 1 ]; then
+        printf 'session=%s project=%s user=%s (sudo -u %s -i ccmux %s' "$session" "$project" "$worker" "$worker" "$project"
+        [ $# -eq 0 ] || printf ' %s' "$*"
+        echo ")"; exit 0
+      fi
+      exec sudo -u "$worker" -i ccmux "$project" "$@"
+    fi
+    [ -z "$missing" ] || die "no such repo: $missing (give <customer>/<repo>, or a path to a repo under $root)"
 
     if [ -n "''${HARNESS_PROJECT_DIR:-}" ] && [ "$project" = "''${HARNESS_PROJECT:-}" ]; then
       repo="$HARNESS_PROJECT_DIR"
@@ -58,22 +94,6 @@ pkgs.writeShellApplication {
       repo="$root/$project"
     fi
     [ -d "$repo" ] || die "no such repo: $repo"
-    session="''${project//\//-}"
-
-    # HARNESS_ROLE is the role of HARNESS_PROJECT, the shell's own project:
-    # the window carries it, and is named after it, only when it opens that
-    # project. Into any other project (the center launching a work repo) the
-    # window starts without it and that repo's shell sets its own (direnv,
-    # before every Bash command), so a work session never reads `center`.
-    # The window sets or clears it itself, since the tmux server's global
-    # environment is that of whichever client started the server, possibly
-    # a center shell; the client drops it, so a server started here has none.
-    role="" name=claude setrole="unset HARNESS_ROLE"
-    if [ "$project" = "''${HARNESS_PROJECT:-}" ]; then role="''${HARNESS_ROLE:-}"; fi
-    if [ -n "$role" ]; then
-      [[ "$role" =~ ^[a-z][a-z0-9-]*$ ]] || die "HARNESS_ROLE is not a role name: $role"
-      name="$role" setrole="export HARNESS_ROLE=$role"
-    fi
 
     # The window's claude. The launching PATH's first (a host-wide install,
     # or the repo shell ccmux runs in), by absolute path: the one `-n`
@@ -101,12 +121,17 @@ pkgs.writeShellApplication {
     if [ "$dry" = 1 ]; then
       printf 'session=%s repo=%s' "$session" "$repo"
       [ $# -eq 0 ] || printf ' args=%s' "$*"
-      printf '\nrole=%s window=%s' "''${role:-unset}" "$name"
-      [ -n "$role" ] || [ -z "''${HARNESS_ROLE:-}" ] || printf ' (HARNESS_ROLE=%s is for %s)' "$HARNESS_ROLE" "''${HARNESS_PROJECT:-no project}"
       printf '\nclaude=%s (%s)' "$claude" "$via"
       echo; exit 0
     fi
-    unset HARNESS_ROLE
+
+    # `sudo -i` does not carry XDG_RUNTIME_DIR; linger keeps the worker's
+    # /run/user/<uid>, and devenv and tmux look there. Assumed from the plan
+    # (check V5), not yet verified live, 2026-10-27.
+    uid=$(id -u)
+    if [ -z "''${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$uid" ]; then
+      export XDG_RUNTIME_DIR="/run/user/$uid"
+    fi
 
     if [ "$via" = PATH ]; then
       printf -v command '%q ' "$claude" "$@"
@@ -114,11 +139,11 @@ pkgs.writeShellApplication {
       printf -v command '%q ' "$direnv" exec "$repo" claude "$@"
     fi
     # Keep the window open after claude exits so the pane can be inspected.
-    window="$setrole; $command; exec \"\$SHELL\""
+    window="$command; exec \"\$SHELL\""
     if tmux has-session -t "=$session" 2>/dev/null; then
-      tmux new-window -t "=$session" -n "$name" -c "$repo" "$window"
+      tmux new-window -t "=$session" -n claude -c "$repo" "$window"
     else
-      tmux new-session -d -s "$session" -n "$name" -c "$repo" "$window"
+      tmux new-session -d -s "$session" -n claude -c "$repo" "$window"
     fi
     if [ -n "''${TMUX:-}" ]; then
       exec tmux switch-client -t "=$session"
