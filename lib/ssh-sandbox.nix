@@ -1,4 +1,4 @@
-# A sandboxed session in a harness repo (every work repo) gets no agent and
+# A sandboxed session in a jail (every work repo) gets no agent and
 # no key files, so it cannot push, clone or ssh as the user, while the
 # user's own shells keep both. The center runs without the sandbox, so its
 # key files stay readable (settings.nix drops `filesystem` there). A

@@ -9,7 +9,7 @@
 # The library served an embedded native addon (`bun-ant-audio-out`, linked
 # against libasound.so.2) that the binary extracts and dlopens when audio
 # output is used. Without the variable that dlopen fails and audio output
-# does not work; the sandboxed sessions this harness runs do not use it.
+# does not work; the sandboxed sessions ai-jailer runs do not use it.
 # Not replaced by a RUNPATH on the binary: `patchelf --add-rpath`, in any
 # order with autoPatchelfHook's interpreter change, leaves claude-code
 # 2.1.303 segfaulting on `--version` (changelog 2026-10-27; 2.1.308 was

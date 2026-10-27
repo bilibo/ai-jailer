@@ -3,8 +3,8 @@
 How several Claude Code sessions on one host work together without trusting
 each other. Written 2026-10-20 from the first live case: a session in a
 customer repo was refused an edit by the hook (the rule for `devenv.nix`
-matched the harness's own module source), wrote the change up as a diff,
-sent it to the session open in the harness checkout, and that session put
+matched ai-jailer's own module source), wrote the change up as a diff,
+sent it to the session open in the ai-jailer checkout, and that session put
 the diff in front of Raul before applying it. That sequence is the design;
 this file says which parts of it to make structural, and in what order.
 The roadmap keeps the order against everything else.
@@ -18,7 +18,7 @@ The roadmap keeps the order against everything else.
 - **The human is the only party who can accept a relayed request.** A
   session that was refused an action does not get it done by asking a peer.
   Claude Code's own guidance to the receiving session says so (it calls it
-  permission laundering); the harness makes it a check the engine performs,
+  permission laundering); the jailer makes it a check the engine performs,
   not a courtesy the model extends.
 - **Coordination is a separate layer from enforcement.** `env-guard.sh`, the
   deny rules and the sandbox stay the hard rules, enforceable from a repo
@@ -51,9 +51,9 @@ checked.
 ## 3. Tiers, realised as Linux users
 
 Planned on 2026-10-20 as two tiers, customer and platform, chosen by
-`ccmux` from the directory and exported as `HARNESS_TIER`. Realised on
+`ajmux` from the directory and exported as `AI_JAILER_TIER`. Realised on
 2026-10-24 as a role the repo's devenv shell set (`harness.role`,
-`HARNESS_ROLE`). Replaced on 2026-10-27 by Linux users, because a role set
+`AI_JAILER_ROLE`). Replaced on 2026-10-27 by Linux users, because a role set
 inside one UID separated nothing: every session ran as the same user with
 the same files. A tier is now a user, and which session may touch what is a
 property of the operating system. Section 5 keeps the old words.
@@ -65,9 +65,9 @@ property of the operating system. Section 5 keeps the old words.
 
 Which tier a session is in is its UID, not a line in a file an agent could
 edit: a worker cannot become the owner, cannot read the owner's home or
-another worker's (0750; untested live, check V7 and `harness check` case
+another worker's (0750; untested live, check V7 and `aj check` case
 18), and cannot use sudo (hook rule 4 refuses it by text; the sudoers file
-has no rule for a worker). `ccmux <customer>/<repo>` from the owner's
+has no rule for a worker). `ajmux <customer>/<repo>` from the owner's
 account hands over to the worker (`sudo -u w-<customer> -i`); a worker
 naming another customer is refused. No session has a different rule set
 from the workers': a session in this checkout is an ordinary managed
@@ -75,7 +75,7 @@ session. A tmux server is per user, so a worker's `send-keys` reaches only
 its own server (runbook section 8).
 
 The 2026-10-20 trigger remains: the hook's rule for `*/devenv.nix` matches
-the harness's own `devenv/devenv.nix` too, so a change there comes to the
+ai-jailer's own `devenv/devenv.nix` too, so a change there comes to the
 human as a diff, in every session.
 
 ## 4. The proposal flow
@@ -84,9 +84,9 @@ A proposal is a diff plus a rationale, the user and directory it came
 from, and a timestamp. It is the only thing that crosses from a worker to
 the owner.
 
-1. A work session hits a refusal for a change to a harness-owned or
+1. A work session hits a refusal for a change to a jailer-owned or
    project-config file (`devenv.nix`, `.envrc`, `.claude/settings.json`,
-   the harness source). It writes the change as a diff and submits it as a
+   the ai-jailer source). It writes the change as a diff and submits it as a
    proposal. It does not ask any session to apply it.
 2. The owner's session, or the owner reading the worker's window, shows
    the proposal to the human: the model relays it in chat and asks. The
@@ -99,7 +99,7 @@ the owner.
 4. The applied change is traceable to the accepted proposal.
 
 The flow is unchanged by the move to users. Steps 1 and 2 are the CLAUDE.md
-contract in both places: the block `harness init` writes into work repos
+contract in both places: the block `aj init` writes into work repos
 ("Do not work around it: propose a diff or ask") and this repo's own
 CLAUDE.md ("propose those as diffs"; it has no line of its own on relayed
 requests, so the receiving side is Claude Code's guidance in section 2).
@@ -108,7 +108,7 @@ mechanism: the broker mod that was to make steps 2, 3 and 4 structural was
 dropped on 2026-10-24 (section 5).
 
 Relay is for the genuine case: a work session needing a change to
-harness source or project configuration. Routine work bouncing through the
+ai-jailer source or project configuration. Routine work bouncing through the
 owner means a rule over-matches, and the fix is the rule.
 
 ## 5. The broker mod: dropped 2026-10-24
@@ -129,7 +129,7 @@ call and change the system prompt, runs with the engine's reach outside
 the Bash sandbox, and keeps a store every session shares. An enabled
 organisation mod is the one kind the built-in guard lets through, so
 shipping one makes its code, its build, the marketplace that serves it and
-the keys that enable it a trust surface the harness would have to defend
+the keys that enable it a trust surface the jailer would have to defend
 on every host, for coordination that never relaxes a rule (section 1).
 
 What stays is the policy that refuses mods:
@@ -140,14 +140,14 @@ What stays is the policy that refuses mods:
   lists a source, so no marketplace can be added; `disableSideloadFlags`;
   `allowManagedHooksOnly`. The managed tree has no marketplace directory.
 - Any host: the deny rules and the hook refuse `claude plugin` and the
-  plugin flags on a nested `claude`; `harness init` refuses a repo with a
+  plugin flags on a nested `claude`; `aj init` refuses a repo with a
   plugin manifest under `.claude`.
 - Since 2026-10-27 the managed settings carry `syncClaudeAiSkills` and
   `syncClaudeAiPlugins = false` (check V9 pending), so the claude.ai
   account's plugins and skills do not load; bootstrap's user-scope write
   and `--account-sync` are gone.
 
-Coordination stays the proposal flow of section 4 plus `ccmux`: the
+Coordination stays the proposal flow of section 4 plus `ajmux`: the
 CLAUDE.md contract in each tier, Claude Code's own messaging between
 sessions, the human as the gate, and the tmux window colour as the sign
 that a session waits. A record of proposals and a structural gate have no
@@ -163,7 +163,7 @@ dated roadmap entry.
   the host.nix options and the `managed-wsl` tree, `hook-test` for the
   `claude plugin` refusals.
 - The proposal flow is a contract between models and a human, so its test
-  is live: the live suite (`harness check`) is to gain a case where a work
+  is live: the live suite (`aj check`) is to gain a case where a work
   session's refused edit ends as a proposal in chat and not as an edit
   anywhere. The case does not exist yet.
 
@@ -175,4 +175,4 @@ dated roadmap entry.
   see).
 - Remote Control: a driven session is still the local process, so the
   rules apply unchanged; confirm once Remote Control can start on a
-  harness host (roadmap, Ideas).
+  ai-jailer host (roadmap, Ideas).

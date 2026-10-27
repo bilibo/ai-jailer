@@ -3,6 +3,34 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-28
+
+- Decision (the owner's): the project is renamed. The repo and flake are
+  `ai-jailer` (`bilibo/ai-jailer`; GitHub redirects the old URL, so
+  existing `flake.lock` and `devenv.lock` files keep resolving), the CLI
+  is `aj` ("ai-jailer, or `aj` among friends"), the tmux launcher is
+  `ajmux`, and a governed repo is a jail: the devenv module's options are
+  `ai-jail.*` (`ai-jail.enable`, `ai-jail.settings`, ...), a repo's
+  `devenv.yaml` names the input `ai-jailer` and imports
+  `ai-jailer/devenv`. Flake outputs: `packages.aj`, `packages.ajmux`,
+  `apps.aj` and `apps.default`, so `nix run github:bilibo/ai-jailer --
+  init` works. The `--harness <ref>` flag is `--jailer <ref>`. The two
+  variables a jail's shell exports about itself are `AI_JAIL_PROJECT`
+  and `AI_JAIL_PROJECT_DIR`; every other `HARNESS_*` variable is
+  `AI_JAILER_*`. The host state bootstrap writes follows the name:
+  `/etc/sudoers.d/ai-jailer`, `/etc/sysctl.d/99-ai-jailer.conf`,
+  `~/.local/state/ai-jailer/receipt.json` (its ref and revision under
+  the key `jailer`), `~/.cache/ai-jailer/direnv-ok`,
+  `~/.config/environment.d/50-ai-jailer.conf`, and the
+  `# --- ai-jailer ---` block markers in nix.conf, the bashrc snippet and
+  tmux.conf. Unchanged: `/etc/claude-code`, the `w-` prefix, the `agents`
+  group, the `devenv/` directory, the `claude-nix-harness-container`
+  repo. Entries below keep the names of their day. A host bootstrapped
+  under the old names (the 2026-10-22 laptops) holds state `aj reset`
+  does not know: reset from the last old revision, a311cf4, first
+  (runbook section 7). `bilibo/nixos-wsl` follows (input `ai-jailer`,
+  package `ajmux`); its lock moves once the GitHub repo is renamed.
+
 ## 2026-10-27
 
 - Finding: the owner verified that `harness bootstrap` then `harness

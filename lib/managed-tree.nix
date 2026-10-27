@@ -1,6 +1,6 @@
 # One store path, linked at /etc/claude-code on the host: the managed
 # settings and the hooks they call. No plugin or marketplace directory: the
-# harness ships no mods (2026-10-24, docs/sessions.md section 5), and the
+# ai-jailer ships no mods (2026-10-24, docs/sessions.md section 5), and the
 # managed settings refuse every mod (lib/settings.nix).
 {
   pkgs,
@@ -18,7 +18,7 @@
   managedDir ? "/etc/claude-code",
 }:
 let
-  harnessLib = import ./default.nix { inherit lib; };
+  jailerLib = import ./default.nix { inherit lib; };
 
   hooks = import ./hooks.nix {
     inherit
@@ -30,7 +30,7 @@ let
       ;
   };
 
-  settings = harnessLib.settings {
+  settings = jailerLib.settings {
     managed = true;
     inherit
       platform
@@ -47,7 +47,7 @@ let
   };
   settingsJson = (pkgs.formats.json { }).generate "managed-settings.json" settings;
 in
-pkgs.runCommand "claude-nix-harness-managed" { } ''
+pkgs.runCommand "ai-jailer-managed" { } ''
   mkdir -p $out
   cp ${settingsJson} $out/managed-settings.json
   cp -r ${hooks} $out/hooks

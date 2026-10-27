@@ -2,7 +2,7 @@
 
 Ideas with a shape but no commitment, written 2026-10-24. Neither is a
 roadmap item; the roadmap's "Ideas, not planned" points here. Both start
-from one observation: the harness governs the Claude Code process on a
+from one observation: the jailer governs the Claude Code process on a
 host, and two things now sit next to that process that it does not
 govern on its own: agents built on the Agent SDK, and the cloud identity
 the agent acts under.
@@ -33,7 +33,7 @@ What the SDK documentation says about settings, read 2026-10-24
 - Filesystem hooks and programmatic hooks run side by side; a
   `PreToolUse` hook gates "every tool call regardless of mode and rules".
 
-So the picture, before any test: in a harness repo, an SDK program with
+So the picture, before any test: in a jail, an SDK program with
 default options is governed exactly as a session is (`env-guard`, the
 deny set, the sandbox, the preamble). A program that opts out
 (`settingSources: []`, its own `sandbox`, bypass mode) escapes the repo
@@ -43,10 +43,10 @@ program's bypass mode is the one undocumented point, and it is the SDK form of t
 `docs/sessions.md` section 7 already asks about the CLI's
 `--permission-mode`.
 
-Two harness use cases fit the SDK, and three test cases come before
+Two jailer use cases fit the SDK, and three test cases come before
 either:
 
-- **The harness's own jobs.** `harness check` is eighteen `claude -p`
+- **ai-jailer's own jobs.** `aj check` is eighteen `claude -p`
   sessions driven by a shell script and judged with `jq` over
   stream-json; roadmap item 6 (the limits suite) grows the same way. As
   an SDK program: a typed stream, the transcript already parsed, one
@@ -55,11 +55,11 @@ either:
   it.
 - **Headless agents on a managed host.** A scheduled job on the WSL
   host (a nightly `terraform plan` review, a dependency audit) is an SDK
-  program under a systemd timer, as a worker user, in a harness repo.
+  program under a systemd timer, as a worker user, in a jail.
 
-The test cases, each a `harness check`-style verdict on tool results:
+The test cases, each an `aj check`-style verdict on tool results:
 
-1. Default options in a harness repo: `env-guard` refuses `git push`,
+1. Default options in a jail: `env-guard` refuses `git push`,
    `grep nonewprivs /proc/self/status` shows the sandbox, `DEVENV_ROOT`
    is set by the preamble. Expected to pass; the documentation says so.
 2. The opt-out program on a host with the managed file: `settingSources: []`,
@@ -71,11 +71,11 @@ The test cases, each a `harness check`-style verdict on tool results:
    the repo file is for" gains the line: a program the user runs can opt
    out of the repo file; the managed layer is the answer, as it is for
    user-scope settings.
-3. `harness check` gains an SDK twin of cases 1, 3 and 7 and the case
+3. `aj check` gains an SDK twin of cases 1, 3 and 7 and the case
    above, so a Claude Code release that changes SDK behaviour fails a
    check instead of a reader's assumption.
 
-The limit to write down whichever way the tests go: the harness reaches
+The limit to write down whichever way the tests go: the jailer reaches
 agents that run through Claude Code's engine. An agent framework that
 calls the API directly, or another vendor's, runs on the host with the
 user's credentials and sees none of the hook, the deny rules or the
@@ -86,7 +86,7 @@ For it the only lever is the identity, which is section 2.
 
 ## 2. The agent's identity: Entra Agent ID and M365
 
-The harness is the process half of agent control: what the process can
+The jailer is the process half of agent control: what the process can
 read, write, run and reach. Roadmap item 5 names the other half from the
 process's side: "Reader-only service principal per customer. The one
 control that holds against every client, including things the hook never
@@ -106,7 +106,7 @@ briefing, now task-scoped and time-bound permissions, agent risk,
 Conditional Access for agent identities, and discovery that names
 Claude Code as a local agent type) is the answer to exactly that: the
 agent gets an identity of its own, so it gets its own log, its own
-policy and its own blast radius. The harness's contribution is small
+policy and its own blast radius. The jailer's contribution is small
 and already half built: the agent directory is where that identity is
 consumed, and nothing else on the host is.
 
@@ -114,7 +114,7 @@ This belongs in a separate repository: a different audience (tenant and
 security administrators), different artifacts (KQL hunts for
 service-principal sign-ins and app-credential changes, Conditional Access
 for workload identities as code, app-consent governance, a playbook),
-usable by someone who never installs Nix. The harness must keep working
+usable by someone who never installs Nix. The jailer must keep working
 for non-Azure customers; it is cloud-agnostic apart from the `az` regex
 and the network allowlist.
 
@@ -125,20 +125,20 @@ The seams, each already in the code or the roadmap:
    under Conditional Access, logged into `azure-agent` by the human with
    a device code; no client secret on disk (the sandbox already denies
    `ARM_CLIENT_SECRET` and `AZURE_CLIENT_SECRET` and hides `.env`).
-   `harness doctor` names the principal in each directory and warns when
+   `aj doctor` names the principal in each directory and warns when
    `azure-agent` and `azure-human` hold the same one.
-2. **Detection.** The identity repo watches the tenant side; the harness
-   has the host side (hook refusals, `harness check` transcripts, debug
+2. **Detection.** The identity repo watches the tenant side; the jailer
+   has the host side (hook refusals, `aj check` transcripts, debug
    logs). The key is the agent identity's app id plus the host name. A
    documented pairing, no code.
 3. **Attestation.** If tenant-side discovery inventories Claude Code
    installs, the managed tree (root-owned `/etc/claude-code`, a known
    settings body and hook) is the evidence that an install is governed.
-   `harness doctor --json` emitting the settings hash, hook version and
+   `aj doctor --json` emitting the settings hash, hook version and
    deny count is the hook for it. Not before a consumer exists.
 
-Order: the hunting note first, it needs no harness change; the identity
+Order: the hunting note first, it needs no jailer change; the identity
 repo second; the `agentAuth` value and the doctor line when phase 3
 lands; the attestation output when something reads it. The README gains
-one paragraph when the identity repo exists: the harness is the endpoint
+one paragraph when the identity repo exists: the jailer is the endpoint
 half, the identity half lives in the tenant, with the link.

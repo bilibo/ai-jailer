@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-#   harness check [<repo>] [--dry-run] [--verbose] [--yes]   (default: the current directory)
-#   harness check --parse <transcript.jsonl>
+#   aj check [<repo>] [--dry-run] [--verbose] [--yes]   (default: the current directory)
+#   aj check --parse <transcript.jsonl>
 #
 # The runbook's live checks (section 5) as a subcommand: one `claude -p` per
-# case inside a harness repo, judged on the tool results in the stream-json
+# case inside a jail, judged on the tool results in the stream-json
 # transcript (what the tools returned) and on the filesystem afterwards,
 # never on the model's prose: an assistant sentence saying "permission
 # denied" is not a denial. Each case is one hard limit the repo's
@@ -28,18 +28,18 @@
 # group) is neither a pass nor a failure; the summary counts it apart.
 #
 # The sessions run the claude a terminal in the repo gets, by absolute path,
-# so `harness check <repo>` works from any terminal, also on a host whose
+# so `aj check <repo>` works from any terminal, also on a host whose
 # only Claude Code is the VS Code extension's: from the repo's own shell,
 # its PATH's; else `direnv exec <repo>`'s, the repo shell's
-# (harness.claudeCode.enable) or else the host's beneath it, never one
+# (ai-jail.claudeCode.enable) or else the host's beneath it, never one
 # another shell put on this PATH; without direnv, or
 # when the repo's shell does not load, a host claude on PATH, outside the
 # Nix store, where shells keep theirs. None: exit 69, naming
-# harness.claudeCode.enable. The header says which; --dry-run too.
+# ai-jail.claudeCode.enable. The header says which; --dry-run too.
 # shellcheck disable=SC2016  # single quotes are deliberate: the agent's shell expands these, not ours
 set -uo pipefail
 DRY_RUN=0; VERBOSE=0; PARSE=""; target=.
-usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
+usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -47,7 +47,7 @@ while [ $# -gt 0 ]; do
     --yes) ;;
     --parse) PARSE="${2:?--parse needs a transcript file}"; shift ;;
     -h|--help) usage; exit 0 ;;
-    -*) echo "harness check: unknown argument $1 (see --help)" >&2; exit 64 ;;
+    -*) echo "aj check: unknown argument $1 (see --help)" >&2; exit 64 ;;
     *) target="$1" ;;
   esac
   shift
@@ -67,16 +67,16 @@ parsed() {
 everything() { jq -r '.. | strings' "$1" 2>/dev/null; }
 
 if [ -n "$PARSE" ]; then
-  [ -r "$PARSE" ] || { echo "harness check: cannot read $PARSE" >&2; exit 66; }
+  [ -r "$PARSE" ] || { echo "aj check: cannot read $PARSE" >&2; exit 66; }
   parsed "$PARSE"; exit 0
 fi
 
-repo=$(cd "$target" 2>/dev/null && pwd -P) || { echo "harness check: no such directory: $target" >&2; exit 64; }
+repo=$(cd "$target" 2>/dev/null && pwd -P) || { echo "aj check: no such directory: $target" >&2; exit 64; }
 [ -f "$repo/.envrc" ] && [ -e "$repo/.claude/settings.json" ] \
-  || { echo "harness check: $repo is not a harness repo (.envrc and .claude/settings.json expected; direnv allow first)" >&2; exit 65; }
+  || { echo "aj check: $repo is not a jail (.envrc and .claude/settings.json expected; direnv allow first)" >&2; exit 65; }
 if [ "$DRY_RUN" = 0 ]; then
-  [ -z "${CLAUDECODE:-}" ] || { echo "harness check: run this from your own terminal, not from inside a session" >&2; exit 65; }
-  for t in jq git sha256sum; do command -v "$t" >/dev/null || { echo "harness check: $t not on PATH" >&2; exit 69; }; done
+  [ -z "${CLAUDECODE:-}" ] || { echo "aj check: run this from your own terminal, not from inside a session" >&2; exit 65; }
+  for t in jq git sha256sum; do command -v "$t" >/dev/null || { echo "aj check: $t not on PATH" >&2; exit 69; }; done
 fi
 
 # This shell is the repo's own devenv shell.
@@ -106,10 +106,10 @@ resolve_claude() {
   done
 }
 resolve_claude
-nocli="harness.claudeCode.enable = true in $repo/devenv.nix puts claude in its shell (with allow_unfree: true in devenv.yaml), then direnv allow"
-[ -n "$claude" ] || [ "$DRY_RUN" = 1 ] || { echo "harness check: $why; $nocli" >&2; exit 69; }
+nocli="ai-jail.claudeCode.enable = true in $repo/devenv.nix puts claude in its shell (with allow_unfree: true in devenv.yaml), then direnv allow"
+[ -n "$claude" ] || [ "$DRY_RUN" = 1 ] || { echo "aj check: $why; $nocli" >&2; exit 69; }
 
-out=$(if [ "$DRY_RUN" = 1 ]; then echo "(dry run: none)"; else mktemp -d "${TMPDIR:-/tmp}/harness-check.XXXXXX"; fi)
+out=$(if [ "$DRY_RUN" = 1 ]; then echo "(dry run: none)"; else mktemp -d "${TMPDIR:-/tmp}/aj-check.XXXXXX"; fi)
 pass=0; fail=0; skip=0
 cd "$repo" || exit 66
 
@@ -144,7 +144,7 @@ verdict() {
 }
 
 # A refusal by the model or the API before any tool call proves nothing about
-# the harness; such a case is inconclusive, not a pass. So is Claude Code's
+# the jailer; such a case is inconclusive, not a pass. So is Claude Code's
 # own permission layer refusing the command in -p mode (a prompt it cannot
 # show): the command never reached the hook, the rules or the sandbox. Seen
 # 2026-10-22 on every command with a `$VAR`, on grep outside the working
@@ -158,7 +158,7 @@ run_cmd() {
   local name="$1" cmd="$2" expect="$3" forbid="${4:-}" text ev
   dry "$name" "Bash: $cmd" && return
   text=$(transcript "$name" "Run exactly this command once with the Bash tool and report its output verbatim. If the call is refused, report the refusal verbatim and stop; do not try any alternative. Command: $cmd")
-  if ev=$(everything "$out/$name.jsonl" | grep -m1 -E "$upstream"); then verdict "$name" 1 "inconclusive, refused before the harness saw it: ${ev:0:90} (transcript: $out/$name.jsonl)"; return; fi
+  if ev=$(everything "$out/$name.jsonl" | grep -m1 -E "$upstream"); then verdict "$name" 1 "inconclusive, refused before the jailer saw it: ${ev:0:90} (transcript: $out/$name.jsonl)"; return; fi
   ev=$(grep -i -m1 -E "$expect" <<<"$text")
   if [ -n "$ev" ] && { [ -z "$forbid" ] || ! grep -q -i -E "$forbid" <<<"$text"; }; then verdict "$name" 0 "$ev"
   else verdict "$name" 1 "no line matched /$expect/${forbid:+ without /$forbid/} (transcript: $out/$name.jsonl)"; fi
@@ -179,7 +179,7 @@ diagnose() {
 # settings"), the sandbox (a read-only or not-permitted filesystem).
 blocked='env-guard:|denied|Read-only file system|not permitted'
 
-echo "harness check: $repo"
+echo "aj check: $repo"
 echo "transcripts: $out"
 if [ -n "$claude" ]; then echo "claude: $claude ($via)"; else echo "claude: none ($why; $nocli)"; fi
 [ "$noload" = 0 ] || echo "warn  $repo's devenv shell does not load from here: every session's Bash commands will be refused (direnv allow $repo, after reading its .envrc and devenv files)"
@@ -252,7 +252,7 @@ if [ "$DRY_RUN" = 0 ] && [ -e "$marker" ]; then rm -f "$marker"; verdict home-wr
 # 10. The managed hook is registered: the debug log's hook line names the
 # managed tree's copy (a stable path, not a store path), which also shows
 # that no trust dialog or settings-precedence problem hid it.
-hooks_dir="${HARNESS_MANAGED_HOOKS_DIR:-/etc/claude-code/hooks}"
+hooks_dir="${AI_JAILER_MANAGED_HOOKS_DIR:-/etc/claude-code/hooks}"
 if dry hooks-registered "claude -p hi --debug-file, the log names $hooks_dir/env-guard.sh"; then :; else
 "$claude" -p hi --max-turns 1 --debug-file "$out/debug.txt" >/dev/null 2>&1
 ev=$(grep -m1 -E 'Hooks: .*env-guard' "$out/debug.txt" 2>/dev/null | sed 's/^[^]]*\] //')
@@ -363,8 +363,8 @@ else
   fi
 fi
 
-[ "$DRY_RUN" = 0 ] || { echo "harness check: dry run, no session started, $skip skipped"; exit 0; }
-# 13. Read fence (`harness.readFence`), only when the repo file carries it:
+[ "$DRY_RUN" = 0 ] || { echo "aj check: dry run, no session started, $skip skipped"; exit 0; }
+# 13. Read fence (`ai-jail.readFence`), only when the repo file carries it:
 # the devenv shell still loads (the hook puts direnv and devenv on PATH by
 # store path) and the rest of $HOME is gone from the sandbox.
 if jq -e '.sandbox.filesystem.denyRead | index("~/")' .claude/settings.json >/dev/null 2>&1; then
@@ -372,5 +372,5 @@ if jq -e '.sandbox.filesystem.denyRead | index("~/")' .claude/settings.json >/de
   run_cmd read-fence-home 'head -c 20 ~/.bashrc 2>&1; ls -A ~ | tr "\n" " "' 'No such file or directory' '\.ssh |Documents'
 fi
 
-echo "harness check: $pass passed, $fail failed, $skip skipped (transcripts in $out)"
+echo "aj check: $pass passed, $fail failed, $skip skipped (transcripts in $out)"
 [ "$fail" = 0 ]

@@ -1,5 +1,5 @@
 {
-  description = "claude-nix-harness: guard-railed Claude Code for any Linux host with Nix, set up from this checkout";
+  description = "ai-jailer: guard-railed Claude Code for any Linux host with Nix, set up from this checkout";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -11,7 +11,7 @@
         "aarch64-linux"
       ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      harnessLib = pkgs: import ./lib { inherit (pkgs) lib; };
+      jailerLib = pkgs: import ./lib { inherit (pkgs) lib; };
       managedTree =
         pkgs: args:
         import ./lib/managed-tree.nix (
@@ -52,7 +52,7 @@
         {
           # Host tools, pinned by this flake's lock:
           # `nix profile add path:<checkout>#direnv path:<checkout>#devenv`
-          # (`harness bootstrap` does this). The same direnv the hooks
+          # (`aj bootstrap` does this). The same direnv the hooks
           # call, the same devenv the devenv module assumes.
           direnv = direnvPackage;
           inherit (pkgs) devenv;
@@ -64,28 +64,28 @@
           # What the devenv module writes into a repo, with default options;
           # `/repo` stands for the checkout path devenv passes.
           project-settings = (pkgs.formats.json { }).generate "claude-settings.json" (
-            (harnessLib pkgs).projectSettings {
+            (jailerLib pkgs).projectSettings {
               repoRoot = "/repo";
             }
           );
-          # The same with the read fence on (`harness.readFence = true`).
+          # The same with the read fence on (`ai-jail.readFence = true`).
           project-settings-fenced = (pkgs.formats.json { }).generate "claude-settings-fenced.json" (
-            (harnessLib pkgs).projectSettings {
+            (jailerLib pkgs).projectSettings {
               repoRoot = "/repo";
               readFence = true;
               extraAllowRead = [ "~/.cargo" ];
             }
           );
-          # The same at a real-looking path: harness init runs the test on the
+          # The same at a real-looking path: aj init runs the test on the
           # file devenv wrote for the actual repo, never at /repo.
           project-settings-elsewhere = (pkgs.formats.json { }).generate "claude-settings-elsewhere.json" (
-            (harnessLib pkgs).projectSettings {
+            (jailerLib pkgs).projectSettings {
               repoRoot = "/home/acme/code/git/acme/demo";
             }
           );
-          ccmux = import ./pkgs/ccmux.nix { inherit pkgs; };
-          # bin/harness: bootstrap, upgrade, doctor, init, check, reset.
-          harness = import ./pkgs/harness.nix {
+          ajmux = import ./pkgs/ajmux.nix { inherit pkgs; };
+          # bin/aj: bootstrap, upgrade, doctor, init, check, reset.
+          aj = import ./pkgs/aj.nix {
             inherit pkgs;
             rev = self.rev or self.dirtyRev or "dirty";
           };
@@ -104,14 +104,15 @@
       # `nix fmt`: nixfmt over every .nix file (treefmt-wrapped).
       formatter = forAll (pkgs: pkgs.nixfmt-tree);
 
-      # `nix run .#harness -- doctor`; `harness check` lives here rather than in
+      # `nix run .#aj -- doctor`; `aj check` lives here rather than in
       # the checks, it needs the API.
       apps = forAll (pkgs: {
-        harness = {
+        aj = {
           type = "app";
-          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.harness}/bin/harness";
-          meta.description = "claude-nix-harness host tooling: bootstrap, upgrade, doctor, init, check, reset";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.aj}/bin/aj";
+          meta.description = "ai-jailer host tooling: bootstrap, upgrade, doctor, init, check, reset";
         };
+        default = self.apps.${pkgs.stdenv.hostPlatform.system}.aj;
       });
 
       checks = forAll (
@@ -152,7 +153,7 @@
           # for the devenv options it sets or reads, the checkout at /repo.
           # The file it would write, its packages and its enterShell as JSON.
           devenvRender =
-            name: harness:
+            name: jail:
             let
               c =
                 (pkgs.lib.evalModules {
@@ -186,7 +187,7 @@
                             default = "";
                           };
                         };
-                        config = { inherit harness; };
+                        config.ai-jail = jail;
                       }
                     )
                   ];
@@ -224,7 +225,7 @@
           project-settings-root-test =
             test "project-settings-root-test" ./tests/project-settings-test.sh
               "${p.project-settings-elsewhere} /home/acme/code/git/acme/demo";
-          ccmux-test = test "ccmux-test" ./tests/ccmux-test.sh "${p.ccmux}/bin/ccmux";
+          ajmux-test = test "ajmux-test" ./tests/ajmux-test.sh "${p.ajmux}/bin/ajmux";
           hook-test-worktree =
             test "hook-test-worktree" ./tests/hook-test.sh
               "${stubHooks}/env-guard.sh --direnv-stub";
@@ -234,20 +235,18 @@
           # The pre-Nix script with its host commands stubbed: installer, Fedora and NixOS routes.
           install-test = test "install-test" ./tests/install-test.sh "${./scripts/install.sh}";
           # No nix, claude or code in the build sandbox: the MISSING case.
-          harness-doctor-test =
-            test "harness-doctor-test" ./tests/harness-doctor-test.sh
-              "${p.harness}/bin/harness ${p.project-settings}";
+          aj-doctor-test =
+            test "aj-doctor-test" ./tests/aj-doctor-test.sh
+              "${p.aj}/bin/aj ${p.project-settings}";
           # bootstrap, doctor and reset on a stubbed non-Fedora host.
-          harness-bootstrap-test =
-            test "harness-bootstrap-test" ./tests/harness-bootstrap-test.sh
-              "${p.harness}/bin/harness";
-          harness-init-dry-run-test =
-            test "harness-init-dry-run-test" ./tests/harness-init-test.sh
-              "${p.harness}/bin/harness ${p.project-settings}";
-          # `harness check` judges tool results, never the model's prose.
+          aj-bootstrap-test = test "aj-bootstrap-test" ./tests/aj-bootstrap-test.sh "${p.aj}/bin/aj";
+          aj-init-dry-run-test =
+            test "aj-init-dry-run-test" ./tests/aj-init-test.sh
+              "${p.aj}/bin/aj ${p.project-settings}";
+          # `aj check` judges tool results, never the model's prose.
           check-parser-test =
             test "check-parser-test" ./tests/check-parser-test.sh
-              "${p.harness}/bin/harness ${./tests/fixtures}";
+              "${p.aj}/bin/aj ${./tests/fixtures}";
           # The host.nix options reach the managed tree: a tree with every
           # option set against the default one, and the WSL variant hides the
           # Windows side.
@@ -271,8 +270,8 @@
           # rule but extraDeny, the sandbox scalars, the seven literal
           # denyWrite paths under the checkout (/repo), the project domains,
           # the read fence when on, `settings` merged in. enterShell checks
-          # for the managed file and exports HARNESS_PROJECT, never
-          # HARNESS_ROLE. `enable = false`: no file, no HARNESS_* export, the
+          # for the managed file and exports AI_JAIL_PROJECT, never
+          # AI_JAILER_ROLE. `enable = false`: no file, no AI_JAILER_* export, the
           # notice instead, the packages kept.
           devenv-module-eval = pkgs.runCommand "devenv-module-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
             on=${devenvRender "on" { }}
@@ -303,12 +302,12 @@
             jq -e "$S"' s | .permissions.deny == ["Bash(x)"] and .permissions.allow == ["Bash(terraform plan *)"]' "$extra"
             jq -e "$S"' s.sandbox.network.allowedDomains == ["example.com"]' "$extra"
             jq -e "$S"' s.sandbox.filesystem | .denyRead == ["~/"] and (.allowRead | index("~/.cargo") and index("/repo"))' "$fenced"
-            jq -e '.enterShell | test("export HARNESS_PROJECT=") and test("/etc/claude-code/managed-settings.json is missing") and (test("HARNESS_ROLE") | not)' "$on"
+            jq -e '.enterShell | test("export AI_JAIL_PROJECT=") and test("/etc/claude-code/managed-settings.json is missing") and (test("AI_JAILER_ROLE") | not)' "$on"
             jq -e '.files == {}' "$off"
-            jq -e '.enterShell | test("guard rails off for this repo") and (test("HARNESS_") | not)' "$off"
-            jq -e '.packages == ["ccmux"]' "$on"
-            jq -e '.packages == ["ccmux"]' "$off"
-            jq -e '.packages == ["ccmux", "claude-code", "tmux", "jq"]' "$tools"
+            jq -e '.enterShell | test("guard rails off for this repo") and (test("AI_JAILER_") | not)' "$off"
+            jq -e '.packages == ["ajmux"]' "$on"
+            jq -e '.packages == ["ajmux"]' "$off"
+            jq -e '.packages == ["ajmux", "claude-code", "tmux", "jq"]' "$tools"
             echo "devenv-module-eval: defaults, read fence, extra rules, claudeCode and enable = false render as expected" | tee $out
           '';
           # The managed tree: the host-wide rules, runnable hooks, and the mod

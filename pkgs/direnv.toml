@@ -1,4 +1,4 @@
-# direnv's global config on a harness host: harness bootstrap writes it to
+# direnv's global config on an ai-jailer host: aj bootstrap writes it to
 # ~/.config/direnv/direnv.toml.
 [global]
 strict_env = true

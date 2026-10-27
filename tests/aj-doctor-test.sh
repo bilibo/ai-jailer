@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#   harness-doctor-test.sh <path-to-harness> <project-settings.json>
+#   aj-doctor-test.sh <path-to-aj> <project-settings.json>
 #
-# `harness doctor` on a host that has nothing: an empty HOME, a PATH with no
+# `aj doctor` on a host that has nothing: an empty HOME, a PATH with no
 # nix, claude, code, direnv or tmux (the Nix build sandbox is such a host).
 # It must report MISSING lines, run to its summary and exit 1, never stop
 # early; no claude is an info line and no tmux a warning, neither MISSING.
@@ -14,21 +14,21 @@
 # file checked with visudo -cf) and the caller's standing (worker, owner,
 # neither), with getent, loginctl, sudo and visudo stubbed.
 set -uo pipefail
-harness="${1:?usage: harness-doctor-test.sh <harness> <project-settings.json>}"
-settings="${2:?usage: harness-doctor-test.sh <harness> <project-settings.json>}"
+aj="${1:?usage: aj-doctor-test.sh <aj> <project-settings.json>}"
+settings="${2:?usage: aj-doctor-test.sh <aj> <project-settings.json>}"
 pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/home"
 
-# doctor <dir> [<path>]: harness doctor in <dir> with nothing (or only <path>)
+# doctor <dir> [<path>]: aj doctor in <dir> with nothing (or only <path>)
 # on PATH; sets out and rc.
 doctor() {
   out=$(cd "$1" && env -i HOME="$tmp/home" PATH="${2:-/var/empty}" TMPDIR="$tmp" USER="${T_USER:-tester}" \
-    HARNESS_OS_RELEASE="${OS_RELEASE:-/var/empty/none}" HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
-    HARNESS_MANAGED_DIR="${MANAGED:-$tmp/no-managed}" HARNESS_SUDOERS="${SUDOERS:-$tmp/no-sudoers}" HARNESS_STORE_DIR="$tmp/store" \
-    HARNESS_SYSTEM_BASHRC="${SYSTEM_BASHRC:-/var/empty/none}" ${DIRENV_CONFIG:+"DIRENV_CONFIG=$DIRENV_CONFIG"} \
-    ${T_CODE_ROOT:+"HARNESS_CODE_ROOT=$T_CODE_ROOT"} ${T_PROJECT:+"HARNESS_PROJECT=$T_PROJECT"} \
-    "$harness" doctor 2>&1); rc=$?
+    AI_JAILER_OS_RELEASE="${OS_RELEASE:-/var/empty/none}" AI_JAILER_NIXOS_MARKER=/var/empty/none AI_JAILER_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
+    AI_JAILER_MANAGED_DIR="${MANAGED:-$tmp/no-managed}" AI_JAILER_SUDOERS="${SUDOERS:-$tmp/no-sudoers}" AI_JAILER_STORE_DIR="$tmp/store" \
+    AI_JAILER_SYSTEM_BASHRC="${SYSTEM_BASHRC:-/var/empty/none}" ${DIRENV_CONFIG:+"DIRENV_CONFIG=$DIRENV_CONFIG"} \
+    ${T_CODE_ROOT:+"AI_JAILER_CODE_ROOT=$T_CODE_ROOT"} ${T_PROJECT:+"AI_JAIL_PROJECT=$T_PROJECT"} \
+    "$aj" doctor 2>&1); rc=$?
 }
 check() { # check <description> <want-regex>
   if [[ "$out" =~ $2 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/)"; printf '%s\n' "$out" | sed 's/^/  /'; fi
@@ -45,29 +45,29 @@ doctor "$tmp/empty"
 exits "doctor exits 1 when something is missing" 1
 check "nix reported missing"    'MISSING nix'
 check "direnv reported missing" 'MISSING direnv'
-check "ran to the summary"      'harness doctor: [0-9]+ missing, [0-9]+ warnings'
+check "ran to the summary"      'aj doctor: [0-9]+ missing, [0-9]+ warnings'
 refute "no shell error"         'unbound variable|syntax error|line [0-9]+:|command not found'
 refute "no repo part outside a repo" 'repo: '
 # No managed settings: this host enforces nothing, and says so.
-check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(harness bootstrap --workers \.\.\. from the harness checkout.s devenv shell\)'
+check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(aj bootstrap --workers \.\.\. from the ai-jailer checkout.s devenv shell\)'
 check "no getent: no agents group" 'info  no agents group: no worker users on this host'
 refute "no sudoers verdict without the file" 'visudo'
 refute "strictAllowlist is gone"  'strictAllowlist|strict network'
 refute "account sync verdicts are gone" 'account-synced'
-refute "role and managed-env lines are gone" 'HARNESS_ROLE|HARNESS_EXPECT_MANAGED'
+refute "role and managed-env lines are gone" 'AI_JAILER_ROLE|AI_JAILER_EXPECT_MANAGED'
 refute "no store-wide managed warning" 'this host carries managed settings'
 # No host claude is a supported shape (the plain WSL host: the VS Code
-# extension's binary, the CLI from a repo's harness.claudeCode.enable): an
-# info line, no claude doctor. No host tmux is a warning: ccmux carries its
+# extension's binary, the CLI from a repo's ai-jail.claudeCode.enable): an
+# info line, no claude doctor. No host tmux is a warning: ajmux carries its
 # own, attaching by hand needs one.
-check "no claude is an info line" 'info  claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from harness\.claudeCode\.enable'
+check "no claude is an info line" 'info  claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from ai-jail\.claudeCode\.enable'
 refute "no claude is not missing" 'MISSING claude'
 refute "no claude doctor without claude" 'claude doctor:'
-check "no tmux is a warning"    'warn  tmux not on the host PATH: ccmux brings its own'
-refute "no tmux is not missing" 'MISSING tmux( [^h]|$)' # `tmux harness block` is the config file's line
+check "no tmux is a warning"    'warn  tmux not on the host PATH: ajmux brings its own'
+refute "no tmux is not missing" 'MISSING tmux( [^a]|$)' # `tmux ai-jailer block` is the config file's line
 # Counted: the same host with claude and tmux stubs has the same number
 # missing and one warning fewer (tmux's; the info line counts nowhere).
-summary_of() { [[ "$out" =~ harness\ doctor:\ ([0-9]+)\ missing,\ ([0-9]+)\ warnings ]] && echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"; }
+summary_of() { [[ "$out" =~ aj\ doctor:\ ([0-9]+)\ missing,\ ([0-9]+)\ warnings ]] && echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"; }
 read -r miss0 warn0 < <(summary_of)
 mkdir -p "$tmp/cbin"
 # shellcheck disable=SC2016  # the stub's own $1
@@ -131,7 +131,7 @@ check "hook from the system bashrc" "ok    direnv hook in $tmp/etc-bashrc \(syst
 refute "no bashrc.d verdict with a system hook" 'bashrc\.d'
 printf '[global]\nstrict_env = false\n' >"$tmp/etc-direnv/direnv.toml"
 OS_RELEASE="$tmp/os-release" DIRENV_CONFIG="$tmp/etc-direnv" doctor "$tmp/empty"
-check "a foreign direnv.toml is a warning" "warn  $tmp/etc-direnv/direnv\.toml exists and is not the harness one"
+check "a foreign direnv.toml is a warning" "warn  $tmp/etc-direnv/direnv\.toml exists and is not the ai-jailer one"
 printf 'ID=ubuntu\nPRETTY_NAME="Ubuntu 26.10"\n' >"$tmp/os-release"; touch "$tmp/wsl"
 OS_RELEASE="$tmp/os-release" WSL_MARKER="$tmp/wsl" doctor "$tmp/empty"
 check "wsl host line"           'host: WSL2 \(Ubuntu 26.10\) '
@@ -150,12 +150,12 @@ check "no mkhl.direnv elsewhere is missing" 'MISSING VS Code extension mkhl\.dir
 # The environment lines: facts (info), counted nowhere.
 doctor "$tmp/empty"
 read -r miss1 warn1 < <(summary_of)
-check "code root default"       "info  HARNESS_CODE_ROOT $tmp/home/code/git \\(default\\)"
-check "project unset"           "info  HARNESS_PROJECT unset: not inside a harness repo's shell"
+check "code root default"       "info  AI_JAILER_CODE_ROOT $tmp/home/code/git \\(default\\)"
+check "project unset"           "info  AI_JAIL_PROJECT unset: not inside a jail's shell"
 T_CODE_ROOT=/srv/code T_PROJECT=acme/app doctor "$tmp/empty"
 read -r miss2 warn2 < <(summary_of)
-check "code root set"           'info  HARNESS_CODE_ROOT /srv/code[[:space:]]'
-check "project set"             'info  HARNESS_PROJECT acme/app[[:space:]]'
+check "code root set"           'info  AI_JAILER_CODE_ROOT /srv/code[[:space:]]'
+check "project set"             'info  AI_JAIL_PROJECT acme/app[[:space:]]'
 if [ "$miss1" = "$miss2" ] && [ "$warn1" = "$warn2" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: counts: missing $miss1/$miss2, warnings $warn1/$warn2 (want the same: the environment lines count nowhere)"; fi
 
 # The managed rules present: ok, and every hook they name must run.
@@ -217,14 +217,14 @@ SUDOERS="$tmp/sudoers" doctor "$tmp/empty" "$tmp/abin"
 check "sudoers that fails"      "MISSING $tmp/sudoers fails visudo -cf"
 rm "$tmp/visudo-bad"
 
-out=$("$harness" --version 2>&1); rc=$?
-exits "--version" 0; check "--version prints the revision" '^harness .+'
-out=$("$harness" --help 2>&1); rc=$?
+out=$("$aj" --version 2>&1); rc=$?
+exits "--version" 0; check "--version prints the revision" '^aj .+'
+out=$("$aj" --help 2>&1); rc=$?
 exits "--help" 0; check "--help lists the commands" 'bootstrap.*upgrade.*doctor.*init.*check.*reset'
-out=$("$harness" doctor --help 2>&1); rc=$?
-exits "doctor --help" 0; check "doctor --help is the bootstrap header" 'harness reset'
-out=$("$harness" frobnicate 2>&1); rc=$?
+out=$("$aj" doctor --help 2>&1); rc=$?
+exits "doctor --help" 0; check "doctor --help is the bootstrap header" 'aj reset'
+out=$("$aj" frobnicate 2>&1); rc=$?
 exits "unknown command" 64
 
-echo "harness-doctor-test: $pass passed, $fail failed"
+echo "aj-doctor-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

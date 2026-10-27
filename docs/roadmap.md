@@ -9,26 +9,31 @@ What exists is in the README (the host and lockdown tables); when and why
 it changed is in `docs/changelog.md`. The itemised list that stood here
 until 2026-10-26 is in git: `git show 8e38390:docs/roadmap.md`.
 
+Renamed on 2026-10-28 (changelog): the repo and flake are `ai-jailer`, the
+CLI `aj`, the launcher `ajmux`, and a governed repo is a jail with
+`ai-jail.*` options. Items below written before that day keep the names
+they had (`harness.role`, `harness.workers`, ...).
+
 ## Target flow (2026-10-21)
 
 What the pieces add up to, and what is missing for it:
 
 1. One installer per host: `curl -fsSL .../scripts/install.sh | bash -s
    -- --yes` (or `scripts/install.sh` from a clone) does the root and
-   pre-Nix work, then `harness bootstrap` the user side, on Fedora,
+   pre-Nix work, then `aj bootstrap` the user side, on Fedora,
    Ubuntu and NixOS, each also under WSL.
-2. The harness checkout is the command center: its own devenv shell,
-   `ccmux` in it, the session where the human accepts what other
+2. The ai-jailer checkout is the command center: its own devenv shell,
+   `ajmux` in it, the session where the human accepts what other
    sessions propose.
-3. `harness init <customer>/<repo>` per project: a standard
+3. `aj init <customer>/<repo>` per project: a standard
    `devenv.nix` a non-Nix user can add tools to.
-4. `ccmux` sessions per project, set on tasks by hand or by the command
+4. `ajmux` sessions per project, set on tasks by hand or by the command
    center; what their rules refuse, they propose to the command center
    instead of working around.
 
 Status against it: 1 runs end to end on Fedora 44 and on Ubuntu 26.10
-(2026-10-22: install, bootstrap, `harness init` on the checkout, `harness
-check`, `ccmux`; changelog); NixOS is detected since 2026-10-23 (gap A, the
+(2026-10-22: install, bootstrap, `aj init` on the checkout, `aj
+check`, `ajmux`; changelog); NixOS is detected since 2026-10-23 (gap A, the
 NixOS half), WSL detection is stubbed. 2 works by convention
 (CLAUDE.md contracts and `SendMessage`, as on 2026-10-21 when three
 sessions worked the audit board); since 2026-10-24 the checkout has its
@@ -54,12 +59,12 @@ The gaps, in order:
   that systemd runs in the distro (`[boot] systemd=true` in
   `/etc/wsl.conf`; the nix-installer's daemon needs it, else
   `--init none`: verify which), skip the `environment.d` step (no
-  Linux GUI login), and `harness init` writes `harness.platform =
+  Linux GUI login), and `aj init` writes `ai-jail.platform =
   "wsl";` into `devenv.nix` so `/mnt/c` and `/run/WSL` are hidden from
   the sandbox; today no unmanaged WSL repo gets that. NixOS-WSL stays the
-  module route (item 7). Tests: install-test and harness-bootstrap-test
+  module route (item 7). Tests: install-test and aj-bootstrap-test
   cases with a fake `ID=nixos` os-release plus a marker path, and a fake
-  WSL marker (`HARNESS_*` overrides, as the other system paths have).
+  WSL marker (`AI_JAILER_*` overrides, as the other system paths have).
 - B. **Ubuntu for real**: runbook section 5's fresh-distro list on Ubuntu
   24.04, done under WSL so it verifies A's WSL branch on the same run.
 - C. **A guide to the project devenv for non-Nix users**: written
@@ -67,23 +72,23 @@ The gaps, in order:
   header and gains the `packages`, `languages` and `env` lines. As written
   on 2026-10-21:
   (`docs/project-devenv.md`, linked from the README and from the
-  `devenv.nix` `harness init` writes): what the four files are and which
+  `devenv.nix` `aj init` writes): what the four files are and which
   ones a human edits; adding a tool (`packages = [ pkgs.terraform ];`,
   names from search.nixos.org/packages); a language toolchain
   (`languages.rust.enable = true;`); environment variables (`env.X =
   "...";`, never secrets: README "Where project configuration goes");
-  project allow rules (`harness.settings.permissions.allow`); network
-  hosts for the sandbox (`harness.extraAllowedDomains`); unfree packages
+  project allow rules (`ai-jail.settings.permissions.allow`); network
+  hosts for the sandbox (`ai-jail.extraAllowedDomains`); unfree packages
   (`allow_unfree: true`); the `direnv allow` prompt after every change
   and why (`require_allowed`); and the agent's side: it proposes the
   diff, the human applies it. The template gains one commented line per
   case pointing at the guide. The customer module's `lang` option (item 9) shortens
   it later; the guide comes first. Since 2026-10-21 the template lists
-  every harness option commented out; the guide is still to write.
+  every ai-jail option commented out; the guide is still to write.
 - D. **Command center as a tier**: realised 2026-10-24 as `harness.role`
   (`docs/sessions.md` section 3). `center` is this
   checkout: the same deny rules and hook as a work repo, no sandbox, Bash
-  prompted, memory on, `HARNESS_ROLE=center` carried by `ccmux`. `work`
+  prompted, memory on, `AI_JAILER_ROLE=center` carried by `ajmux`. `work`
   is everywhere else. The checkout imports the module pinned from GitHub,
   so a working-tree edit never becomes its live hook. Open: the managed
   host, where the managed sandbox stays on in the center and limiting
@@ -104,31 +109,31 @@ The gaps, in order:
       and accept that `gh auth login` without a keyring puts a push token
       in reach again.
    2. Done 2026-10-21: `devenv/devenv.nix` imports `pkgs/direnv.nix`.
-   3. Done 2026-10-24: `root_steps` in `pkgs/harness/bootstrap.sh` keeps
+   3. Done 2026-10-24: `root_steps` in `pkgs/aj/bootstrap.sh` keeps
       only the nix.conf block and `userns_steps`; the dnf loop, the SELinux
       block, the daemon-socket block and `ROOT_RPMS` are gone, `reset` and
       `doctor` unchanged, bootstrap-test case 11 a doctor-only Fedora host
       line (changelog). As written: `scripts/install.sh` owns every root
-      and pre-Nix step, `harness bootstrap` the user side.
+      and pre-Nix step, `aj bootstrap` the user side.
    4. Done 2026-10-22: `CLAUDE.md`, section "Checks", carries the copy of
       the regular files and `nix flake check path:<dir>` (changelog). No
       memory note: `CLAUDE.md` is loaded into every session here.
-   5. Done 2026-10-22: `tests/harness-bootstrap-test.sh` runs the harness
+   5. Done 2026-10-22: `tests/aj-bootstrap-test.sh` runs the jailer
       with the stub directory as the whole PATH (the wrapper prepends its
       own store tools), so a by-hand run no longer sees the host's
       `getenforce` and `code`; the header no longer claims the Nix build
       sandbox guarantees that. On a nix-installer host the bootstrap's
       `nix_path` then put the default profile's real nix ahead of the stub
       (52 cases, GitHub unreachable from a session): the profile.d files
-      it sources are `HARNESS_NIX_PROFILE_D`, empty in the test.
-   6. Done 2026-10-24: `harness init` counts a `devenv.lock` that exists
+      it sources are `AI_JAILER_NIX_PROFILE_D`, empty in the test.
+   6. Done 2026-10-24: `aj init` counts a `devenv.lock` that exists
       before the first `direnv allow` as foreign and prints the inputs it
-      pins under the `==>` header, so the y/N covers it; harness-init-test
+      pins under the `==>` header, so the y/N covers it; aj-init-test
       has the case (changelog). As written: a foreign lock was approved by
       the second `direnv allow` without being shown, and it pins every
       input, nixpkgs included.
    7. Done 2026-10-21: hook refuses `git checkout <ref> <path>...` (changelog).
-   8. Written 2026-10-24, not yet run live: `harness check` case 14
+   8. Written 2026-10-24, not yet run live: `aj check` case 14
       (`cred-sandbox`), the sandbox hiding `~/.git-credentials` on its
       own, by `wc -c ~/.git-cred*` with a fake file when the host has
       none; which of `0` or no-such-file the sandbox answers is for the
@@ -136,23 +141,23 @@ The gaps, in order:
       path around the hook's `cred_files` regex, create the fake line
       first when absent (`https://x:live-check@example.invalid`), remove
       it after, leave a real one alone.
-   9. Done 2026-10-22, on the Ubuntu laptop itself: `harness upgrade`
+   9. Done 2026-10-22, on the Ubuntu laptop itself: `aj upgrade`
       removed the scrub key from `~/.claude/settings.json`, the hook's
       preamble got devenv a writable runtime directory (changelog), and
-      `harness check` passed 12 of 12: case 2 the devenv shell inside the
+      `aj check` passed 12 of 12: case 2 the devenv shell inside the
       sandbox, case 12 the two GitHub tokens.
    10. Confirm on the WSL host that `/model` in a session writes a plain
-       `~/.claude/settings.json` after `harness bootstrap`. The staged set
+       `~/.claude/settings.json` after `aj bootstrap`. The staged set
        this item first named was committed (9197010), the WSL route then
        moved to `bilibo/nixos-wsl` (8e38390), its flake has no `harness`
        input, and its `check-access.sh` already checks for a plain file.
    Not planned: `~/.kube/config` and `~/.docker/config.json` the same way
-   as `~/.aws`, until a harness host holds them.
+   as `~/.aws`, until an ai-jailer host holds them.
 1. **Interactive check of the repo-only shape.** `-p` sessions are verified
-   (live-check 10/10 on 2026-10-20; `harness check` 12 of 12 on the Ubuntu
+   (live-check 10/10 on 2026-10-20; `aj check` 12 of 12 on the Ubuntu
    laptop, 2026-10-22).
-   Left: a `ccmux` session in the test repo, the trust dialog accepted
-   once, hooks seen firing and the tmux window turning orange (`ccmux` on
+   Left: an `ajmux` session in the test repo, the trust dialog accepted
+   once, hooks seen firing and the tmux window turning orange (`ajmux` on
    the checkout runs on the Ubuntu laptop since 2026-10-22; the hook
    firing and the orange window are still unobserved). The
    Notification matcher names are verified against the hooks reference;
@@ -164,25 +169,25 @@ The gaps, in order:
    bootstrap change, plus a `live-check` case where the behaviour is only
    visible live:
    1. Read fence, prototyped live in the test repo on 2026-10-21 and kept
-      opt-in: `harness.readFence = true` gives `denyRead ["~/"]` plus
+      opt-in: `ai-jail.readFence = true` gives `denyRead ["~/"]` plus
       `allowRead` for the repo and the shell-entry paths (`lib/settings.nix`),
-      `harness.extraAllowRead` for what the project reads under `$HOME`.
+      `ai-jail.extraAllowRead` for what the project reads under `$HOME`.
       Left: turn it on in a real repo and watch what breaks (a `path:`
       devenv input and `~/.cargo` are the known cases), then decide the
-      default; `harness check` runs case 13 in a fenced repo.
+      default; `aj check` runs case 13 in a fenced repo.
    2. `permissions.blockReadsOutsideWorkingDirectories = true` last. Any
       scope, `true` wins; it stops the Read tool outside the working
       directories, which also stops a session in the test repo reading the
-      harness checkout. Decide per role; the center must not set it.
+      ai-jailer checkout. Decide per role; the center must not set it.
    3. Keyring agent sockets: `denyRead` for `/run/user/*/gcr` and
       `/run/user/*/keyring` next to the `/run/WSL` entry. Every unix socket
       is reachable and the gcr address is guessable; `ssh-add -l` against it
       listed the user's keys from inside the sandbox (changelog 2026-10-21);
       whether the agent signs without a desktop prompt was not measured. If
       the wildcard does not take on Linux, the NixOS module writes the
-      literal uid path. `harness check`: `ls /run/user/$(id -u)/gcr` fails
+      literal uid path. `aj check`: `ls /run/user/$(id -u)/gcr` fails
       and `ssh-add -l` against the guessed path gets `Could not open a
-      connection`. `harness doctor`: warn when `ssh-add -l` lists a key that
+      connection`. `aj doctor`: warn when `ssh-add -l` lists a key that
       is not `-sk`. With it: the `lib/ssh-sandbox.nix` header (the gate is
       no usable key in any agent, not an unknown address) and a README line
       on `ssh-add -c` and the hardware-key touch timing.
@@ -200,31 +205,31 @@ The gaps, in order:
       (`devenv.local.*` is in since 2026-10-21): closes the interpreter
       writes the hook cannot see. Check first that the preamble's `direnv
       export` and devenv's first evaluation write none of them;
-      `devenv.lock` is the doubtful one. `harness check`: an interpreter
+      `devenv.lock` is the doubtful one. `aj check`: an interpreter
       write gets a permission error, not the hook's message.
    6. Answered 2026-10-24, no hole: in a session in this checkout `git
       config core.hooksPath` fails with `could not lock config file
       .git/config: File exists` (the sandbox masks `.git/config.lock` as
-      `/dev/null`); `harness check` case 15 asserts it, not yet run by
-      `harness check` itself, and runbook section 8 names the `-c`,
+      `/dev/null`); `aj check` case 15 asserts it, not yet run by
+      `aj check` itself, and runbook section 8 names the `-c`,
       `--global` and worktree forms as the accepted gaps (changelog). As
       written: `git config core.hooksPath /tmp/h` inside the sandbox,
       expecting a permission error on `.git/config`.
    7. Done 2026-10-26 for new repos (changelog): the template `.envrc`
       fails the load while either file exists; this checkout's own
-      `.envrc` and the `harness check` case are still to do. As written:
+      `.envrc` and the `aj check` case are still to do. As written:
       `devenv.local.nix` and `devenv.local.yaml` can be created by an
       interpreter write the hook does not see, and devenv imports them on
       the next evaluation without a `direnv allow` (the literal `denyWrite`
       that closed this broke the shell, 2026-10-22). Candidate: the `.envrc`
       the template writes fails the load when either file exists (a test
-      before `use devenv`), so a harness repo never carries them; the
-      checkout's own `.envrc` the same, by hand. `harness check`: a
+      before `use devenv`), so a jail never carries them; the
+      checkout's own `.envrc` the same, by hand. `aj check`: a
       `python3` write creating one gets the next command's preamble failing
       loudly, not a silently imported file.
    8. **The tmux socket** (2026-10-24; work it before 2.1: the one open
       item that leaves the sandbox entirely). 2026-10-26: (a) written as
-      hook rule 7 with hook-test cases and `harness check` case 16, both
+      hook rule 7 with hook-test cases and `aj check` case 16, both
       not yet run live (changelog); (b) open. `allowAllUnixSockets`
       reaches the user's tmux server, which runs outside the sandbox as
       the user: a sandboxed `tmux send-keys`, `run-shell` or `new-window`
@@ -233,17 +238,17 @@ The gaps, in order:
       2026-10-24: `run-shell`, `new-window`, `capture-pane` pass). Not
       observed live: no server ran during the check (`tmux ls` in the
       sandbox: `couldn't create directory /run/user/1000/tmux-1000
-      (Read-only file system)`, the directory absent); under `ccmux` the
+      (Read-only file system)`, the directory absent); under `ajmux` the
       client takes the path from `$TMUX`, and a socket on the read-only
-      `/run/user` mount answers (the gcr case, 2026-10-21). `ccmux` from
+      `/run/user` mount answers (the gcr case, 2026-10-21). `ajmux` from
       a command-center session uses this path by design. Since 2026-10-24 the command center runs without the
       sandbox (`harness.role = "center"`), so it has nothing to escape and
-      is out of this item's scope, and its `ccmux` launches cross no
+      is out of this item's scope, and its `ajmux` launches cross no
       sandbox boundary. The item stays open for work repos, and the
       center's pane is among those a work session's sandboxed `tmux
       send-keys` can type into, which matters more now that the center
-      has no sandbox. The `ccmux` flag hole is closed (2026-10-24): rule 6
-      matches `ccmux` as well as `claude` (for `ccmux` outside the
+      has no sandbox. The `ajmux` flag hole is closed (2026-10-24): rule 6
+      matches `ajmux` as well as `claude` (for `ajmux` outside the
       enforcement roots too) and reads separators inside quotes as text,
       with hook-test cases; the tmux rule of (a) stays open, a separate
       decision. Shapes:
@@ -255,12 +260,12 @@ The gaps, in order:
          `run-shell`, `new-window`, `split-window`, `new-session`,
          `respawn-*`, `pipe-pane`, `if-shell`, `source-file`, `set-hook`,
          `bind-key`, `display-popup`, `display-menu`, `command-prompt`,
-         `confirm-before`, `set-option default-command`). Keeps `ccmux`; text only, so a script or
+         `confirm-before`, `set-option default-command`). Keeps `ajmux`; text only, so a script or
          `python` on the socket still gets through.
-      b. Private socket: `ccmux` runs tmux with `-S` under a directory the
+      b. Private socket: `ajmux` runs tmux with `-S` under a directory the
          repo file can `denyRead` without knowing the uid
-         (`~/.local/state/claude-nix-harness/tmux`). The real boundary.
-         Costs `ccmux` from inside a sandboxed work session (moot for the
+         (`~/.local/state/ai-jailer/tmux`). The real boundary.
+         Costs `ajmux` from inside a sandboxed work session (moot for the
          center, which has no sandbox) unless that repo lists it in
          `sandbox.excludedCommands` (unsandboxed, behind a prompt; verify
          with `allowUnsandboxedCommands = false` and for compound
@@ -272,7 +277,7 @@ The gaps, in order:
          window), the session layout is lost, and VS Code's terminal
          brings its own sockets into `/run/user/<uid>`
          (`vscode-ipc-*.sock`, seen 2026-10-24). Not on its own.
-      First (a), with hook-test cases: one regex and its tests, `ccmux`
+      First (a), with hook-test cases: one regex and its tests, `ajmux`
       keeps working. Then
       (b) together with 2.3 (the same mechanism, a socket directory in
       `denyRead`). `tmux-notify.sh` must keep working: it runs as a hook,
@@ -281,7 +286,7 @@ The gaps, in order:
       `set-window-option -t $TMUX_PANE window-status-style` (and `-u`).
       (a) does not touch hooks; (b) must leave `TMUX`/`TMUX_PANE` out of
       `credentials.envVars` unless that list is shown not to reach hook
-      environments. `harness check`: from a `ccmux` session, `tmux
+      environments. `aj check`: from an `ajmux` session, `tmux
       display-message -p '#S'` prints the session name today; after (a)
       the hook refuses `tmux new-window`; after (b) the client cannot
       connect.
@@ -303,21 +308,21 @@ The gaps, in order:
    azurerm/azuread/alz providers, tflint, trivy, and the `AZURE_CONFIG_DIR`
    task under `.git/devenv-base/azure` shared by worktrees.
    `imports: - devenv-base/azure` resolves to `azure/devenv.nix`, same rule
-   as `harness/devenv`.
+   as `ai-jailer/devenv`.
 4. **Repo template**: the test repo minus Rust, plus the azure module;
-   `harness init` renders it. Convert one real customer repo; confirm
+   `aj init` renders it. Convert one real customer repo; confirm
    `az account show` and `terraform plan` inside the sandbox with the
    network allowlist, and record the exact blob hosts the first
    `terraform init` and `trivy` run need.
 5. **Reader-only service principal per customer.** The one control that
    holds against every client, including things the hook never sees. Human
    logs it into the repo's `AZURE_CONFIG_DIR`.
-6. **Limits suite**: `harness check` (`pkgs/harness/check.sh`) is the first cut. Still to do:
-   a throwaway repo (`harness init` into a temporary code root), the cases
+6. **Limits suite**: `aj check` (`pkgs/aj/check.sh`) is the first cut. Still to do:
+   a throwaway repo (`aj init` into a temporary code root), the cases
    from item 2, the `.devenv/shell-*.sh` litter count over 50 commands,
-   `harness doctor --full` running it.
+   `aj doctor --full` running it.
 7. **Managed host base config**: a NixOS-WSL base configuration (and later
-   a native NixOS one) shipped with the harness, `harness.enable` on both
+   a native NixOS one) shipped with the jailer, `ai-jail.enable` on both
    modules and nothing else, with the WSL-specific checks (`/run/WSL` and
    `/mnt/c` empty inside the sandbox, `cmd.exe` fails). First time the
    managed layer runs live. 2026-10-23: the module evaluates in `nix
@@ -327,18 +332,18 @@ The gaps, in order:
    NixOS-WSL laptop from 2026-10-23 (generation 8) and was then taken off
    it: the Windows route's host is plain by default
    (`examples/nixos-wsl-plain.nix`, the sandbox prerequisites and nothing
-   from the harness), the harness comes afterwards as the user, and the
+   from the jailer), the jailer comes afterwards as the user, and the
    managed base config stays as the stricter opt-in
    (`examples/nixos-wsl-host.nix`). 2026-10-26: `examples/` removed; the
    WSL shapes live in `bilibo/nixos-wsl`, and the README's managed-host
    row carries the import lines. What remains here is the native NixOS
    managed host, when someone wants one. 2026-10-27, item 12: the module
-   is gone; `harness bootstrap` is the route on NixOS as everywhere.
+   is gone; `aj bootstrap` is the route on NixOS as everywhere.
 8. **Broker mod: dropped 2026-10-24.** A mod is a hooks module the engine
    loads into every session on the machine, outside the Bash sandbox, and
    an enabled organisation mod is the one kind the built-in guard lets
    through; shipping the broker would have made its code, build,
-   marketplace and registration keys a trust surface the harness defends
+   marketplace and registration keys a trust surface the jailer defends
    on every host, for coordination that never relaxes a rule. Removed the
    same day: `mods/` (the observe slice), `lib/mods.nix`, `harness.mods`,
    the managed marketplace directory with its
@@ -349,31 +354,31 @@ The gaps, in order:
    lists a source, `disableSideloadFlags`, `allowManagedHooksOnly`),
    asserted by `managed-tree-test` and `nixos-module-eval`; the bootstrap
    turns account-synced skills and plugins off by default. Coordination
-   stays the proposal flow (`docs/sessions.md` section 4) plus `ccmux`; a
+   stays the proposal flow (`docs/sessions.md` section 4) plus `ajmux`; a
    proposal record or a structural gate comes back only through a new
    dated entry here.
 
 9. **Left open by the tier handoff** (`docs/handoff-tiers.md`, removed
    2026-10-26; the full phases: `git show 8e38390:docs/handoff-tiers.md`).
-   - Done 2026-10-26 (changelog): `harness doctor` reports
-     `HARNESS_CODE_ROOT`, `HARNESS_PROJECT` and the cwd's `HARNESS_ROLE`;
+   - Done 2026-10-26 (changelog): `aj doctor` reports
+     `AI_JAILER_CODE_ROOT`, `AI_JAIL_PROJECT` and the cwd's `AI_JAILER_ROLE`;
      the runbook's verification section starts with it.
    - A center on a managed host: a managed `sandbox.enabled = true` wins
      over the repo file, so `center` turns nothing off there. Undecided
      whether a managed host has a center at all. Closed by item 11
      (2026-10-27): there is no center.
-   - Platform roots without a harness devenv (`~/nixos-config`): no role,
-     no generated file; the planned `ccmux --settings` route was not built.
-   - Customer module (`imports: - harness/devenv/customer`, with items 3
+   - Platform roots without a jail devenv (`~/nixos-config`): no role,
+     no generated file; the planned `ajmux --settings` route was not built.
+   - Customer module (`imports: - ai-jailer/devenv/customer`, with items 3
      to 5): `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `CUSTOMER_NAME`;
      `AZURE_CONFIG_DIR` per actor under `.git/devenv-base/`; a human-only
      `az-login` script; an `enterShell` tenant check; a hook branch that
      refuses `az`, `terraform apply|destroy` and `pulumi up` on a tenant or
      subscription mismatch; `allowWrite` and `lang` options.
-   - `harness init` additions: a customer registry
+   - `aj init` additions: a customer registry
      (`~/code/git/<customer>/customer.toml`), the customer block in
      `devenv.nix`, `README.md` and `.editorconfig`, the first commit, the
-     template version in `devenv.yaml`, and `harness upgrade` showing the
+     template version in `devenv.yaml`, and `aj upgrade` showing the
      diff.
    - Limits-suite cases for item 6: nested `claude --add-dir ..`, `nh os
      switch`, `nixos-rebuild switch`, `home-manager switch`, reads of a
@@ -385,7 +390,7 @@ The gaps, in order:
      working-style rule from nixos-config; platform-tier cloud tools (`az`,
      `azd`, `terraform` into a devenv, or a PATH filter); whether
      `~/nixos-config` sessions may commit; where the doc-quality skills
-     live for customer repos (since 2026-10-24 the harness ships no
+     live for customer repos (since 2026-10-24 ai-jailer ships no
      plugins); what `allowWrite = true` means against the unconditional
      apply/destroy deny; pointing `azfn-rust-handler/devenv.yaml` at this
      repo.
@@ -398,19 +403,19 @@ The gaps, in order:
     - The tree and CLAUDE.md disagree: no commit sets `harness.role =
       "center"` here and `devenv.yaml` imports `./devenv`, so the
       checkout runs as a work repo with a hook built from the working
-      tree (`HARNESS_ROLE=work` in its shell). Either set the role and pin
+      tree (`AI_JAILER_ROLE=work` in its shell). Either set the role and pin
       the module as CLAUDE.md describes, or correct CLAUDE.md. Both files
       are the human's.
-    - `harness check` reads the role from the repo shell and
+    - `aj check` reads the role from the repo shell and
       `.sandbox.enabled` from the settings file (`check.sh:127-132`) and
       warns when they disagree; the settings file is the truth, so drop
       the role lookup and the role half of `check-parser-test`.
-    - `harness init` writes `# role = "center";` commented into every work
+    - `aj init` writes `# role = "center";` commented into every work
       repo's `devenv.nix`; only this checkout can ever set it, so stop.
 
 11. **Worker users and managed-only rules (2026-10-27).** Reopens item
     10 ("Role design reviewed and kept, 2026-10-26"): the owner
-    verified that `harness bootstrap` then `harness init` on a fresh
+    verified that `aj bootstrap` then `aj init` on a fresh
     host ends with a repo that enforces nothing, and a review of the
     tree at `ce6bd9f` found why (changelog 2026-10-27). Item 10's three
     trims are overtaken: the role, the lookup and the template line are
@@ -422,16 +427,16 @@ The gaps, in order:
       module: `w-<customer>`, 0750 home, group `w-<customer>` with the
       owner as member, marker group `agents`, linger, never in
       `trusted-users`, Home Manager per worker, user settings seeded
-      once, never a store symlink. `ccmux <customer>/<repo>` hands over
+      once, never a store symlink. `ajmux <customer>/<repo>` hands over
       with `sudo -u w-<customer> -i`.
-    - The host matrix stays; `harness bootstrap` mirrors the module on
+    - The host matrix stays; `aj bootstrap` mirrors the module on
       Fedora and Ubuntu (`--workers`, `--owner`, `--owner-sudo`).
     - Claude Code's own sandbox stays; every `strictAllowlist` piece and
       the egress-filter idea are dropped; `allowedDomains` stays as a
       prompt-avoiding list.
     - Dropped: `harness.role`, `hooks/center-guard.sh`,
       `enforcementRoots`, the universal/project deny split,
-      `HARNESS_ROLE`, `packages.managed-scoped`,
+      `AI_JAILER_ROLE`, `packages.managed-scoped`,
       `packages.project-settings-center`, the center and scoped checks,
       `docs/command-center.md`, bootstrap's user-scope settings block
       and `--account-sync`.
@@ -445,7 +450,7 @@ The gaps, in order:
     Staged, not committed: the managed/repo split in `lib/`, hook
     scoping removed, the NixOS module's `owner`, `workers`,
     `ownerSudo` and `devenvCache`, the home module's settings seed,
-    ccmux handover, `harness init`, `check` (18 cases) and `bootstrap`
+    ajmux handover, `aj init`, `check` (18 cases) and `bootstrap`
     with the root steps, and the tests (changelog 2026-10-27 has the
     list and the results). Open:
     - [ ] V1 managed sandbox in a worker session with no repo file:
@@ -454,7 +459,7 @@ The gaps, in order:
       managed hook. Decides whether the 2026-10-27 failure is moot.
     - [ ] V2 project-scope `allowedDomains` under a managed sandbox:
       merged, ignored or prompting. Decides whether
-      `harness.extraAllowedDomains` stays in the devenv module or
+      `ai-jail.extraAllowedDomains` stays in the devenv module or
       becomes host-wide only.
     - [ ] V3 `allowedDomains = ["*"]`: open network or a literal host.
       Decides whether a no-prompt network setting exists.
@@ -462,7 +467,7 @@ The gaps, in order:
       against tmux `server-access` on a group-readable `-S` socket.
       Decides how the owner attaches.
     - [ ] V5 `XDG_RUNTIME_DIR` under `sudo -u w-x -i` with linger:
-      devenv, direnv and `tmux-notify.sh` work when ccmux exports
+      devenv, direnv and `tmux-notify.sh` work when ajmux exports
       `/run/user/$(id -u)`. Decides whether that export is enough.
     - [ ] V6 Home Manager seed: `~/.claude/settings.json` is a plain
       0600 file after activation, `/model` rewrites it, a second
@@ -475,22 +480,22 @@ The gaps, in order:
       the host's home-manager (nix-community at 6d9655f) takes.
     - [ ] V7 group reads: the owner reads `/home/w-x/code/...`; `w-x`
       cannot list `/home/<owner>` or another worker's home.
-    - [ ] V8 a baseline `harness check` transcript in a worker repo.
+    - [ ] V8 a baseline `aj check` transcript in a worker repo.
     - [ ] V9 managed `syncClaudeAiSkills = false` honoured.
     - [ ] Human steps: apply the two patches `c1-devenv-module.patch`
       and `f1-claude-md.patch` from the session scratchpad (the hook
       refuses those files; until the first is applied this checkout's
       shell does not evaluate), commit, rebuild the host with
-      `harness.owner` and `harness.workers`, run `harness check` as a
+      `harness.owner` and `harness.workers`, run `aj check` as a
       worker.
     - [ ] Untested: `nix build --out-link /etc/claude-code` as root
       through the daemon; the whole `home-manager.users.<w>` branch
       (Home Manager is not an input of this flake).
     - [ ] Follow-ups: `check_env`'s `fix: direnv allow <dir>` advice now
       names a command the hook refuses; place `extraAllowedDomains`
-      after V2; the `grep 'direnv allow'` false positive; a `harness
+      after V2; the `grep 'direnv allow'` false positive; a `aj
       check` case for the direnv rule; the home module's
-      `home.sessionVariables` (`HARNESS_CODE_ROOT`) reach a worker's
+      `home.sessionVariables` (`AI_JAILER_CODE_ROOT`) reach a worker's
       shell only where something sources Home Manager's session file,
       which a host without `programs.bash` under Home Manager does not
       (found 2026-10-27 reading the sources while wiring the NixOS-WSL
@@ -503,13 +508,13 @@ The gaps, in order:
 12. **One route on every Linux, run from the checkout (2026-10-27).**
     Reopens item 11's "one Linux user per customer from
     `harness.workers` in the NixOS module" and "Home Manager per
-    worker": the owner found that the NixOS route put harness users,
+    worker": the owner found that the NixOS route put jailer users,
     rules and options into the host repo (`bilibo/nixos-wsl`), which
-    must stay usable on non-WSL NixOS and carry nothing of the harness.
+    must stay usable on non-WSL NixOS and carry nothing of ai-jailer.
     Decisions, the owner's:
-    - The harness repo is the control point. Its checkout's devenv
-      shell carries the `harness` CLI built from the checkout and sets
-      `HARNESS_REF=path:<checkout>`; `harness bootstrap --workers ...`
+    - The ai-jailer checkout is the control point. Its checkout's devenv
+      shell carries the `aj` CLI built from the checkout and sets
+      `AI_JAILER_REF=path:<checkout>`; `aj bootstrap --workers ...`
       from that shell builds the Unix user and group model and links
       the managed tree on every Linux: Fedora 44+, Ubuntu, other
       Linux, NixOS and NixOS-WSL. `scripts/install.sh` stays the
@@ -536,14 +541,14 @@ The gaps, in order:
       is unreadable to a worker, so `worker_user_steps` prefetches it
       into the store once (`nix flake prefetch --json`) and hands the
       workers that store path.
-    - A host repo (`bilibo/nixos-wsl`) carries only `ccmux` and the
+    - A host repo (`bilibo/nixos-wsl`) carries only `ajmux` and the
       tmux rules from this flake: no module, no CLI, no users.
 
     Open:
     - [ ] V1 to V9 of item 11 stay as written, V6 narrowed to whether
       Claude Code needs `~/.claude/settings.json` at all (the seed that
       wrote it went with the home module).
-    - [ ] A worker's `harness init` writes the receipt's ref into the
+    - [ ] A worker's `aj init` writes the receipt's ref into the
       repo's `devenv.yaml`; after the prefetch that is a store path
       with no GC root (init warns). Options: a world-readable checkout
       location, or `github:` in worker repos' `devenv.yaml` (the hard
@@ -552,7 +557,7 @@ The gaps, in order:
       rebuild; only doctor's receipt-versus-passwd line reports it.
     - [ ] `nix flake prefetch` on Fedora's packaged Nix, and `nix build
       --out-link /etc/claude-code` as root through the daemon: untested.
-    - [ ] The first live run: `harness bootstrap --dry-run --workers
+    - [ ] The first live run: `aj bootstrap --dry-run --workers
       test` from the checkout's shell on the NixOS-WSL host, then the
       real run as the gate for V1 to V9.
 
@@ -581,12 +586,12 @@ The gaps, in order:
   0.19 to 0.23 s warm, 4.5 s after a change; the hook's `check_env` adds
   36 to 41 ms per Bash call in steady state (changelog).
 - Account-synced skills and plugins: decided 2026-10-24 for unmanaged
-  hosts, off by default (`harness bootstrap` writes `syncClaudeAiSkills`
+  hosts, off by default (`aj bootstrap` writes `syncClaudeAiSkills`
   and `syncClaudeAiPlugins = false`; `--account-sync` opts back in,
   `--no-account-sync` is still accepted). The managed settings do not set
   them; whether the managed host should is still open.
 - `LD_LIBRARY_PATH` inside a session carries a Nix alsa-lib path that
-  neither devenv, direnv nor the harness exports (2026-10-21); the host's
+  neither devenv, direnv nor the jailer exports (2026-10-21); the host's
   `code` loads `librt` from the Nix glibc through it and dies. Trace the
   exporter (the launcher, the terminal, Claude Code itself) before the
   managed host, where more host binaries run from sessions. Traced
@@ -603,7 +608,7 @@ The gaps, in order:
 ## Ideas, not planned
 
 - `docs/suggestion.md` (2026-10-24): agents built on the Claude Agent SDK
-  (the harness's own jobs, headless agents on the managed host; three
+  (ai-jailer's own jobs, headless agents on the managed host; three
   test cases before any code), and the agent's cloud identity (Entra
   Agent ID) as a separate repository with three seams into this one.
 - Tighten the hook with the gaps listed in the runbook's known-gaps section:
@@ -611,7 +616,7 @@ The gaps, in order:
   az transfer verbs, and a fail-closed rule for dynamic shell constructs
   (`$IFS`, `$(`, `base64 -d |`). Each one
   starts as a test case. Also: stop matching `*/devenv.nix` when the path
-  is the harness's own `devenv/devenv.nix`, which the hook refuses today.
+  is ai-jailer's own `devenv/devenv.nix`, which the hook refuses today.
   Also: the `direnv allow|permit|grant|edit` rule (item 11) refuses a
   quoted mention (`grep 'direnv allow' docs/`).
 - Edit-rule asymmetry: the hook refuses Edit on `.envrc`, `devenv.*`,
@@ -632,7 +637,7 @@ The gaps, in order:
   `disableRemoteControl = true` turns it off everywhere it can start,
   including the in-session toggle; the settings reference lists the key as
   any-file scope (checked 2026-10-21), so the repo file can carry it with a
-  `harness.allowRemoteControl` option in the `allowConnectors` shape, and
+  `ai-jail.allowRemoteControl` option in the `allowConnectors` shape, and
   the managed file makes it final. Which scope wins when they disagree is
   not stated; assume `true` wins as for `disableBypassPermissionsMode` and
   confirm live. Off until the verification suite exists (the broker it also
@@ -645,12 +650,12 @@ The gaps, in order:
   repo (same `lib/`, root-owned store behind a nix-daemon, devcontainer
   files per engine; never run under podman or VS Code). The WSL tier does
   not use it; NixOS-WSL builds its distro tarball from the NixOS module
-  (the harness module is gone since 2026-10-27, item 12; `bilibo/nixos-wsl`
+  (the NixOS module is gone since 2026-10-27, item 12; `bilibo/nixos-wsl`
   is its own flake).
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook.
-- An assertion in `devenv/devenv.nix` that `harness.settings` sets no
+- An assertion in `devenv/devenv.nix` that `ai-jail.settings` sets no
   `permissions.deny` and no list under `sandbox` (2026-10-24): merged
-  with `recursiveUpdate`, either replaces the harness's own list, and
-  only `harness init`'s settings test notices, once. Today
+  with `recursiveUpdate`, either replaces ai-jailer's own list, and
+  only `aj init`'s settings test notices, once. Today
   `docs/project-devenv.md` warns against it.

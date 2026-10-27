@@ -7,7 +7,7 @@
 # Nothing in ~/.claude or in a repo overrides a key set there.
 #
 # `managed = false` is the repo's .claude/settings.json the devenv module
-# writes: the project layer. Allow rules come from `harness.settings`
+# writes: the project layer. Allow rules come from `ai-jail.settings`
 # (merged by the devenv module), deny rules from `extraDeny`, plus literal
 # `denyWrite` paths under the checkout, the project's extra domains, the
 # read fence when on, and a few scalars repeated as a belt. It carries no
@@ -243,7 +243,7 @@ let
             }
           ];
         filesystem = withFence {
-          # devenv re-fetches the `path:` harness input on every `direnv export`;
+          # devenv re-fetches the `path:` ai-jailer input on every `direnv export`;
           # Nix needs a writable cache for the fetcher lock, else devenv never
           # loads inside the sandbox and every Claude command runs without it.
           allowWrite = [
@@ -311,7 +311,7 @@ let
         };
       };
 
-      # The mod policy. The harness ships no mods (2026-10-24, docs/sessions.md
+      # The mod policy. ai-jailer ships no mods (2026-10-24, docs/sessions.md
       # section 5), so nothing registers a marketplace or enables a plugin
       # (no `extraKnownMarketplaces` key, no `enabledPlugins`, no
       # `prependPlugins`) and every mod is refused. The built-in guard only
@@ -338,7 +338,7 @@ let
         # Not devenv.local.*: a literal entry is masked as an unreadable device
         # node whether or not the file exists, and devenv reads both files
         # when they exist, so listing them stopped every shell evaluation
-        # inside the sandbox (`harness check` case 2, 2026-10-22). The hook
+        # inside the sandbox (`aj check` case 2, 2026-10-22). The hook
         # still refuses shell writes to them by name.
         denyWrite = map (p: "${repoRoot}/${p}") (
           lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected

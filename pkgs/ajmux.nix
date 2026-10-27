@@ -1,41 +1,41 @@
-# ccmux [-n] [<customer>/<repo> | <path>] [claude args...]
+# ajmux [-n] [<customer>/<repo> | <path>] [claude args...]
 # Starts or attaches the project's tmux session and runs claude in a window
-# named `claude`. HARNESS_PROJECT is exported by the harness devenv shell, so
+# named `claude`. AI_JAIL_PROJECT is exported by the jail's devenv shell, so
 # inside a repo (or its worktree) the project argument is optional; for a
-# clone outside the code root the shell also exports HARNESS_PROJECT_DIR.
+# clone outside the code root the shell also exports AI_JAIL_PROJECT_DIR.
 #
-# Each customer is a Linux user, ${HARNESS_WORKER_PREFIX:-w-}<customer>, with
-# its own tmux server. Run by anyone else, ccmux hands over with
-# `sudo -u <worker> -i ccmux <customer>/<repo> [claude args]` and does not
+# Each customer is a Linux user, ${AI_JAILER_WORKER_PREFIX:-w-}<customer>, with
+# its own tmux server. Run by anyone else, ajmux hands over with
+# `sudo -u <worker> -i ajmux <customer>/<repo> [claude args]` and does not
 # touch tmux itself; run by that worker, it starts the session. A worker
 # naming another customer's project is refused (exit 66). With no such user
-# on the host, ccmux runs directly for the caller.
+# on the host, ajmux runs directly for the caller.
 #
 # The handover always passes the name, never a path: a path under the
 # caller's own home resolves against the caller's code root, and the worker
-# resolves the name under its own HARNESS_CODE_ROOT, which comes from its
+# resolves the name under its own AI_JAILER_CODE_ROOT, which comes from its
 # login shell (hence `-i`). A name the caller's root does not hold is
 # handed over unresolved; it is an error only on a direct run.
 #
 # claude is the one on PATH, else the target repo's devenv shell's
-# (`direnv exec`), else an error naming harness.claudeCode.enable.
+# (`direnv exec`), else an error naming ai-jail.claudeCode.enable.
 # `-n` prints the resolution (or the handover) and exits, for
-# tests/ccmux-test.sh. Exit codes: 64 usage, 66 no such repo or refused,
+# tests/ajmux-test.sh. Exit codes: 64 usage, 66 no such repo or refused,
 # 69 no claude.
 {
   pkgs,
   codeRoot ? "$HOME/code/git",
 }:
 pkgs.writeShellApplication {
-  name = "ccmux";
+  name = "ajmux";
   # sudo, getent and id come from the host's PATH, which writeShellApplication
   # keeps after these: sudo has to be the host's setuid binary.
   runtimeInputs = [ pkgs.tmux ];
   text = ''
-    usage() { echo "usage: ccmux [<customer>/<repo> | <path>] [claude args]  (inside a repo under $root, the project is optional)" >&2; exit 64; }
-    die() { echo "ccmux: $*" >&2; exit 66; }
+    usage() { echo "usage: ajmux [<customer>/<repo> | <path>] [claude args]  (inside a repo under $root, the project is optional)" >&2; exit 64; }
+    die() { echo "ajmux: $*" >&2; exit 66; }
     # Physical path, like the `pwd -P` in resolve, so a symlinked root still matches.
-    root="''${HARNESS_CODE_ROOT:-${codeRoot}}"
+    root="''${AI_JAILER_CODE_ROOT:-${codeRoot}}"
     root=$(cd "$root" 2>/dev/null && pwd -P) || die "no such directory: $root"
 
     # resolve <dir>: the <customer>/<repo> containing <dir>, or die.
@@ -65,8 +65,8 @@ pkgs.writeShellApplication {
       else
         die "no such repo: $root/$arg (give <customer>/<repo>, or a path to a repo under $root)"
       fi
-    elif [ -n "''${HARNESS_PROJECT:-}" ]; then
-      project="$HARNESS_PROJECT"
+    elif [ -n "''${AI_JAIL_PROJECT:-}" ]; then
+      project="$AI_JAIL_PROJECT"
     elif [[ "$PWD" == "$root/"* ]]; then
       project=$(resolve "$PWD")
     else
@@ -74,35 +74,35 @@ pkgs.writeShellApplication {
     fi
     session="''${project//\//-}"
 
-    prefix="''${HARNESS_WORKER_PREFIX:-w-}"
+    prefix="''${AI_JAILER_WORKER_PREFIX:-w-}"
     worker="$prefix''${project%%/*}"
     me=$(id -un)
     if [ "$me" != "$worker" ] && getent passwd "$worker" >/dev/null 2>&1; then
       case "$me" in "$prefix"*) die "a worker cannot open another customer's session ($worker)" ;; esac
       if [ "$dry" = 1 ]; then
-        printf 'session=%s project=%s user=%s (sudo -u %s -i ccmux %s' "$session" "$project" "$worker" "$worker" "$project"
+        printf 'session=%s project=%s user=%s (sudo -u %s -i ajmux %s' "$session" "$project" "$worker" "$worker" "$project"
         [ $# -eq 0 ] || printf ' %s' "$*"
         echo ")"; exit 0
       fi
-      exec sudo -u "$worker" -i ccmux "$project" "$@"
+      exec sudo -u "$worker" -i ajmux "$project" "$@"
     fi
     [ -z "$missing" ] || die "no such repo: $missing (give <customer>/<repo>, or a path to a repo under $root)"
 
-    if [ -n "''${HARNESS_PROJECT_DIR:-}" ] && [ "$project" = "''${HARNESS_PROJECT:-}" ]; then
-      repo="$HARNESS_PROJECT_DIR"
+    if [ -n "''${AI_JAIL_PROJECT_DIR:-}" ] && [ "$project" = "''${AI_JAIL_PROJECT:-}" ]; then
+      repo="$AI_JAIL_PROJECT_DIR"
     else
       repo="$root/$project"
     fi
     [ -d "$repo" ] || die "no such repo: $repo"
 
     # The window's claude. The launching PATH's first (a host-wide install,
-    # or the repo shell ccmux runs in), by absolute path: the one `-n`
+    # or the repo shell ajmux runs in), by absolute path: the one `-n`
     # reports. Else the target repo's devenv shell
-    # (harness.claudeCode.enable): the window runs `direnv exec <repo>
+    # (ai-jail.claudeCode.enable): the window runs `direnv exec <repo>
     # claude`, so claude starts in that shell's environment. On a host whose
     # Claude Code is the VS Code extension's bundled binary, that is the only
     # CLI there is.
-    nocli() { echo "ccmux: $1; harness.claudeCode.enable = true in $repo/devenv.nix puts claude in its shell (with allow_unfree: true in devenv.yaml), then direnv allow" >&2; exit 69; }
+    nocli() { echo "ajmux: $1; ai-jail.claudeCode.enable = true in $repo/devenv.nix puts claude in its shell (with allow_unfree: true in devenv.yaml), then direnv allow" >&2; exit 69; }
     direnv=$(type -P direnv || true)
     if claude=$(type -P claude); then
       via=PATH

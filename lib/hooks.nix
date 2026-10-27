@@ -36,7 +36,7 @@ let
       };
   tmuxNotify = mkHook "tmux-notify.sh" ../hooks/tmux-notify.sh [ pkgs.tmux ] { };
 in
-pkgs.runCommand "claude-nix-harness-hooks" { } ''
+pkgs.runCommand "ai-jailer-hooks" { } ''
   mkdir -p $out
   cp ${envGuard} $out/env-guard.sh
   cp ${tmuxNotify} $out/tmux-notify.sh

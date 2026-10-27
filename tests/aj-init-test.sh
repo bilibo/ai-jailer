@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-#   harness-init-test.sh <path-to-harness> [<settings.json>]
+#   aj-init-test.sh <path-to-aj> [<settings.json>]
 #
-# `harness init --dry-run` under a temp HOME and code root: it prints every
+# `aj init --dry-run` under a temp HOME and code root: it prints every
 # file a new repo gets and creates nothing, not even the repo directory. On
 # an existing repo with its own devenv.nix, the shell step stops for approval;
 # with --yes it reaches the checks, where the stub direnv has linked
-# <settings.json> (a store path; default: the harness itself) as the repo's
+# <settings.json> (a store path; default: aj itself) as the repo's
 # .claude/settings.json, and the settings test must get the repo's own path.
 # A repo's own devenv.lock is shown as the inputs it pins and stops the same.
-# A repo with the guard rails off (harness.enable = false) gets no settings
+# A repo with the guard rails off (ai-jail.enable = false) gets no settings
 # file; init reports it and exits 0 without the checks. The hook test runs on
-# the hook in the managed settings (HARNESS_MANAGED_SETTINGS, a fixture
+# the hook in the managed settings (AI_JAILER_MANAGED_SETTINGS, a fixture
 # here); with no such file init prints MISSING, runs the settings test and
 # exits 1. The generated devenv.nix and CLAUDE.md carry no role, memory or
 # local-commit text and say the rules come from the managed settings.
 # With no claude on the host PATH (the default here: PATH is empty) the
-# template turns harness.claudeCode.enable on and devenv.yaml gets
+# template turns ai-jail.claudeCode.enable on and devenv.yaml gets
 # allow_unfree: true; with one, both stay commented out. A claude in a store
 # directory (a shell's) or under ~/.vscode-server (the extension's) is not
 # the host's. The template's .envrc fails while a devenv.local.* exists, and
 # init stops on one unless the repo keeps its own .envrc.
 set -uo pipefail
-harness="${1:?usage: harness-init-test.sh <harness> [<settings.json>]}"
-settings="${2:-$harness}"
+aj="${1:?usage: aj-init-test.sh <aj> [<settings.json>]}"
+settings="${2:-$aj}"
 pass=0; fail=0
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/home"
@@ -34,38 +34,38 @@ check() { # check <description> <want-regex>
 has()   { if grep -q -E "$3" "$2" 2>/dev/null; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$3/ in $2)"; sed 's/^/  /' "$2" 2>/dev/null; fi; }
 lacks() { if grep -q -E "$3" "$2" 2>/dev/null; then fail=$((fail+1)); echo "FAIL: $1 (/$3/ in $2)"; sed 's/^/  /' "$2"; else pass=$((pass+1)); fi; }
 init() { # init <args...>: sets out and rc; $HOST_PATH is the host's PATH (default: nothing), $STORE its NIX_STORE_DIR
-  out=$(env -i HOME="$tmp/home" PATH="${HOST_PATH:-/var/empty}" ${STORE:+"NIX_STORE_DIR=$STORE"} HARNESS_CODE_ROOT="$tmp/code" HARNESS_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" "$harness" init "$@" 2>&1); rc=$?
+  out=$(env -i HOME="$tmp/home" PATH="${HOST_PATH:-/var/empty}" ${STORE:+"NIX_STORE_DIR=$STORE"} AI_JAILER_CODE_ROOT="$tmp/code" AI_JAILER_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" "$aj" init "$@" 2>&1); rc=$?
 }
 
 init --dry-run acme/demo
 if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: init --dry-run exits $rc"; fi
-check "the repo path"         "harness init: $tmp/code/acme/demo \\(project acme/demo\\)"
+check "the repo path"         "aj init: $tmp/code/acme/demo \\(project acme/demo\\)"
 for f in devenv.yaml devenv.nix .envrc CLAUDE.md; do check "plans $f" "would write +$f"; done
 check "plans .gitignore"       'would add +\.gitignore: \.claude/settings\.json'
 check "plans .worktreeinclude" 'would add +\.worktreeinclude: \.claude/settings\.json'
 check "no shell step"          'shell step skipped'
-check "default ref is the published repo" 'harness: +github:bilibo/claude-nix-harness \(default\)'
+check "default ref is the published repo" 'jailer: +github:bilibo/ai-jailer \(default\)'
 refute_store_warning() { if [[ "$out" =~ 'would pin a store path' ]]; then fail=$((fail+1)); echo "FAIL: store-path warning on the default ref"; else pass=$((pass+1)); fi; }
 refute_store_warning
 if [ -z "$(find "$tmp" -mindepth 1 -not -path "$tmp/home")" ]; then pass=$((pass+1))
 else fail=$((fail+1)); echo "FAIL: --dry-run created files:"; find "$tmp" -mindepth 1 -not -path "$tmp/home" | sed 's/^/  /'; fi
 
-init --dry-run --harness github:bilibo/claude-nix-harness acme/demo
-check "--harness names the ref" 'harness: +github:bilibo/claude-nix-harness \(--harness\)'
-HARNESS_REF=path:/somewhere
-out=$(env -i HOME="$tmp/home" PATH=/var/empty HARNESS_CODE_ROOT="$tmp/code" HARNESS_REF="$HARNESS_REF" "$harness" init --dry-run acme/demo 2>&1)
-check "HARNESS_REF names the ref" 'harness: +path:/somewhere \(HARNESS_REF\)'
+init --dry-run --jailer github:bilibo/ai-jailer acme/demo
+check "--jailer names the ref" 'jailer: +github:bilibo/ai-jailer \(--jailer\)'
+AI_JAILER_REF=path:/somewhere
+out=$(env -i HOME="$tmp/home" PATH=/var/empty AI_JAILER_CODE_ROOT="$tmp/code" AI_JAILER_REF="$AI_JAILER_REF" "$aj" init --dry-run acme/demo 2>&1)
+check "AI_JAILER_REF names the ref" 'jailer: +path:/somewhere \(AI_JAILER_REF\)'
 # Shared flags before the command land on it too.
-out=$(env -i HOME="$tmp/home" PATH=/var/empty HARNESS_CODE_ROOT="$tmp/code" "$harness" --dry-run init acme/demo 2>&1)
+out=$(env -i HOME="$tmp/home" PATH=/var/empty AI_JAILER_CODE_ROOT="$tmp/code" "$aj" --dry-run init acme/demo 2>&1)
 check "--dry-run before the command" 'would write +devenv\.yaml'
 if [ ! -e "$tmp/code" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $tmp/code was created"; fi
 
 init
 if [ "$rc" = 64 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: init without a target exits $rc, want 64"; fi
-out=$("$harness" init --help 2>&1)
-check "init --help" 'harness init <customer>/<repo>'
-out=$("$harness" check --help 2>&1)
-check "check --help" 'harness check \[<repo>\]'
+out=$("$aj" init --help 2>&1)
+check "init --help" 'aj init <customer>/<repo>'
+out=$("$aj" check --help 2>&1)
+check "check --help" 'aj check \[<repo>\]'
 
 # An existing repo with its own devenv.nix: the shell step prints it and,
 # without --yes or a terminal, stops before any `direnv allow`. direnv and
@@ -82,11 +82,11 @@ printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/bash"; chmod +x "$tmp/bin/bash"
 echo '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/etc/claude-code/hooks/env-guard.sh"}]}]}}' >"$tmp/managed.json"
 shell_init() { # shell_init <args...>: init on $repo_dir (default: the foreign repo) with the stubs, no terminal, $MANAGED as the managed settings file (default: the fixture); sets out and rc
   : >"$tmp/calls"
-  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS="$settings" HARNESS_CODE_ROOT="$tmp/code" HARNESS_MANAGED_SETTINGS="${MANAGED:-$tmp/managed.json}" "$harness" init "$@" "${repo_dir:-$tmp/foreign}" 2>&1 </dev/null); rc=$?
+  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS="$settings" AI_JAILER_CODE_ROOT="$tmp/code" AI_JAILER_MANAGED_SETTINGS="${MANAGED:-$tmp/managed.json}" "$aj" init "$@" "${repo_dir:-$tmp/foreign}" 2>&1 </dev/null); rc=$?
 }
 shell_init
 if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a foreign devenv.nix without --yes exits 0"; fi
-check "the foreign file printed" 'foreign/devenv\.nix \(not written by harness init\).*foreign code'
+check "the foreign file printed" 'foreign/devenv\.nix \(not written by aj init\).*foreign code'
 check "refused, --yes named"     'not approved: devenv\.nix; .*re-run with --yes'
 if grep -q 'direnv allow' "$tmp/calls"; then fail=$((fail+1)); echo "FAIL: direnv allow ran without approval"; else pass=$((pass+1)); fi
 shell_init --yes --verbose
@@ -104,7 +104,7 @@ check "managed: settings test still gets the repo path" "bash .*project-settings
 check "managed: hook test runs on the managed hook"     "bash .*hook-test\\.sh /etc/claude-code/hooks/env-guard\\.sh[[:space:]]"
 check "managed: ready"                                   'Ready\.'
 if [[ "$out" =~ 'MISSING' ]]; then fail=$((fail+1)); echo "FAIL: MISSING with a readable managed file"; else pass=$((pass+1)); fi
-if [[ "$out" =~ HARNESS_ROLE|role\ +(work|center) ]]; then fail=$((fail+1)); echo "FAIL: init still mentions a role"; else pass=$((pass+1)); fi
+if [[ "$out" =~ AI_JAILER_ROLE|role\ +(work|center) ]]; then fail=$((fail+1)); echo "FAIL: init still mentions a role"; else pass=$((pass+1)); fi
 # Without a managed file: MISSING, the settings test still runs, then exit 1
 # before the hook test and the footer.
 MANAGED="$tmp/none.json" shell_init --yes --verbose
@@ -119,22 +119,22 @@ mkdir -p "$tmp/locked"
 echo '{"nodes":{"nixpkgs":{"locked":{"type":"github","owner":"NixOS","repo":"nixpkgs","rev":"0123abc"}},"root":{"inputs":{"nixpkgs":"nixpkgs"}}},"root":"root","version":7}' >"$tmp/locked/devenv.lock"
 repo_dir="$tmp/locked" shell_init
 if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a foreign devenv.lock without --yes exits 0"; fi
-check "the lock's inputs printed" 'locked/devenv\.lock \(not written by harness init\).*nixpkgs: github:NixOS/nixpkgs @ 0123abc'
+check "the lock's inputs printed" 'locked/devenv\.lock \(not written by aj init\).*nixpkgs: github:NixOS/nixpkgs @ 0123abc'
 check "the lock refused"          'not approved: devenv\.lock;'
 if grep -q 'direnv allow' "$tmp/calls"; then fail=$((fail+1)); echo "FAIL: direnv allow ran with an unapproved lock"; else pass=$((pass+1)); fi
 
-# A repo whose owner turned the guard rails off (harness.enable = false):
-# the shell loads (DEVENV_ROOT) without the harness (no HARNESS_PROJECT) and
+# A repo whose owner turned the guard rails off (ai-jail.enable = false):
+# the shell loads (DEVENV_ROOT) without the jail module (no AI_JAIL_PROJECT) and
 # devenv writes no settings file. init says so and exits 0 without the
 # checks; a shell that did not load at all still fails as before.
-mkdir -p "$tmp/off"; echo '{ ... }: { harness.enable = false; }' >"$tmp/off/devenv.nix"
+mkdir -p "$tmp/off"; echo '{ ... }: { ai-jail.enable = false; }' >"$tmp/off/devenv.nix"
 off_init() { # off_init [<VAR=value>...]: init --yes on the off repo, nothing linked; sets out and rc
   : >"$tmp/calls"
-  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS= HARNESS_CODE_ROOT="$tmp/code" "$@" "$harness" init --yes --verbose "$tmp/off" 2>&1 </dev/null); rc=$?
+  out=$(env -i HOME="$tmp/home" PATH="$tmp/bin" CALLS="$tmp/calls" SETTINGS= AI_JAILER_CODE_ROOT="$tmp/code" "$@" "$aj" init --yes --verbose "$tmp/off" 2>&1 </dev/null); rc=$?
 }
 off_init DEVENV_ROOT="$tmp/off"
 if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a repo with the guard rails off exits $rc"; printf '%s\n' "$out" | sed 's/^/  /'; fi
-check "guard rails off reported" 'off +the shell loads without the guard rails: harness\.enable = false in devenv\.nix'
+check "guard rails off reported" 'off +the shell loads without the guard rails: ai-jail\.enable = false in devenv\.nix'
 if [ -e "$tmp/off/.claude/settings.json" ] || [ -L "$tmp/off/.claude/settings.json" ]; then fail=$((fail+1)); echo "FAIL: a settings file in the repo with the guard rails off"; else pass=$((pass+1)); fi
 if [[ "$out" =~ project-settings-test|hook-test|Ready\. ]]; then fail=$((fail+1)); echo "FAIL: the checks ran with the guard rails off"; else pass=$((pass+1)); fi
 off_init
@@ -142,18 +142,18 @@ if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a s
 check "not loaded is still an error" 'settings\.json was not written: the devenv shell did not load'
 
 # A WSL host (fake marker): the dry run says so, and a real write (no shell
-# step) puts harness.platform = "wsl" into devenv.nix; elsewhere the line
+# step) puts ai-jail.platform = "wsl" into devenv.nix; elsewhere the line
 # stays commented out.
 touch "$tmp/wsl"
 WSL_MARKER="$tmp/wsl" init --dry-run acme/demo
-check "wsl noted in the dry run" 'platform +wsl \(harness\.platform in devenv\.nix\)'
+check "wsl noted in the dry run" 'platform +wsl \(ai-jail\.platform in devenv\.nix\)'
 WSL_MARKER="$tmp/wsl" init --no-shell acme/wsl
-if grep -q -E '^    platform = "wsl";' "$tmp/code/acme/wsl/devenv.nix"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: harness.platform not set on a WSL host"; fi
+if grep -q -E '^    platform = "wsl";' "$tmp/code/acme/wsl/devenv.nix"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: ai-jail.platform not set on a WSL host"; fi
 init --no-shell acme/plain
 if grep -q -E '^    # platform = "wsl";' "$tmp/code/acme/plain/devenv.nix"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: platform line not commented out off WSL"; fi
 if [[ "$out" =~ 'platform   wsl' ]]; then fail=$((fail+1)); echo "FAIL: wsl noted off WSL"; else pass=$((pass+1)); fi
-# The off switch is in the template, commented out, first in the harness block.
-if grep -A1 -x -F '  harness = {' "$tmp/code/acme/plain/devenv.nix" | grep -q -E '^    # enable = false; +# guard rails off'; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: no commented-out enable = false in the template's harness block"; fi
+# The off switch is in the template, commented out, first in the ai-jailer block.
+if grep -A1 -x -F '  ai-jail = {' "$tmp/code/acme/plain/devenv.nix" | grep -q -E '^    # enable = false; +# guard rails off'; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: no commented-out enable = false in the template's ai-jail block"; fi
 # Host decisions, no longer project options: no role, memory or local-commit
 # line in the template, not even commented out.
 lacks "template: no role line"             "$tmp/code/acme/plain/devenv.nix" 'role'
@@ -179,7 +179,7 @@ for f in devenv.local.yaml devenv.local.nix; do
   echo '{ }' >"$plain/$f"
   envrc_run "$plain"
   if [ "$rc" != 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: the template .envrc with $f exits 0"; fi
-  if [[ "$(grep -i -m1 error <<<"$out")" == "error: $f is refused in a harness repo (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" ]]; then pass=$((pass+1))
+  if [[ "$(grep -i -m1 error <<<"$out")" == "error: $f is refused in a jail (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" ]]; then pass=$((pass+1))
   else fail=$((fail+1)); echo "FAIL: the hook's error line for $f"; printf '%s\n' "$out" | sed 's/^/  /'; fi
   if [[ "$out" == *'use devenv'* ]]; then fail=$((fail+1)); echo "FAIL: use devenv ran with $f present"; else pass=$((pass+1)); fi
   rm -f "$plain/$f"
@@ -195,12 +195,12 @@ mkdir -p "$tmp/ownrc"; echo 'use devenv' >"$tmp/ownrc/.envrc"; echo '{ }' >"$tmp
 repo_dir="$tmp/ownrc" shell_init
 check "own .envrc: devenv.local.nix approved with it" 'not approved: \.envrc devenv\.local\.nix;'
 # claudeCode.enable.
-on='^    claudeCode\.enable = true; +# the CLI for tmux/ccmux sessions; the VS Code extension brings its own$'
+on='^    claudeCode\.enable = true; +# the CLI for tmux/ajmux sessions; the VS Code extension brings its own$'
 off='^    # claudeCode\.enable = true; +# claude, tmux and jq in this shell'
 # No claude on the host PATH (acme/plain above): on, allow_unfree with it,
 # and the report says so, the dry run included.
 has   "no host claude: claudeCode.enable on"   "$tmp/code/acme/plain/devenv.nix" "$on"
-has   "no host claude: allow_unfree"           "$tmp/code/acme/plain/devenv.yaml" '^allow_unfree: true +# for harness\.claudeCode\.enable in devenv\.nix: claude-code is unfree$'
+has   "no host claude: allow_unfree"           "$tmp/code/acme/plain/devenv.yaml" '^allow_unfree: true +# for ai-jail\.claudeCode\.enable in devenv\.nix: claude-code is unfree$'
 check "no host claude: reported"               'claude +none on the host PATH: claudeCode\.enable = true in devenv\.nix, allow_unfree: true in devenv\.yaml'
 init --dry-run acme/demo
 check "no host claude: reported in the dry run" 'claude +none on the host PATH: claudeCode\.enable = true'
@@ -210,7 +210,7 @@ mkdir -p "$tmp/hostbin"; printf '#!/bin/sh\n' >"$tmp/hostbin/claude"; chmod +x "
 HOST_PATH="$tmp/hostbin" init --no-shell acme/hosted
 has   "host claude: claudeCode.enable commented" "$tmp/code/acme/hosted/devenv.nix" "$off"
 lacks "host claude: claudeCode.enable not set"   "$tmp/code/acme/hosted/devenv.nix" '^ *claudeCode\.enable'
-has   "host claude: allow_unfree commented"      "$tmp/code/acme/hosted/devenv.yaml" '^# allow_unfree: true +# for harness\.claudeCode\.enable'
+has   "host claude: allow_unfree commented"      "$tmp/code/acme/hosted/devenv.yaml" '^# allow_unfree: true +# for ai-jail\.claudeCode\.enable'
 lacks "host claude: allow_unfree not set"        "$tmp/code/acme/hosted/devenv.yaml" '^allow_unfree'
 check "host claude: reported"                    "claude +$tmp/hostbin/claude on the host PATH: claudeCode\\.enable left commented out in devenv\\.nix"
 # A claude only in a store directory (init run from a repo shell that has
@@ -225,5 +225,5 @@ check "shell's claude only: reported as none"     'claude +none on the host PATH
 STORE="$tmp/store" HOST_PATH="$tmp/store/abc-claude-code/bin:$tmp/hostbin" init --dry-run acme/demo
 check "host claude after a shell's: found"       "claude +$tmp/hostbin/claude on the host PATH"
 
-echo "harness-init-test: $pass passed, $fail failed"
+echo "aj-init-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

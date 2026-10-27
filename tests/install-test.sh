@@ -5,7 +5,7 @@
 # fetches, sudo, rpm, systemctl, nix) and a fake os-release: the
 # nix-installer route (fetched only when nix is absent; --yes or a terminal
 # for its confirmation), the Fedora route (dnf, the socket, no installer),
-# what reaches bootstrap (the ref: this checkout, HARNESS_REF, or the
+# what reaches bootstrap (the ref: this checkout, AI_JAILER_REF, or the
 # published repo when piped; the root steps; flakes on), the init of the
 # checkout, the NixOS route (no installer, the nix.settings block printed),
 # and the flags that stop it. Assumes no nix on the test's own PATH and no
@@ -31,7 +31,7 @@ stub "$tmp/bin" sudo 'exit 0'
 stub "$tmp/bin" rpm 'exit 1'
 stub "$tmp/bin" systemctl 'exit 1'
 # nix: logs what bootstrap and init would see.
-stub "$tmp/nixbin" nix 'echo "env HARNESS_REF=$HARNESS_REF HARNESS_ROOT_PACKAGES=[$HARNESS_ROOT_PACKAGES] HARNESS_ROOT_STEPS=[$HARNESS_ROOT_STEPS] NIX_CONFIG=[$NIX_CONFIG]" >>"$CALLS"
+stub "$tmp/nixbin" nix 'echo "env AI_JAILER_REF=$AI_JAILER_REF AI_JAILER_ROOT_PACKAGES=[$AI_JAILER_ROOT_PACKAGES] AI_JAILER_ROOT_STEPS=[$AI_JAILER_ROOT_STEPS] NIX_CONFIG=[$NIX_CONFIG]" >>"$CALLS"
 case "$*" in *" bootstrap"*|*" bootstrap "*) exit "${BOOTSTRAP_RC:-0}" ;; esac'
 # What the installer route sources afterwards: puts nix on PATH.
 printf 'PATH=%s:$PATH\n' "$tmp/nixbin" >"$tmp/nix-daemon.sh"
@@ -44,8 +44,8 @@ run() {
   printf 'ID=%s\nVERSION_ID="%s"\nPRETTY_NAME="%s %s"\n' "$id" "$ver" "$id" "$ver" >"$tmp/os-release"
   : >"$log"
   out=$(cd "$cwd" && env -i HOME="$tmp/home" PATH="$path" TMPDIR="$tmp" CALLS="$log" INSTALLER="$tmp/installer" \
-    HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" ${HARNESS_REF:+HARNESS_REF="$HARNESS_REF"} \
-    HARNESS_NIXOS_MARKER=/var/empty/none HARNESS_NIX_CONF="$tmp/nix.conf" ${BOOTSTRAP_RC:+BOOTSTRAP_RC="$BOOTSTRAP_RC"} \
+    AI_JAILER_OS_RELEASE="$tmp/os-release" AI_JAILER_NIX_PROFILE_SH="$tmp/nix-daemon.sh" ${AI_JAILER_REF:+AI_JAILER_REF="$AI_JAILER_REF"} \
+    AI_JAILER_NIXOS_MARKER=/var/empty/none AI_JAILER_NIX_CONF="$tmp/nix.conf" ${BOOTSTRAP_RC:+BOOTSTRAP_RC="$BOOTSTRAP_RC"} \
     bash "$tmp/checkout/scripts/install.sh" "$@" 2>&1 </dev/null); rc=$?
 }
 called()   { if grep -q -E -e "$2" "$log"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/ not in the calls)"; sed 's/^/  /' "$log"; fi; }
@@ -60,11 +60,11 @@ run ubuntu 24.04 "$tmp/checkout" --yes
 exits "fresh host" 0
 called "installer fetched"         '^curl .*artifacts\.nixos\.org/nix-installer'
 called "installer run, no-confirm" '^installer install --no-confirm$'
-called "bootstrap from the checkout" "^nix run path:$tmp/checkout#harness -- bootstrap --yes$"
-called "installer step recorded"   'HARNESS_ROOT_STEPS=\[nix-installer\]'
-called "no packages recorded"      'HARNESS_ROOT_PACKAGES=\[\]'
+called "bootstrap from the checkout" "^nix run path:$tmp/checkout#aj -- bootstrap --yes$"
+called "installer step recorded"   'AI_JAILER_ROOT_STEPS=\[nix-installer\]'
+called "no packages recorded"      'AI_JAILER_ROOT_PACKAGES=\[\]'
 called "flakes on for nix"         'NIX_CONFIG=\[extra-experimental-features = nix-command flakes\]'
-called "init of the checkout"      "^nix run path:$tmp/checkout#harness -- init $tmp/checkout --yes$"
+called "init of the checkout"      "^nix run path:$tmp/checkout#aj -- init $tmp/checkout --yes$"
 uncalled "no dnf off fedora"       'dnf'
 uncalled "no sudo of our own"      '^sudo'
 
@@ -80,7 +80,7 @@ says "bootstrap missing: says so"   'init runs anyway'
 WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
 exits "re-run" 0
 uncalled "no second installer"     '^curl|^installer'
-called "nothing recorded"          'HARNESS_ROOT_STEPS=\[\]'
+called "nothing recorded"          'AI_JAILER_ROOT_STEPS=\[\]'
 called "bootstrap again"           '-- bootstrap --yes$'
 
 # No terminal and no --yes: refused before the installer runs.
@@ -92,22 +92,22 @@ uncalled "no bootstrap"            '^nix run'
 
 # From another directory: still this checkout.
 WITH_NIX=1 run ubuntu 24.04 "$tmp" --yes
-called "ref is the checkout"       "^nix run path:$tmp/checkout#harness -- bootstrap"
+called "ref is the checkout"       "^nix run path:$tmp/checkout#aj -- bootstrap"
 called "init of the checkout"      "-- init $tmp/checkout"
 
 # Piped into bash, no checkout: the published ref, no init.
 : >"$log"
 out=$(cd "$tmp" && env -i HOME="$tmp/home" PATH="$tmp/nixbin:$tmp/bin:$PATH" TMPDIR="$tmp" CALLS="$log" INSTALLER="$tmp/installer" \
-  HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_PROFILE_SH="$tmp/nix-daemon.sh" \
+  AI_JAILER_OS_RELEASE="$tmp/os-release" AI_JAILER_NIX_PROFILE_SH="$tmp/nix-daemon.sh" \
   bash -s -- --yes <"$tmp/checkout/scripts/install.sh" 2>&1); rc=$?
 exits "piped" 0
-called "published ref"             '^nix run github:bilibo/claude-nix-harness#harness -- bootstrap --yes$'
+called "published ref"             '^nix run github:bilibo/ai-jailer#aj -- bootstrap --yes$'
 uncalled "no init without a checkout" ' init '
 
-# HARNESS_REF wins over the checkout; init still runs on the checkout.
-HARNESS_REF=github:bilibo/claude-nix-harness WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
-called "HARNESS_REF wins"          '^nix run github:bilibo/claude-nix-harness#harness -- bootstrap'
-called "init on the checkout"      "github:bilibo/claude-nix-harness#harness -- init $tmp/checkout"
+# AI_JAILER_REF wins over the checkout; init still runs on the checkout.
+AI_JAILER_REF=github:bilibo/ai-jailer WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
+called "AI_JAILER_REF wins"          '^nix run github:bilibo/ai-jailer#aj -- bootstrap'
+called "init on the checkout"      "github:bilibo/ai-jailer#aj -- init $tmp/checkout"
 
 # --no-init, and which flags reach bootstrap and init.
 WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes --no-init
@@ -137,13 +137,13 @@ exits "--check with workers"       0
 says "check: managed link"         'would run: sudo nix build path:[^ ]*checkout#managed --out-link /etc/claude-code'
 says "check: agents group"         'would run: sudo groupadd agents'
 says "check: worker group"         'would run: sudo groupadd w-acme'
-says "check: worker user"          "would run: sudo useradd -m -g w-acme -G agents -s /bin/bash -c 'claude-nix-harness worker for acme' w-acme"
+says "check: worker user"          "would run: sudo useradd -m -g w-acme -G agents -s /bin/bash -c 'ai-jailer worker for acme' w-acme"
 says "check: home mode"            'would run: sudo chmod 0750 /home/w-acme'
 says "check: owner joins the group" 'would run: sudo usermod -aG w-acme raul'
 says "check: linger"               'would run: sudo loginctl enable-linger w-acme'
-says "check: sudoers rule"         'sudoers\.d/claude-nix-harness   \(raul ALL=\(%agents\) NOPASSWD: ALL\)'
-says "check: visudo"               'would run: sudo visudo -cf /etc/sudoers.d/claude-nix-harness'
-says "check: worker user steps"    'would run: sudo -u w-acme -i nix run path:[^ ]*checkout#harness -- bootstrap --no-root --yes --harness '
+says "check: sudoers rule"         'sudoers\.d/ai-jailer   \(raul ALL=\(%agents\) NOPASSWD: ALL\)'
+says "check: visudo"               'would run: sudo visudo -cf /etc/sudoers.d/ai-jailer'
+says "check: worker user steps"    'would run: sudo -u w-acme -i nix run path:[^ ]*checkout#aj -- bootstrap --no-root --yes --jailer '
 uncalled "check with workers runs nothing" '^curl|^installer|^nix|^sudo'
 run ubuntu 24.04 "$tmp/checkout" --check --workers acme --owner raul --owner-sudo none
 if [[ "$out" =~ sudoers\.d ]]; then fail=$((fail+1)); echo "FAIL: --owner-sudo none still prints the sudoers lines"; else pass=$((pass+1)); fi
@@ -161,8 +161,8 @@ exits "fedora" 0
 called "dnf"                       '^sudo dnf install -y nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils$'
 called "socket"                    '^sudo systemctl enable --now nix-daemon.socket$'
 uncalled "no installer on fedora"  '^curl|^installer'
-called "packages recorded"         'HARNESS_ROOT_PACKAGES=\[nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils\]'
-called "socket recorded"           'HARNESS_ROOT_STEPS=\[nix-daemon.socket\]'
+called "packages recorded"         'AI_JAILER_ROOT_PACKAGES=\[nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils\]'
+called "socket recorded"           'AI_JAILER_ROOT_STEPS=\[nix-daemon.socket\]'
 # Fedora 43 has no nix package: the installer route.
 WITH_NIX=1 run fedora 43 "$tmp/checkout" --yes
 uncalled "fedora 43 is the installer route" 'dnf'
@@ -177,8 +177,8 @@ uncalled "no dnf on nixos"         'dnf'
 uncalled "no sudo on nixos"        '^sudo'
 says "nixos named"                 'NixOS: nix from the system configuration, no installer'
 if [[ "$out" =~ nix\.settings ]]; then fail=$((fail+1)); echo "FAIL: install.sh prints nix.settings on NixOS (bootstrap does)"; else pass=$((pass+1)); fi
-called "bootstrap on nixos"        "^nix run path:$tmp/checkout#harness -- bootstrap --yes$"
-called "nothing recorded on nixos" 'HARNESS_ROOT_STEPS=\[\]'
+called "bootstrap on nixos"        "^nix run path:$tmp/checkout#aj -- bootstrap --yes$"
+called "nothing recorded on nixos" 'AI_JAILER_ROOT_STEPS=\[\]'
 printf 'experimental-features = nix-command flakes\nextra-substituters = https://devenv.cachix.org\n' >"$tmp/nix.conf"
 WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --yes
 says "nixos again"                 'NixOS: nix from the system configuration'
@@ -186,7 +186,7 @@ if [[ "$out" =~ nix\.settings ]]; then fail=$((fail+1)); echo "FAIL: nix.setting
 # --check with workers on NixOS: the worker lines, no sudoers, the wsl note.
 WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --check --workers acme --owner raul
 exits "nixos --check with workers" 0
-says "nixos check: worker user"    "would run: sudo useradd -m -g w-acme -G agents -s /bin/bash -c 'claude-nix-harness worker for acme' w-acme"
+says "nixos check: worker user"    "would run: sudo useradd -m -g w-acme -G agents -s /bin/bash -c 'ai-jailer worker for acme' w-acme"
 says "nixos check: wsl note"       '#managed --out-link /etc/claude-code   \(#managed-wsl under WSL\)'
 if [[ "$out" =~ sudoers ]]; then fail=$((fail+1)); echo "FAIL: --check prints the sudoers lines on NixOS"; else pass=$((pass+1)); fi
 # Without nix there is nothing to run: refused, nothing downloaded.

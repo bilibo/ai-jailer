@@ -1,15 +1,16 @@
-# claude-nix-harness
+# ai-jailer
 
-Guard rails for Claude Code on a Linux host with Nix. The hard rules (deny
-rules, a fail-closed hook, the Bash sandbox, mod policy) live in the
-host-wide managed settings under `/etc/claude-code`, root-owned, so no
-repo file, user setting or session can relax them. Each customer's agents
-run as their own Linux user (`w-<customer>`) with a private home, their
-own Claude login and no push credential or sudo; you drive them from your
-own account with `ccmux <customer>/<repo>`. A repo's `devenv.nix` adds a
-project layer on top (allow rules, extra deny rules, extra network hosts).
-Agents stage and diff; you commit and push. Your own sessions are bound by
-the managed file too: the rules are the host's, not a repo's.
+ai-jailer, or `aj` among friends: guard rails for Claude Code on a
+Linux host with Nix. The hard rules (deny rules, a fail-closed hook,
+the Bash sandbox, mod policy) live in the host-wide managed settings
+under `/etc/claude-code`, root-owned, so no repo file, user setting or
+session can relax them. Each customer's agents run as their own Linux
+user (`w-<customer>`) with a private home, their own Claude login and
+no push credential or sudo; you drive them from your own account with
+`ajmux <customer>/<repo>`. A repo's `devenv.nix` adds a project layer on
+top (allow rules, extra deny rules, extra network hosts). Agents stage
+and diff; you commit and push. Your own sessions are bound by the managed
+file too: the rules are the host's, not a repo's.
 
 Status, 2026-10-27: this is the shape the code now has. None of it has run
 live yet; the first-run checks are pending (runbook section 5), and the
@@ -17,14 +18,14 @@ live yet; the first-run checks are pending (runbook section 5), and the
 
 | Host | Route | Tested |
 | --- | --- | --- |
-| Any Linux: Fedora 44 or newer, Ubuntu, NixOS, NixOS-WSL, other | One route, run from this checkout's devenv shell ("Usage" below): `harness bootstrap --workers <a,b> [--owner <login>]` links `/etc/claude-code`, creates the worker users, groups and linger, the sudo rule (not on NixOS: the owner's own sudo serves), and sets each worker up as that user. `scripts/install.sh` runs the same after putting Nix on a host that lacks it. NixOS differs in what bootstrap may write: `nix.conf` and the user-namespace sysctl are the system configuration's and are printed as options; the users come from `useradd` (`users.mutableUsers`, the default) | The previous shape (repo file only, one user) ran end to end on Fedora 44 and Ubuntu 26.10 laptops (2026-10-22). The worker route and the NixOS route are covered by the stubbed-host tests only; `nix build --out-link /etc/claude-code` as root is untested |
+| Any Linux: Fedora 44 or newer, Ubuntu, NixOS, NixOS-WSL, other | One route, run from this checkout's devenv shell ("Usage" below): `aj bootstrap --workers <a,b> [--owner <login>]` links `/etc/claude-code`, creates the worker users, groups and linger, the sudo rule (not on NixOS: the owner's own sudo serves), and sets each worker up as that user. `scripts/install.sh` runs the same after putting Nix on a host that lacks it. NixOS differs in what bootstrap may write: `nix.conf` and the user-namespace sysctl are the system configuration's and are printed as options; the users come from `useradd` (`users.mutableUsers`, the default) | The previous shape (repo file only, one user) ran end to end on Fedora 44 and Ubuntu 26.10 laptops (2026-10-22). The worker route and the NixOS route are covered by the stubbed-host tests only; `nix build --out-link /etc/claude-code` as root is untested |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
 A host without the managed file enforces nothing: a repo that imports the
-devenv module warns at every shell entry, and `harness doctor` reports the
+devenv module warns at every shell entry, and `aj doctor` reports the
 file as MISSING. The earlier routes (a repo file only; the NixOS module
 with `harness.owner` and `harness.workers`, dropped 2026-10-27) are gone:
-a host configuration carries nothing of the harness.
+a host configuration carries nothing of ai-jailer.
 
 `devenv/` is the project side: every repo imports it. A container route
 was built and set aside; it lives in the claude-nix-harness-container repo,
@@ -42,9 +43,9 @@ lib/        pure Nix: deny rules, settings.nix (the managed body and the repo's 
 hooks/      env-guard.sh (the guard hook), tmux-notify.sh
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates the project layer of .claude/settings.json
 host.nix    optional, gitignored: this host's managed-tree options (extra deny rules, domains, the memory and commit switches); flake.nix merges it into `packages.managed`
-pkgs/       ccmux launcher, direnv.toml and tmux.conf (the host-side settings), claude-code override (nixpkgs' package without the `LD_LIBRARY_PATH` every command would inherit), devenv-cache.nix (the devenv cache key), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
-scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap` with the worker flags, then `harness init` on the checkout
-tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, binary untouched, `--version`; unfree, so only when the evaluator allows it), check-parser-test.sh (`harness check --parse` against the transcripts in fixtures/)
+pkgs/       ajmux launcher, direnv.toml and tmux.conf (the host-side settings), claude-code override (nixpkgs' package without the `LD_LIBRARY_PATH` every command would inherit), devenv-cache.nix (the devenv cache key), the `aj` CLI (aj.nix; bodies under aj/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
+scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `aj bootstrap` with the worker flags, then `aj init` on the checkout
+tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ajmux-test.sh, host-config-test.sh, install-test.sh and aj-bootstrap-test.sh (the install route with stubbed hosts), aj-doctor-test.sh, aj-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, binary untouched, `--version`; unfree, so only when the evaluator allows it), check-parser-test.sh (`aj check --parse` against the transcripts in fixtures/)
 docs/       runbook (daily flow, onboarding, verification, troubleshooting), project-devenv (a project's devenv.nix for non-Nix users), roadmap, changelog, sessions (tiers, proposals), suggestion (ideas with a shape, not planned)
 ```
 
@@ -55,13 +56,13 @@ Ubuntu 26.10 without the worker flags; any other Linux goes through the
 same nix-installer route as Ubuntu and should work.
 
 ```sh
-git clone https://github.com/bilibo/claude-nix-harness.git harness
-cd harness
+git clone https://github.com/bilibo/ai-jailer.git ai-jailer
+cd ai-jailer
 scripts/install.sh --workers acme,globex     # --owner defaults to $USER; --owner-sudo nopasswd|password|none
 scripts/install.sh --check --workers acme    # prints the planned steps, changes nothing
 ```
 
-The script installs Nix where it is missing, then `harness bootstrap` runs
+The script installs Nix where it is missing, then `aj bootstrap` runs
 the root steps (devenv cache in `nix.conf`, user namespaces, the managed
 link `nix build <ref>#managed --out-link /etc/claude-code`, a user and
 group per worker, 0750 homes, linger, the sudoers file checked with
@@ -72,29 +73,29 @@ later AppArmor confines user namespaces; bootstrap offers the bwrap
 profile from the Claude Code sandboxing docs (`/etc/apparmor.d/bwrap`)
 and, until it is in place, every Claude command is refused.
 
-Afterwards: `harness doctor` reports the managed file, the managed hook,
+Afterwards: `aj doctor` reports the managed file, the managed hook,
 the `agents` members, linger and the sudoers file per worker, and whether
-the caller is a worker, the owner or neither. `harness upgrade` moves the
+the caller is a worker, the owner or neither. `aj upgrade` moves the
 profile and the managed link to this checkout's `flake.lock` after a `git
-pull`. `harness reset` removes the sudoers file, the managed link and
+pull`. `aj reset` removes the sudoers file, the managed link and
 linger; it keeps the worker users, whose homes hold repos and a Claude
 login, and prints the `userdel -r` lines for you to run.
 
-Another project that imports `harness/devenv` gets the same shell contents
-with `harness.claudeCode.enable = true` in its devenv.nix (default false)
-and `allow_unfree: true` in its devenv.yaml; `harness init
+Another project that imports `ai-jailer/devenv` gets the same shell contents
+with `ai-jail.claudeCode.enable = true` in its devenv.nix (default false)
+and `allow_unfree: true` in its devenv.yaml; `aj init
 <customer>/<repo>` writes one and does its first shell entry. On a host
 with no `claude` of its own init writes both lines uncommented, so the
-repo's shell brings the CLI, tmux and jq for `ccmux` sessions; with a host
+repo's shell brings the CLI, tmux and jq for `ajmux` sessions; with a host
 `claude` it leaves both commented out.
 
 ## Windows: NixOS-WSL
 
 This repo keeps no Windows installer (since 2026-10-24). A host repo
 installs NixOS-WSL; `bilibo/nixos-wsl` is the reference one, and its README
-has the installer and its flags. That repo carries nothing of the harness
-but `ccmux` and the tmux rules (since 2026-10-27); the rules and the
-workers come from `harness bootstrap`, run there as on any Linux ("Usage"
+has the installer and its flags. That repo carries nothing of ai-jailer
+but `ajmux` and the tmux rules (since 2026-10-27); the rules and the
+workers come from `aj bootstrap`, run there as on any Linux ("Usage"
 below). Bootstrap detects WSL and links the `managed-wsl` tree, which
 hides `/mnt/c` and `/run/WSL` from the sandbox.
 
@@ -104,9 +105,9 @@ neither read Windows files nor run Windows executables. The host file
 keeps the Windows PATH off the Linux PATH for the same reason, and for
 speed. Claude Code on Windows is often the VS Code extension's bundled
 binary run over Remote-WSL (nix-ld runs it); a session started that way
-as the owner still loads the managed file, and `ccmux` sessions use the
+as the owner still loads the managed file, and `ajmux` sessions use the
 CLI `claude` of the worker's profile or of the repo's shell
-(`harness.claudeCode.enable`).
+(`ai-jail.claudeCode.enable`).
 
 ## Enforcement layers
 
@@ -126,7 +127,7 @@ Each Claude Code mechanism covers a different surface, so all are used:
    is in `trusted-users`, so a worker cannot hand the Nix daemon options.
 3. The repo's project layer (`.claude/settings.json`, devenv module,
    read-only store symlink): `extraDeny`, allow rules from
-   `harness.settings`, the sandbox belt scalars (`enabled`,
+   `ai-jail.settings`, the sandbox belt scalars (`enabled`,
    `allowUnsandboxedCommands = false`, `failIfUnavailable`), the repo's own
    settings, skills, hooks, plugin manifest and `.git` hooks and config as
    literal `denyWrite` paths, `extraAllowedDomains` and, when on, the read
@@ -138,14 +139,14 @@ Each Claude Code mechanism covers a different surface, so all are used:
    (`bash -c`, `env`, `git -C`, quoted words), git history writes, cloud
    writes, system changes, in-repo secrets (`.env`, `.tfvars`, `.tfstate`)
    and the user's own Claude credentials, config-file edits, plugin loading,
-   nested `claude`/`ccmux` launch flags, tmux commands other than the
+   nested `claude`/`ajmux` launch flags, tmux commands other than the
    read-only ones, `direnv allow` and its synonyms (the human approves
    `.envrc` changes). `onFailure: block`.
 6. Bash sandbox (bubblewrap, Claude Code's socat proxy): filesystem and
    egress confinement for everything `az`, `terraform`, `tflint`, `trivy`
    do at runtime. Works nested inside `vscode-fhs`. Hosts outside the
    allowlist prompt in an interactive session and are refused in a `-p` one.
-7. Mod policy (managed only): no mod loads: the harness ships none (since
+7. Mod policy (managed only): no mod loads: ai-jailer ships none (since
    2026-10-24) and the built-in guard refuses every other; no marketplace
    can be added beyond `extraKnownMarketplaces` (none by default); sideload
    flags rejected; `allowManagedHooksOnly` by default.
@@ -154,9 +155,9 @@ Each Claude Code mechanism covers a different surface, so all are used:
 ### What the repo file is for
 
 It is the project layer, not the enforcement: a repo adds allow rules,
-deny rules and network hosts for its own work, and `harness init` checks
+deny rules and network hosts for its own work, and `aj init` checks
 the file and the hook on it. It carries nothing the host needs, so a repo
-that turns it off (`harness.enable = false`) keeps the managed rules.
+that turns it off (`ai-jail.enable = false`) keeps the managed rules.
 Some limits stay with whoever launches the session:
 
 - `claude --setting-sources user`, `--settings`, `--bare` or a session
@@ -173,7 +174,7 @@ Some limits stay with whoever launches the session:
   hook and the sandbox are the gate, not the prompt.
 - The claude.ai account's connectors (Gmail, Drive, Notion, ...) are off
   through `disableClaudeAiConnectors`, which holds from any scope;
-  `harness.allowConnectors` turns them back on per repo, or `allowConnectors`
+  `ai-jail.allowConnectors` turns them back on per repo, or `allowConnectors`
   in `host.nix` per host.
 
 ### Lockdown level
@@ -198,17 +199,17 @@ items, in order, is the "sandbox hardening" entry of the roadmap.
 ## Usage
 
 The checkout is the control point, on every Linux. Its devenv shell carries
-the `harness` CLI built from the checkout and sets the harness ref to the
+the `aj` CLI built from the checkout and sets the ai-jailer ref to the
 checkout, so the rules linked at `/etc/claude-code`, the CLI and the
 workers come from one revision:
 
 ```sh
-git clone https://github.com/bilibo/claude-nix-harness.git ~/code/claude-nix-harness
-cd ~/code/claude-nix-harness
+git clone https://github.com/bilibo/ai-jailer.git ~/code/ai-jailer
+cd ~/code/ai-jailer
 devenv shell                                   # or direnv allow, once bootstrap has put direnv on PATH
-harness bootstrap --workers acme,globex        # sudo: /etc/claude-code, the users, groups, linger, the sudo rule; then each worker's user side
-harness doctor
-git pull && harness upgrade                    # moves the rules, the profile packages and the workers to the checkout's lock
+aj bootstrap --workers acme,globex        # sudo: /etc/claude-code, the users, groups, linger, the sudo rule; then each worker's user side
+aj doctor
+git pull && aj upgrade                    # moves the rules, the profile packages and the workers to the checkout's lock
 ```
 
 The host needs Nix with flakes, the devenv cache in the root `nix.conf`
@@ -221,17 +222,17 @@ NixOS and NixOS-WSL run the same command. What differs is what bootstrap
 may write there: `/etc/nix/nix.conf` and the sysctls are the system
 configuration's (store symlinks), so the `nix.settings` and
 `boot.kernel.sysctl` lines are printed where the host lacks them; no sudo
-rule is installed (`/etc/sudoers` has no `@includedir`), so `ccmux` hands
+rule is installed (`/etc/sudoers` has no `@includedir`), so `ajmux` hands
 over to a worker with whatever sudo the owner has, password or not; the
 workers come from `useradd`, which holds while `users.mutableUsers` is true
-(the default): a rebuild with it false removes them, and `harness doctor`
+(the default): a rebuild with it false removes them, and `aj doctor`
 reports a worker the receipt names but the host lacks. The `/etc/claude-code`
 link survives rebuilds (NixOS only cleans links into `/etc/static`). A host
-configuration carries nothing of the harness; `bilibo/nixos-wsl` takes only
-`ccmux` and the tmux rules from this flake.
+configuration carries nothing of ai-jailer; `bilibo/nixos-wsl` takes only
+`ajmux` and the tmux rules from this flake.
 
 The host-wide options of the managed tree go into `host.nix` at the
-checkout root, gitignored (it is this host's policy, not the harness's); a
+checkout root, gitignored (it is this host's policy, not the jailer's); a
 `path:<checkout>` ref, which the devenv shell sets, carries it, the
 published `github:` ref never does, and bootstrap says so when it finds one
 it cannot use. An attrset, or a function of `pkgs`; every key is an
@@ -251,22 +252,22 @@ argument of `lib/managed-tree.nix`, and an unknown one fails the build:
 
 `platform` needs no setting: bootstrap links `managed-wsl` under WSL.
 
-Every repo the harness should govern, on every host, in the worker's clone:
+Every repo the jailer should govern, on every host, in the worker's clone:
 
 ```yaml
 # a repo's devenv.yaml
 inputs:
-  harness:
-    url: github:bilibo/claude-nix-harness   # or path:/path/to/claude-nix-harness while developing
+  ai-jailer:
+    url: github:bilibo/ai-jailer   # or path:/path/to/ai-jailer while developing
     flake: false
 imports:
-  - harness/devenv
+  - ai-jailer/devenv
 ```
 
 ```nix
 # the repo's devenv.nix
-harness.settings.permissions.allow = [ "Bash(terraform plan *)" ];  # project allow rules
-harness.extraAllowedDomains = [ "dev.azure.com" ];                   # sandbox allowlist; whether a managed sandbox honours it is check V2, pending (runbook section 5)
+ai-jail.settings.permissions.allow = [ "Bash(terraform plan *)" ];  # project allow rules
+ai-jail.extraAllowedDomains = [ "dev.azure.com" ];                   # sandbox allowlist; whether a managed sandbox honours it is check V2, pending (runbook section 5)
 ```
 
 ```text
@@ -276,9 +277,9 @@ harness.extraAllowedDomains = [ "dev.azure.com" ];                   # sandbox a
 ```
 
 The devenv module writes the repo's project layer at every shell entry
-(read-only symlink into the store). Repos outside the harness do not
+(read-only symlink into the store). Repos outside the jailer do not
 import it. A repo that imports it can turn that layer off with one line in
-its `devenv.nix`, `harness.enable = false;`, then `direnv allow`; the
+its `devenv.nix`, `ai-jail.enable = false;`, then `direnv allow`; the
 managed rules still apply (`docs/project-devenv.md`, "Turning the guard
 rails off (and on)"). Only a human can set it: the deny rules and the hook
 refuse an agent's edits to `devenv.nix`.
@@ -287,17 +288,17 @@ Each user needs direnv >= 2.38 for `require_allowed` in `.envrc` (the
 locked nixpkgs ships 2.38.2; bootstrap checks the minimum), `devenv` on
 PATH, and the host `bubblewrap` and `socat` with user namespaces enabled
 for the sandbox (`failIfUnavailable` refuses to start a session without
-it). Bootstrap's profile step adds direnv, devenv, ccmux and harness from
+it). Bootstrap's profile step adds direnv, devenv, ajmux and aj from
 this flake, pinned by its lock (`nix profile add path:<checkout>#direnv
 ...` by hand does the same), and `path:<checkout>#claude-code` is the
 package when Claude Code itself comes from Nix: nixpkgs' wrapper exports an
 `LD_LIBRARY_PATH` that every hook, command and MCP server inherits and that
 kills a distro binary loading libasound (`pkgs/claude-code.nix` drops the
 variable; the binary is otherwise unpatched, so audio output, which needed
-it, does not work; the devenv module uses it). `harness doctor` reports
-every host prerequisite, `claude doctor` included, and `harness init
+it, does not work; the devenv module uses it). `aj doctor` reports
+every host prerequisite, `claude doctor` included, and `aj init
 <customer>/<repo>` writes the files above into a repo and runs its first
-shell entry. `nix run path:<checkout>#harness -- <command>` runs the CLI
+shell entry. `nix run path:<checkout>#aj -- <command>` runs the CLI
 from a checkout outside its shell.
 
 `~/.claude/settings.json` is the user's own and is never a store symlink:
@@ -313,8 +314,8 @@ are, not by where a dotenv file would have put them:
 | What | Where | Who sees it |
 | --- | --- | --- |
 | Identifiers the tools need: tenant, subscription, client and resource IDs, region, environment name | `devenv.nix`, `env.ARM_TENANT_ID = "..."` and friends, committed | you and the agent, exported into every command by the devenv shell |
-| The same, per developer or not for the repository | nowhere: the `.envrc` `harness init` writes fails the load while `devenv.local.nix` or `devenv.local.yaml` exists, because devenv imports them without a `direnv allow` (roadmap 2.7) | nobody |
-| Secrets: client secrets, tokens, passwords | `.env`, loaded into the worker's shell with devenv's `dotenv.enable = true` (direnv's own dotenv loading is off on a harness host), or the worker's `az login` session | the worker's shell only; the agent's preamble loads an empty file, and `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET` and the GitHub tokens are stripped from its environment either way |
+| The same, per developer or not for the repository | nowhere: the `.envrc` `aj init` writes fails the load while `devenv.local.nix` or `devenv.local.yaml` exists, because devenv imports them without a `direnv allow` (roadmap 2.7) | nobody |
+| Secrets: client secrets, tokens, passwords | `.env`, loaded into the worker's shell with devenv's `dotenv.enable = true` (direnv's own dotenv loading is off on an ai-jailer host), or the worker's `az login` session | the worker's shell only; the agent's preamble loads an empty file, and `ARM_CLIENT_SECRET`, `AZURE_CLIENT_SECRET` and the GitHub tokens are stripped from its environment either way |
 
 A project that keeps its IDs in `.env` today sees `az` and `terraform plan`
 fail inside the sandbox until those lines move to `devenv.nix`.
@@ -344,7 +345,7 @@ the worker's clone or fetches the branch into their own. Not tested.
 ## Tests
 
 ```sh
-nix flake check              # hook unit tests, the generated repo file, the managed tree, ccmux resolution, the install route with stubbed hosts, doctor and init, the check parser, the NixOS and devenv modules evaluated
+nix flake check              # hook unit tests, the generated repo file, the managed tree, ajmux resolution, the install route with stubbed hosts, doctor and init, the check parser, the NixOS and devenv modules evaluated
 nix build .#managed          # a managed tree to inspect: result/managed-settings.json
 nix build .#project-settings # the repo's project layer with default options
 ```
@@ -358,7 +359,7 @@ Live, with Claude Code (runbook section 5 has the from-zero sequence and
 the pending first-run checks):
 
 ```sh
-harness doctor                   # as the owner and as a worker: managed file, hook, users, sudo rule, linger; exit 1 when one is missing
-harness init <customer>/<repo>   # as the worker; writes a repo, enters its shell, runs both unit tests on the result
-harness check <repo>             # as the worker: seventeen `claude -p` sessions, eighteen as an `agents` member, two more in a fenced repo, one fewer outside tmux; judged on transcripts and files; costs API calls
+aj doctor                   # as the owner and as a worker: managed file, hook, users, sudo rule, linger; exit 1 when one is missing
+aj init <customer>/<repo>   # as the worker; writes a repo, enters its shell, runs both unit tests on the result
+aj check <repo>             # as the worker: seventeen `claude -p` sessions, eighteen as an `agents` member, two more in a fenced repo, one fewer outside tmux; judged on transcripts and files; costs API calls
 ```

@@ -1,13 +1,13 @@
-# claude-nix-harness
+# ai-jailer
 
-Guard-railed Claude Code for hosts with Nix. This checkout is the harness
+Guard-railed Claude Code for hosts with Nix. This checkout is the ai-jailer
 repo, and a session here runs under the host's managed settings like a
 session in any repo, sandbox on: the hook refuses edits to `devenv.nix`,
 `devenv.yaml`, `devenv/devenv.nix`, `.envrc` and `.claude/` here as
 everywhere; propose those as diffs. The root `devenv.yaml` imports
 `./devenv` from the working tree. That is fine because the live hook is
 the one under `/etc/claude-code`, not the tree's `hooks/`: a working-tree
-edit takes effect only when the human rebuilds or runs `harness upgrade`.
+edit takes effect only when the human rebuilds or runs `aj upgrade`.
 Agents stage and diff; the human commits and pushes.
 
 ## Which document owns what
@@ -19,7 +19,7 @@ Agents stage and diff; the human commits and pushes.
 - `docs/sessions.md`: how sessions coordinate (tiers, proposals).
 - `docs/runbook.md`: what the operator types; written for the human.
 - `docs/project-devenv.md`: a project's `devenv.nix`, for a human who
-  does not know Nix; `harness init`'s template links it.
+  does not know Nix; `aj init`'s template links it.
 - `docs/suggestion.md`: ideas with a shape but no commitment; the
   roadmap's "Ideas, not planned" points here.
 

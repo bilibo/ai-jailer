@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 #   scripts/install.sh [--check] [--no-init] [--workers <a,b,...>] [--worker <name>]
 #                      [--owner <login>] [--owner-sudo nopasswd|password|none]
-#                      [other harness bootstrap flags]
-#   curl -fsSL https://raw.githubusercontent.com/bilibo/claude-nix-harness/main/scripts/install.sh | bash -s -- [flags]
+#                      [other aj bootstrap flags]
+#   curl -fsSL https://raw.githubusercontent.com/bilibo/ai-jailer/main/scripts/install.sh | bash -s -- [flags]
 #
 # The one install route, run once on a plain Linux host: what has to happen
-# before `nix run` works, then `harness bootstrap` for the rest, then, from a
-# checkout, `harness init` on the checkout itself (its shell built, its
+# before `nix run` works, then `aj bootstrap` for the rest, then, from a
+# checkout, `aj init` on the checkout itself (its shell built, its
 # settings file and hook checked), so `git clone`, `scripts/install.sh`,
-# `ccmux` is the whole sequence.
+# `ajmux` is the whole sequence.
 #
 # Fedora 44 or newer (the first release that packages nix and nix-daemon):
-# `dnf install` of nix, nix-daemon and what the sandbox and the harness
+# `dnf install` of nix, nix-daemon and what the sandbox and ai-jailer
 # call, the SELinux label systemd needs to create the daemon socket in /nix,
 # and the socket itself, which the nix-daemon package leaves disabled. Any
 # other Linux: the nix-installer served at artifacts.nixos.org (multi-user
-# daemon; its uninstaller stays at /nix/nix-installer, which `harness reset`
+# daemon; its uninstaller stays at /nix/nix-installer, which `aj reset`
 # runs), downloaded to a file first so a failed download runs nothing. The
 # installer asks for sudo itself and confirms on the terminal; --yes passes
 # --no-confirm, and is required when the script is piped into bash with no
@@ -27,18 +27,18 @@
 # rest as on any host (it prints the nix.settings block where the store-owned
 # nix.conf lacks flakes or the devenv cache, and installs no sudo rule).
 #
-# The harness ref (`nix run`, and what bootstrap puts in the profile):
-# HARNESS_REF, else this checkout when the script runs from one
+# The ai-jailer ref (`nix run`, and what bootstrap puts in the profile):
+# AI_JAILER_REF, else this checkout when the script runs from one
 # (path:<checkout>), else the published repo. What was done here reaches
-# bootstrap's receipt through HARNESS_ROOT_PACKAGES and HARNESS_ROOT_STEPS,
-# so `harness reset` reverses it. --check reports the root steps and changes
+# bootstrap's receipt through AI_JAILER_ROOT_PACKAGES and AI_JAILER_ROOT_STEPS,
+# so `aj reset` reverses it. --check reports the root steps and changes
 # nothing; --dry-run does the same, then hands over to bootstrap's --dry-run
 # when Nix can already run. --no-init skips the checkout's shell. Every other
 # flag goes to bootstrap (--dry-run, --yes and --verbose to init as well),
 # --workers, --worker, --owner and --owner-sudo included: bootstrap creates
 # the worker users, the managed link and the sudo rule (its header lists the
 # commands; on NixOS no sudo rule), and --check prints them as bootstrap
-# would run them. They are not done by this script: they need the harness
+# would run them. They are not done by this script: they need the ai-jailer
 # ref built, which is Nix's job.
 set -euo pipefail
 
@@ -46,10 +46,10 @@ INSTALLER_URL=https://artifacts.nixos.org/nix-installer
 CHECK=0; DRY=0; YES=0; INIT=1; pending=0
 need=(); done_steps=(); pass=(); init_flags=()
 # Tests point these at scratch files.
-os_release="${HARNESS_OS_RELEASE:-/etc/os-release}"
-nixos_marker="${HARNESS_NIXOS_MARKER:-/etc/NIXOS}"
-nix_conf="${HARNESS_NIX_CONF:-/etc/nix/nix.conf}"
-nix_profile_sh="${HARNESS_NIX_PROFILE_SH:-/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
+os_release="${AI_JAILER_OS_RELEASE:-/etc/os-release}"
+nixos_marker="${AI_JAILER_NIXOS_MARKER:-/etc/NIXOS}"
+nix_conf="${AI_JAILER_NIX_CONF:-/etc/nix/nix.conf}"
+nix_profile_sh="${AI_JAILER_NIX_PROFILE_SH:-/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 # root <command...>: through sudo; under --check and --dry-run only printed.
@@ -115,11 +115,11 @@ installer_steps() {
   done_steps+=(nix-installer)
 }
 
-# worker_plan <ref>: under --check, the commands `harness bootstrap` runs for
+# worker_plan <ref>: under --check, the commands `aj bootstrap` runs for
 # --workers, read from the flags in $pass. Printed, never run: bootstrap owns
-# them (pkgs/harness/bootstrap.sh, "Root steps").
+# them (pkgs/aj/bootstrap.sh, "Root steps").
 worker_plan() {
-  local ref="$1" i c w owner="${USER:-$(id -un)}" mode=nopasswd tag="NOPASSWD: " prefix="${HARNESS_WORKER_PREFIX:-w-}"
+  local ref="$1" i c w owner="${USER:-$(id -un)}" mode=nopasswd tag="NOPASSWD: " prefix="${AI_JAILER_WORKER_PREFIX:-w-}"
   local -a workers=() names
   for ((i = 0; i < ${#pass[@]}; i++)); do
     case "${pass[i]}" in
@@ -137,18 +137,18 @@ worker_plan() {
   for c in "${workers[@]}"; do
     w="$prefix$c"
     echo "    would run: sudo groupadd $w"
-    echo "    would run: sudo useradd -m -g $w -G agents -s /bin/bash -c 'claude-nix-harness worker for $c' $w"
+    echo "    would run: sudo useradd -m -g $w -G agents -s /bin/bash -c 'ai-jailer worker for $c' $w"
     echo "    would run: sudo chmod 0750 /home/$w"
     echo "    would run: sudo usermod -aG $w $owner"
     echo "    would run: sudo loginctl enable-linger $w"
   done
   if [ "$mode" != none ]; then
     [ "$mode" != password ] || tag=""
-    echo "    would run: sudo install -m 0440 <new content> /etc/sudoers.d/claude-nix-harness   ($owner ALL=(%agents) ${tag}ALL)"
-    echo "    would run: sudo visudo -cf /etc/sudoers.d/claude-nix-harness"
+    echo "    would run: sudo install -m 0440 <new content> /etc/sudoers.d/ai-jailer   ($owner ALL=(%agents) ${tag}ALL)"
+    echo "    would run: sudo visudo -cf /etc/sudoers.d/ai-jailer"
   fi
   for c in "${workers[@]}"; do
-    echo "    would run: sudo -u $prefix$c -i nix run $ref#harness -- bootstrap --no-root --yes --harness $ref"
+    echo "    would run: sudo -u $prefix$c -i nix run $ref#aj -- bootstrap --no-root --yes --jailer $ref"
   done
 }
 
@@ -171,7 +171,7 @@ main() {
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/../flake.nix" ]; then
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
   fi
-  ref="${HARNESS_REF:-${here:+path:$here}}"; ref="${ref:-github:bilibo/claude-nix-harness}"
+  ref="${AI_JAILER_REF:-${here:+path:$here}}"; ref="${ref:-github:bilibo/ai-jailer}"
 
   # shellcheck disable=SC1090
   [ -r "$os_release" ] && . "$os_release"
@@ -180,7 +180,7 @@ main() {
   elif [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null; then fedora_steps
   else installer_steps; fi
   [ "$CHECK" != 1 ] || worker_plan "$ref"
-  if [ "$CHECK" = 1 ]; then echo; echo "install.sh --check: nothing changed; next would be: nix run $ref#harness -- bootstrap"; exit 0; fi
+  if [ "$CHECK" = 1 ]; then echo; echo "install.sh --check: nothing changed; next would be: nix run $ref#aj -- bootstrap"; exit 0; fi
 
   # Nix-built tools look for the CA bundle at the NixOS and Debian paths or
   # where NIX_SSL_CERT_FILE points; Fedora keeps it elsewhere.
@@ -191,22 +191,22 @@ main() {
   export NIX_CONFIG="extra-experimental-features = nix-command flakes"
   if ! command -v nix >/dev/null || [ "$pending" = 1 ]; then
     [ "$DRY" = 1 ] || die "nix not on PATH after the install step"
-    echo; echo "install.sh --dry-run: next would be: nix run $ref#harness -- bootstrap ${pass[*]}"; exit 0
+    echo; echo "install.sh --dry-run: next would be: nix run $ref#aj -- bootstrap ${pass[*]}"; exit 0
   fi
   # Only in a real run: under --dry-run with nothing pending, the lists are empty.
   [ "$DRY" = 1 ] && done_steps=()
-  export HARNESS_REF="$ref" HARNESS_ROOT_PACKAGES="${need[*]}" HARNESS_ROOT_STEPS="${done_steps[*]}"
-  printf '\n==> nix run %s#harness -- bootstrap %s\n' "$ref" "${pass[*]}"
+  export AI_JAILER_REF="$ref" AI_JAILER_ROOT_PACKAGES="${need[*]}" AI_JAILER_ROOT_STEPS="${done_steps[*]}"
+  printf '\n==> nix run %s#aj -- bootstrap %s\n' "$ref" "${pass[*]}"
   # Bootstrap exits 1 when its report has a MISSING line. On a host that
   # gets tmux and claude from the checkout's shell that is the expected
   # state before init builds it (Ubuntu, 2026-10-21), so init still runs;
   # the exit code is kept so a real gap is not hidden.
   local rc=0
-  nix run "$ref#harness" -- bootstrap "${pass[@]}" || rc=$?
+  nix run "$ref#aj" -- bootstrap "${pass[@]}" || rc=$?
   if [ "$INIT" = 1 ] && [ -n "$here" ] && [ -e "$here/.envrc" ]; then
     [ "$rc" = 0 ] || echo "(bootstrap reported missing items; the checkout's shell may provide them, init runs anyway)"
-    printf '\n==> nix run %s#harness -- init %s   (this checkout: its shell, then the checks on its settings file and hook)\n' "$ref" "$here"
-    nix run "$ref#harness" -- init "$here" "${init_flags[@]}"
+    printf '\n==> nix run %s#aj -- init %s   (this checkout: its shell, then the checks on its settings file and hook)\n' "$ref" "$here"
+    nix run "$ref#aj" -- init "$here" "${init_flags[@]}"
   fi
   return "$rc"
 }

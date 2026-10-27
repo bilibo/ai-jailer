@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #   host-config-test.sh <direnv.toml> <tmux.conf>
 #
-# The two host settings files pkgs/ ships: harness bootstrap writes them
+# The two host settings files pkgs/ ships: aj bootstrap writes them
 # into the user's config on every host, so the settings the sandbox and
-# ccmux rely on are asserted here once.
+# ajmux rely on are asserted here once.
 set -uo pipefail
 toml="${1:?usage: host-config-test.sh <direnv.toml> <tmux.conf>}"
 tmux="${2:?usage: host-config-test.sh <direnv.toml> <tmux.conf>}"
@@ -17,6 +17,6 @@ check "warn timeout"        'grep -q "^warn_timeout = \"2m\"" "$toml"'
 check "no whitelist"        '! grep -qE "^\s*whitelist" "$toml"'
 check "direnv vars dropped" 'grep -q "set-environment -gu DIRENV_DIR$" "$tmux"'
 check "extended keys"       'grep -q "set -g extended-keys on" "$tmux"'
-check "project vars dropped" 'grep -q "set-environment -gu HARNESS_PROJECT_DIR$" "$tmux"'
+check "project vars dropped" 'grep -q "set-environment -gu AI_JAIL_PROJECT_DIR$" "$tmux"'
 echo "pass=$pass fail=$fail"
 [ "$fail" = 0 ]

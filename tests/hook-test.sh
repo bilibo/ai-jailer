@@ -253,33 +253,33 @@ block 'claude -p hi --add-dir=../other'
 allow 'claude -p "summarise the settings reference"'
 allow 'code --settings-file x'
 allow 'claude --version; echo --settings'
-# ccmux hands everything after its project to claude: the same flags, after
+# ajmux hands everything after its project to claude: the same flags, after
 # a <customer>/<repo>, a path or nothing (2026-10-24: these all passed).
-block 'ccmux cust/repo --bare'
-block 'ccmux cust/repo --setting-sources user'
-block 'ccmux cust/repo --dangerously-skip-permissions'
-block 'ccmux cust/repo --plugin-dir x'
-block 'ccmux cust/repo -p hi --settings=/tmp/loose.json'
-block 'ccmux ~/code/git/cust/repo --permission-mode bypassPermissions'
-block 'ccmux --add-dir /tmp/x'
-block 'ccmux -n cust/repo --bare'
-block "ccmux cust/repo '--bare'"
-block 'bash -c "ccmux cust/repo --bare"'
-block 'cd /tmp && env X=1 ccmux cust/repo --setting-sources=user'
-block 'nix run .#ccmux -- cust/repo --bare'
-block '/nix/store/x-ccmux/bin/ccmux cust/repo --bare'
+block 'ajmux cust/repo --bare'
+block 'ajmux cust/repo --setting-sources user'
+block 'ajmux cust/repo --dangerously-skip-permissions'
+block 'ajmux cust/repo --plugin-dir x'
+block 'ajmux cust/repo -p hi --settings=/tmp/loose.json'
+block 'ajmux ~/code/git/cust/repo --permission-mode bypassPermissions'
+block 'ajmux --add-dir /tmp/x'
+block 'ajmux -n cust/repo --bare'
+block "ajmux cust/repo '--bare'"
+block 'bash -c "ajmux cust/repo --bare"'
+block 'cd /tmp && env X=1 ajmux cust/repo --setting-sources=user'
+block 'nix run .#ajmux -- cust/repo --bare'
+block '/nix/store/x-ajmux/bin/ajmux cust/repo --bare'
 # A separator inside quotes or escaped does not end the arguments.
-block 'ccmux cust/repo -p "fix a; then b" --bare'
+block 'ajmux cust/repo -p "fix a; then b" --bare'
 block 'claude -p "a && b" --dangerously-skip-permissions'
 block 'claude -p a\; b --settings x.json'
-block 'ccmux cust/repo -p hi 2>&1 --bare'
+block 'ajmux cust/repo -p hi 2>&1 --bare'
 block 'claude -p hi &>/dev/null --settings x.json'
 allow 'claude -p hi 2>&1 | head; echo --bare'
-allow 'ccmux cust/repo --worktree'
-allow 'ccmux cust/repo -p "hi"'
-allow 'ccmux'
-allow 'ccmux -n cust/repo'
-allow 'ccmux cust/repo; echo --bare'
+allow 'ajmux cust/repo --worktree'
+allow 'ajmux cust/repo -p "hi"'
+allow 'ajmux'
+allow 'ajmux -n cust/repo'
+allow 'ajmux cust/repo; echo --bare'
 allow 'grep -rn "claude|--settings" .'
 # Backslashes: an in-word escape and a line continuation both normalise away.
 block 'git pu\sh origin main'
@@ -384,7 +384,7 @@ run 2 "$(edit_file "$HOME/.bashrc")"
 # Files that run code at the user's next shell, git or tmux start.
 run 2 "$(edit_file "$HOME/.zshrc")"
 run 2 "$(edit_file "$HOME/.gitconfig")"
-run 2 "$(edit_file "$HOME/.config/tmux/harness.conf")"
+run 2 "$(edit_file "$HOME/.config/tmux/ai-jailer.conf")"
 run 2 "$(edit_file "$HOME/.ssh/authorized_keys")"
 # `..` and relative paths are resolved before matching.
 run 2 "$(edit_file "$HOME/code/../.bashrc")"
@@ -423,8 +423,8 @@ run 2 "$(edit_file $IN/.git/hooks/pre-commit)"
 run 2 "$(edit_file $IN/.git/config)"
 run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$IN/.claude/hooks/x.sh\",\"content\":\"x\"}}"
 run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"NotebookEdit\",\"cwd\":\"$IN\",\"tool_input\":{\"notebook_path\":\"$IN/.envrc\"}}"
-# The harness's own shell snippet and the user's bin directory run code too.
-run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$HOME/.bashrc.d/claude-nix-harness.sh\",\"content\":\"x\"}}"
+# ai-jailer's own shell snippet and the user's bin directory run code too.
+run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$HOME/.bashrc.d/ai-jailer.sh\",\"content\":\"x\"}}"
 run 2 "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$IN\",\"tool_input\":{\"file_path\":\"$HOME/.local/bin/claude\",\"content\":\"x\"}}"
 # An edit through a symlink is judged by its target as well.
 ln_dir=$(mktemp -d)

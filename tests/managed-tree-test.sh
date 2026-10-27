@@ -2,7 +2,7 @@
 #   managed-tree-test.sh <managed tree>
 #
 # The managed tree (/etc/claude-code on a host): the hard rules that bind
-# every user, and the mod policy (docs/sessions.md section 5). The harness
+# every user, and the mod policy (docs/sessions.md section 5). ai-jailer
 # ships no mods since 2026-10-24, so the tree has no marketplace directory
 # and its settings register no marketplace and enable no plugin; the keys
 # that refuse every mod on a managed host are all there.

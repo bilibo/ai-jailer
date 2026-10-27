@@ -10,9 +10,9 @@
 # `fenced`: the file was generated with `readFence = true`; the read fence
 # checks replace the "no fence" check. `<repo-root>`: the path the file was
 # generated for, where its literal entries point; default /repo, the flake
-# fixtures' root. harness init passes the real repo.
+# fixtures' root. aj init passes the real repo.
 #
-# A `center` argument is still ignored, not an error: pkgs/harness/init.sh
+# A `center` argument is still ignored, not an error: pkgs/aj/init.sh
 # passes it until item C2 of the 2026-10-27 redesign removes the mode there.
 # shellcheck disable=SC2016  # the filters are jq, where $repo is a jq variable
 set -uo pipefail

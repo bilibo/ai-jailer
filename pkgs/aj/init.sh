@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-#   harness init <customer>/<repo> | <path> [--harness <flakeref>] [--force] [--no-shell]
+#   aj init <customer>/<repo> | <path> [--jailer <flakeref>] [--force] [--no-shell]
 #                [--dry-run] [--yes] [--verbose]
 #
 # Section 3 of the runbook as a subcommand. Renders the files a repo needs to
-# import the harness devenv module (devenv.yaml, devenv.nix, .envrc,
+# import the jail module (devenv.yaml, devenv.nix, .envrc,
 # .gitignore, .worktreeinclude, CLAUDE.md), then does the first shell entry
 # (direnv allow, approval of the files require_allowed names, which makes
 # devenv write .claude/settings.json) and runs the repo's static checks on
 # the result: project-settings-test.sh on the generated file, hook-test.sh on
 # the hook in the host's managed settings (the repo file registers none;
-# $HARNESS_MANAGED_SETTINGS overrides /etc/claude-code/managed-settings.json),
-# ccmux's resolution. No readable managed file is reported MISSING and init
+# $AI_JAILER_MANAGED_SETTINGS overrides /etc/claude-code/managed-settings.json),
+# ajmux's resolution. No readable managed file is reported MISSING and init
 # exits 1 after the settings test: the host enforces nothing. A repo whose
-# devenv.nix sets harness.enable = false loads with no settings file: init
+# devenv.nix sets ai-jail.enable = false loads with no settings file: init
 # says so and stops there, exit 0. A new directory under
-# $HARNESS_CODE_ROOT/<customer>/<repo> (default ~/code/git), or an existing
+# $AI_JAILER_CODE_ROOT/<customer>/<repo> (default ~/code/git), or an existing
 # repo given by path. Files that exist are left alone and reported; --force
-# overwrites the harness-owned ones (devenv.yaml, .envrc). .gitignore and
+# overwrites the jailer-owned ones (devenv.yaml, .envrc). .gitignore and
 # .worktreeinclude only gain the lines they lack; CLAUDE.md gains the
 # contract block if it has none. --dry-run prints the files it would write
 # and creates nothing; --verbose traces the shell step. devenv.yaml,
@@ -28,18 +28,18 @@
 # devenv.local.nix or devenv.local.yaml exists, so one stops the shell step
 # (exit 1) unless the repo keeps its own .envrc, where it is approved too.
 #
-# The harness input is the same ref bootstrap installs from: --harness, else
-# HARNESS_REF, else the receipt's. A `path:` checkout is the form for
-# developing the harness; a repo meant to outlive the checkout pins a git URL
-# instead: --harness github:bilibo/claude-nix-harness, which is also the
+# The ai-jailer input is the same ref bootstrap installs from: --jailer, else
+# AI_JAILER_REF, else the receipt's. A `path:` checkout is the form for
+# developing ai-jailer; a repo meant to outlive the checkout pins a git URL
+# instead: --jailer github:bilibo/ai-jailer, which is also the
 # default when none of them is set. A `path:/nix/store/...` ref makes init warn: garbage
 # collection removes it.
-# devenv.lock records the revision either way; `devenv update harness` moves
+# devenv.lock records the revision either way; `devenv update ai-jailer` moves
 # it. On a WSL host (binfmt WSLInterop, or WSL_DISTRO_NAME) the devenv.nix
-# gets harness.platform = "wsl", which hides /mnt/c and /run/WSL from the
+# gets ai-jail.platform = "wsl", which hides /mnt/c and /run/WSL from the
 # sandbox. On a host with no claude on PATH (the plain WSL host, whose
 # Claude Code is the VS Code extension's bundled binary) it gets
-# harness.claudeCode.enable = true, the CLI for tmux and ccmux sessions, and
+# ai-jail.claudeCode.enable = true, the CLI for tmux and ajmux sessions, and
 # devenv.yaml gets allow_unfree: true (claude-code is unfree); a claude on
 # PATH leaves both commented out. A PATH directory in the Nix store is a
 # shell's, not the host's (init run from inside a repo shell), and one under
@@ -47,35 +47,35 @@
 # shellcheck disable=SC2016  # single quotes are deliberate where direnv or bash must see the `$`
 set -euo pipefail
 
-# Run straight from a checkout (bash pkgs/harness/init.sh), the checkout is the ref.
-HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
-HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
-HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
-HARNESS_TESTS="${HARNESS_TESTS:-$HARNESS_DIR/tests}"
-WSL_MARKER="${HARNESS_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
+# Run straight from a checkout (bash pkgs/aj/init.sh), the checkout is the ref.
+AI_JAILER_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+AI_JAILER_REF="${AI_JAILER_REF:-path:$AI_JAILER_DIR}"
+AI_JAILER_REF_FROM="${AI_JAILER_REF_FROM:-checkout}"
+AI_JAILER_TESTS="${AI_JAILER_TESTS:-$AI_JAILER_DIR/tests}"
+WSL_MARKER="${AI_JAILER_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 FORCE=0; DRY=0; NO_SHELL=0; VERBOSE=0; YES=0; target=""
-usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
+usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --harness) HARNESS_REF="${2:?--harness needs a flake reference}"; HARNESS_REF_FROM=--harness; shift ;;
+    --jailer) AI_JAILER_REF="${2:?--jailer needs a flake reference}"; AI_JAILER_REF_FROM=--jailer; shift ;;
     --force) FORCE=1 ;;
     --dry-run) DRY=1 ;;
     --no-shell) NO_SHELL=1 ;;
     --verbose) VERBOSE=1 ;;
     --yes) YES=1 ;;
     -h|--help) usage; exit 0 ;;
-    -*) echo "harness init: unknown argument $1 (see --help)" >&2; exit 64 ;;
-    *) [ -z "$target" ] || { echo "harness init: one target only" >&2; exit 64; }; target="$1" ;;
+    -*) echo "aj init: unknown argument $1 (see --help)" >&2; exit 64 ;;
+    *) [ -z "$target" ] || { echo "aj init: one target only" >&2; exit 64; }; target="$1" ;;
   esac
   shift
 done
-[ -n "$target" ] || { echo "usage: harness init <customer>/<repo> | <path> (see --help)" >&2; exit 64; }
+[ -n "$target" ] || { echo "usage: aj init <customer>/<repo> | <path> (see --help)" >&2; exit 64; }
 
-root="${HARNESS_CODE_ROOT:-$HOME/code/git}"; root="${root%/}"
-die() { echo "harness init: $1" >&2; exit "${2:-1}"; }
+root="${AI_JAILER_CODE_ROOT:-$HOME/code/git}"; root="${root%/}"
+die() { echo "aj init: $1" >&2; exit "${2:-1}"; }
 note() { printf '%-10s %s\n' "$1" "$2"; }
 
-# The same rule as ccmux: <customer>/<repo> is relative to the code root,
+# The same rule as ajmux: <customer>/<repo> is relative to the code root,
 # anything else is a path.
 if [[ "$target" == */* && "$target" != /* && "$target" != .* ]]; then
   repo="$root/$target"; project="$target"
@@ -120,12 +120,12 @@ ensure_lines() { # ensure_lines <relpath> <line>...
   if [ "$added" = 0 ]; then note unchanged "$rel"; elif [ "$DRY" = 0 ]; then note "added to" "$rel"; fi
 }
 
-echo "harness init: $repo ($(if [ -n "$project" ]; then echo "project $project"; else echo "outside $root: ccmux needs an explicit path"; fi))"
-echo "harness:   $HARNESS_REF ($HARNESS_REF_FROM)"
+echo "aj init: $repo ($(if [ -n "$project" ]; then echo "project $project"; else echo "outside $root: ajmux needs an explicit path"; fi))"
+echo "jailer:    $AI_JAILER_REF ($AI_JAILER_REF_FROM)"
 platform_line='    # platform = "wsl";                # hides /mnt/c and /run/WSL from the sandbox'
 if [ -e "$WSL_MARKER" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; then
   platform_line='    platform = "wsl";                  # this host is WSL: /mnt/c and /run/WSL hidden from the sandbox'
-  note platform 'wsl (harness.platform in devenv.nix)'
+  note platform 'wsl (ai-jail.platform in devenv.nix)'
 fi
 # The host's claude, if any (header): the first on PATH outside the store
 # (NIX_STORE_DIR when Nix is relocated) and outside VS Code's server.
@@ -136,35 +136,35 @@ for d in "${path_dirs[@]}"; do
   if [ -f "$d/claude" ] && [ -x "$d/claude" ]; then host_claude="$d/claude"; break; fi
 done
 claude_line='    # claudeCode.enable = true;        # claude, tmux and jq in this shell, for a host without claude'
-unfree_line='# allow_unfree: true  # for harness.claudeCode.enable in devenv.nix: claude-code is unfree'
+unfree_line='# allow_unfree: true  # for ai-jail.claudeCode.enable in devenv.nix: claude-code is unfree'
 if [ -z "$host_claude" ]; then
-  claude_line='    claudeCode.enable = true;          # the CLI for tmux/ccmux sessions; the VS Code extension brings its own'
-  unfree_line='allow_unfree: true  # for harness.claudeCode.enable in devenv.nix: claude-code is unfree'
+  claude_line='    claudeCode.enable = true;          # the CLI for tmux/ajmux sessions; the VS Code extension brings its own'
+  unfree_line='allow_unfree: true  # for ai-jail.claudeCode.enable in devenv.nix: claude-code is unfree'
   note claude 'none on the host PATH: claudeCode.enable = true in devenv.nix, allow_unfree: true in devenv.yaml'
 else
   note claude "$host_claude on the host PATH: claudeCode.enable left commented out in devenv.nix"
 fi
-if [[ "$HARNESS_REF" == path:/nix/store/* ]]; then
-  note warn "devenv.yaml would pin a store path that garbage collection removes: pass --harness github:bilibo/claude-nix-harness or --harness path:<checkout>"
+if [[ "$AI_JAILER_REF" == path:/nix/store/* ]]; then
+  note warn "devenv.yaml would pin a store path that garbage collection removes: pass --jailer github:bilibo/ai-jailer or --jailer path:<checkout>"
 fi
 
-put devenv.yaml "# The harness module writes .claude/settings.json (the project layer: allow
-# rules, write protections, extra domains) at every shell entry. devenv.lock pins the harness revision;
-# \`devenv update harness\` moves it.
+put devenv.yaml "# The ai-jail module writes .claude/settings.json (the project layer: allow
+# rules, write protections, extra domains) at every shell entry. devenv.lock pins the ai-jailer revision;
+# \`devenv update ai-jailer\` moves it.
 inputs:
-  harness:
-    url: $HARNESS_REF
+  ai-jailer:
+    url: $AI_JAILER_REF
     flake: false
 imports:
-  - harness/devenv
+  - ai-jailer/devenv
 $unfree_line" owned
 
-put devenv.nix "# Project tools and harness options. Allow rules for this project go in
-# harness.settings here, proposed as a diff by an agent and committed by you,
-# never in .claude/settings.local.json (the hook refuses it). Every harness
+put devenv.nix "# Project tools and ai-jail options. Allow rules for this project go in
+# ai-jail.settings here, proposed as a diff by an agent and committed by you,
+# never in .claude/settings.local.json (the hook refuses it). Every ai-jail
 # option is listed, the unused ones commented out. Adding a tool, a
 # toolchain, a variable or a network host, and the \`direnv allow\` after
-# each change: https://github.com/bilibo/claude-nix-harness/blob/main/docs/project-devenv.md
+# each change: https://github.com/bilibo/ai-jailer/blob/main/docs/project-devenv.md
 { pkgs, ... }:
 {
   name = \"$name\";
@@ -175,7 +175,7 @@ put devenv.nix "# Project tools and harness options. Allow rules for this projec
   ];
   # languages.rust.enable = true;      # a toolchain; cargo's hosts go in extraAllowedDomains
   # env.ARM_TENANT_ID = \"...\";         # identifiers only; secrets stay in .env
-  harness = {
+  ai-jail = {
     # enable = false;                  # guard rails off for this repo: no rules file, hook or sandbox
     # readFence = true;                # hide the rest of \$HOME from sandboxed commands
     # extraAllowRead = [ \"~/.cargo\" ]; # with readFence: what the project reads under \$HOME
@@ -194,14 +194,14 @@ $claude_line
 # `use devenv` creates devenv.lock, then the three files are reported as
 # pending and the next `direnv allow` approves them (see the shell step below).
 put .envrc '# devenv imports devenv.local.nix and devenv.local.yaml with no `direnv allow`,
-# and an interpreter write the harness hook cannot see could create one; a
+# and an interpreter write the jailer hook cannot see could create one; a
 # sandbox deny on them broke every load (changelog 2026-10-22, roadmap 2.7).
 # So the load fails while either exists. direnv keeps no watches from a
 # failed load (direnv 2.38.2, 2026-10-26): after removing the file, `direnv
 # reload`.
 for f in devenv.local.nix devenv.local.yaml; do
   if [ -e "$f" ] || [ -L "$f" ]; then
-    echo "error: $f is refused in a harness repo (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" >&2
+    echo "error: $f is refused in a jail (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" >&2
     exit 1
   fi
 done
@@ -214,9 +214,9 @@ ensure_lines .gitignore '.devenv/' '.direnv/' '.claude/settings.json' '.claude/s
 # these files, so it has the repo's rules before devenv regenerates them.
 ensure_lines .worktreeinclude '.claude/settings.json'
 
-contract="## Environment contract (claude-nix-harness)
+contract="## Environment contract (ai-jailer)
 
-This repo is governed by claude-nix-harness. \`.claude/settings.json\` is
+This repo is governed by ai-jailer. \`.claude/settings.json\` is
 generated by the devenv module at every shell entry and carries the
 project's allow rules and the repo's write protections; the deny rules, the
 hook and the Bash sandbox come from the host's managed settings. Tools come
@@ -228,11 +228,11 @@ from the devenv shell (\`devenv.nix\`), not from the host.
   commits from their own terminal.
 - Never edit \`devenv.nix\`, \`devenv.yaml\`, \`devenv.lock\`, \`.envrc\` or
   anything under \`.claude/\`. A project allow rule goes in \`devenv.nix\`
-  (\`harness.settings.permissions.allow\`), proposed as a diff.
+  (\`ai-jail.settings.permissions.allow\`), proposed as a diff.
 - \`~/.ssh\`, \`~/.azure\` and other credential paths are hidden from your
   commands; clone over HTTPS."
 if [ -e "$repo/CLAUDE.md" ]; then
-  if grep -q -F 'claude-nix-harness' "$repo/CLAUDE.md"; then note unchanged CLAUDE.md
+  if grep -q -F 'ai-jailer' "$repo/CLAUDE.md"; then note unchanged CLAUDE.md
   elif [ "$DRY" = 1 ]; then note "would add" "CLAUDE.md: the environment contract"
   else printf '\n%s\n' "$contract" >>"$repo/CLAUDE.md"; note "added to" CLAUDE.md; fi
 else
@@ -251,10 +251,10 @@ if [ "$DRY" = 0 ] && ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$repo" init -q -b main; note "git init" "main (commit when ready; agents never do)"
 fi
 
-if [ "$DRY" = 1 ] || [ "$NO_SHELL" = 1 ]; then echo "harness init: files done; shell step skipped"; exit 0; fi
+if [ "$DRY" = 1 ] || [ "$NO_SHELL" = 1 ]; then echo "aj init: files done; shell step skipped"; exit 0; fi
 
 # ---------------------------------------------------------------- first shell entry
-for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH: run harness bootstrap first (or --no-shell)" 69; done
+for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH: run aj bootstrap first (or --no-shell)" 69; done
 [ "$VERBOSE" = 0 ] || set -x
 v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.38 ] || die "direnv $v is older than 2.38 (require_allowed)" 69
 
@@ -274,7 +274,7 @@ done
 if [ -e "$repo/devenv.lock" ]; then foreign+=(devenv.lock); fi
 if [ ${#foreign[@]} -gt 0 ]; then
   for f in "${foreign[@]}"; do
-    printf '\n==> %s (not written by harness init)\n' "$repo/$f"
+    printf '\n==> %s (not written by aj init)\n' "$repo/$f"
     if [ "$f" = devenv.lock ]; then
       jq -r '.nodes | to_entries[] | select(.value.locked) | .value.locked as $l
         | "  \(.key): \($l.type):\($l.owner // "")\(if $l.owner then "/" else "" end)\($l.repo // $l.path // $l.url // "") @ \($l.rev // $l.narHash // "?")"' \
@@ -311,33 +311,33 @@ if [ -L "$settings" ] && [ -r "$settings" ] && [[ "$(readlink -f "$settings")" =
   note ok ".claude/settings.json -> $(readlink "$settings")"
 elif [ -L "$settings" ]; then
   die ".claude/settings.json is a dangling symlink (direnv reload rewrites it)"
-elif [ "$(direnv exec "$repo" "$BASH" -c 'printf %s "${DEVENV_ROOT:+loaded}${HARNESS_PROJECT:+ harness}"' 2>/dev/null)" = loaded ]; then
+elif [ "$(direnv exec "$repo" "$BASH" -c 'printf %s "${DEVENV_ROOT:+loaded}${AI_JAIL_PROJECT:+ jail}"' 2>/dev/null)" = loaded ]; then
   # The shell loaded and the module exported nothing: the repo owner turned
-  # the guard rails off (harness.enable = false), so there is nothing to check.
-  note off "the shell loads without the guard rails: harness.enable = false in devenv.nix (or devenv.yaml does not import harness/devenv)"
+  # the guard rails off (ai-jail.enable = false), so there is nothing to check.
+  note off "the shell loads without the guard rails: ai-jail.enable = false in devenv.nix (or devenv.yaml does not import ai-jailer/devenv)"
   exit 0
 else
   die ".claude/settings.json was not written: the devenv shell did not load (direnv status in $repo)"
 fi
 # The repo file registers no hook: the hook that enforces the rules is the
 # one in the host's managed settings, so that is the one unit-tested.
-managed="${HARNESS_MANAGED_SETTINGS:-/etc/claude-code/managed-settings.json}"
-[ -r "$managed" ] || note MISSING "no managed settings at $managed: this host enforces nothing (harness bootstrap from the harness checkout's devenv shell)"
-bash "$HARNESS_TESTS/project-settings-test.sh" "$settings" "$repo" || die "the generated settings file fails the harness checks"
+managed="${AI_JAILER_MANAGED_SETTINGS:-/etc/claude-code/managed-settings.json}"
+[ -r "$managed" ] || note MISSING "no managed settings at $managed: this host enforces nothing (aj bootstrap from the ai-jailer checkout's devenv shell)"
+bash "$AI_JAILER_TESTS/project-settings-test.sh" "$settings" "$repo" || die "the generated settings file fails the aj checks"
 [ -r "$managed" ] || exit 1
 hook=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$managed")
-bash "$HARNESS_TESTS/hook-test.sh" "$hook" || die "the managed hook fails the unit tests: $hook"
-# ccmux -n prints the session line, then where the window's claude comes
+bash "$AI_JAILER_TESTS/hook-test.sh" "$hook" || die "the managed hook fails the unit tests: $hook"
+# ajmux -n prints the session line, then where the window's claude comes
 # from: one note. Its error names what is missing.
-if res=$(direnv exec "$repo" ccmux -n 2>/dev/null); then note ok "ccmux -n: ${res//$'\n'/; }"
-else note warn "ccmux -n failed: $({ direnv exec "$repo" ccmux -n 2>&1 || true; } | grep -m1 '^ccmux:' || echo 'run it in the repo shell to see why')"; fi
+if res=$(direnv exec "$repo" ajmux -n 2>/dev/null); then note ok "ajmux -n: ${res//$'\n'/; }"
+else note warn "ajmux -n failed: $({ direnv exec "$repo" ajmux -n 2>&1 || true; } | grep -m1 '^ajmux:' || echo 'run it in the repo shell to see why')"; fi
 { set +x; } 2>/dev/null
 
 cat <<NEXT
 
 Ready. From your own terminal:
-  cd $repo && ccmux                                  # a session in the project's tmux session
+  cd $repo && ajmux                                  # a session in the project's tmux session
   cd $repo && claude -p 'list the tools on PATH'    # the runbook's smoke test
-  harness check $repo                               # the runbook's live checks (API calls)
+  aj check $repo                               # the runbook's live checks (API calls)
 In VS Code, open $repo; mkhl.direnv asks to allow once per devenv.nix/devenv.yaml/devenv.lock change.
 NEXT

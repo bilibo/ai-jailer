@@ -23,7 +23,7 @@ set -Euo pipefail
 PATH="@path@:${PATH:-}"
 trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 
-# Substituted by lib/hooks.nix from the harness.* options: 0 or 1.
+# Substituted by lib/hooks.nix from the ai-jail.* options: 0 or 1.
 ALLOW_LOCAL_COMMITS="@allowLocalCommits@"
 ALLOW_MEMORY_EDITS="@allowMemoryEdits@"
 
@@ -39,9 +39,9 @@ deny() { printf 'env-guard: %s\n' "$1" >&2; exit 2; }
 # says whether that .envrc is allowed without loading it, which covers an
 # edit since the last `direnv allow`. The export itself (0.2 s warm, seconds
 # after a change, measured 2026-10-23) runs only when the files direnv
-# watches in a harness repo, or the direnv and devenv binaries, differ from
+# watches in a jail, or the direnv and devenv binaries, differ from
 # the last good run, or when that run's DEVENV_PROFILE is gone from the
-# store; the record lives under ~/.cache/claude-nix-harness (no record, or
+# store; the record lives under ~/.cache/ai-jailer (no record, or
 # an unwritable cache, means the export runs every time). A refusal names
 # the first error line and what fixes it.
 check_env() {
@@ -54,7 +54,7 @@ check_env() {
   [ "$(jq -r '.state.foundRC.allowed // 0' <<<"$st")" = 0 ] \
     || deny "direnv export failed in $dir: $rcpath is blocked. Run \`direnv allow\` to approve its content (fix: direnv allow $dir)"
   fp=$( (cd "$dir" && stat -c '%n %Y %s %i' .envrc devenv.nix devenv.yaml devenv.lock devenv.local.nix devenv.local.yaml 2>/dev/null; readlink -f "$(command -v direnv)" "$(command -v devenv 2>/dev/null || echo /dev/null)" 2>/dev/null) ) || true
-  cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-nix-harness/direnv-ok"
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/ai-jailer/direnv-ok"
   key=$(printf '%s' "$dir" | sha256sum | cut -c1-16)
   if [ -r "$cache/$key" ]; then
     profile=$(head -n 1 "$cache/$key"); stored=$(tail -n +2 "$cache/$key")
@@ -71,7 +71,7 @@ check_env() {
     # The template .envrc refuses to load while a devenv.local.* exists
     # (2026-10-26); `devenv shell` skips the .envrc and would import it.
     if grep -q 'is blocked' <<<"$err"; then fix="direnv allow $dir"
-    elif grep -q 'is refused in a harness repo' <<<"$err"; then fix="remove the devenv.local file from your own terminal; it is not the agent's to remove"
+    elif grep -q 'is refused in a jail' <<<"$err"; then fix="remove the devenv.local file from your own terminal; it is not the agent's to remove"
     else fix="the devenv error (devenv shell in $dir shows it)"; fi
     deny "direnv export failed in $dir: ${first:-exit $rc} (fix: $fix)"
   fi
@@ -287,14 +287,14 @@ ENV
         # 6. nested sessions that would skip the rules. These flags replace
         # or bypass settings for the child session (`--bare` skips every
         # hook); `--add-dir` widens the child's working
-        # directories, which the sandbox lets it write. `ccmux [<project>]`
+        # directories, which the sandbox lets it write. `ajmux [<project>]`
         # hands the rest to `claude`. Arguments stop at a command separator
         # so a flag in a later command does not count; one inside quotes or
         # after a backslash is text (`-p "a; b" --bare`), as is the `&` of
         # `2>&1` and `&>`, so this rule reads the command with those turned
         # into `_`, which only adds matches. A renamed copy of the binary
         # gets past this; the sandbox is the layer for that.
-        launcher='claude|ccmux'
+        launcher='claude|ajmux'
         q=$(printf '%s' "$cmd" | jq -Rsj 'gsub("(?<q>\"(\\\\.|[^\"\\\\])*\"|\\x27[^\\x27]*\\x27|\\\\.|>&|&>)"; .q | gsub("[;&|]"; "_"))' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
         re="(^|[^a-z])($launcher)( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions|add-dir)( |=|$)"
         [[ "${q,,}" =~ $re ]] && deny "claude launch flag blocked"

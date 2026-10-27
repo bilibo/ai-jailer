@@ -1,9 +1,9 @@
 # The project devenv
 
-For whoever looks after a harness repo and has not used Nix. Every repo
-under the harness gets its tools from a devenv shell: direnv enters it
+For whoever looks after a jail and has not used Nix. Every repo
+under the jailer gets its tools from a devenv shell: direnv enters it
 when you `cd` into the repo, and the same shell wraps every Bash command
-Claude Code runs there. `harness init` writes the files below, and you
+Claude Code runs there. `aj init` writes the files below, and you
 change one of them, `devenv.nix`, when the project needs something new.
 Everything below is a change to `devenv.nix` or `devenv.yaml`.
 
@@ -11,16 +11,16 @@ Everything below is a change to `devenv.nix` or `devenv.yaml`.
 
 | File | What it is | Who edits it |
 |---|---|---|
-| `devenv.nix` | The project's tools, toolchains, environment variables and harness options | you, by hand; an agent proposes the diff |
-| `devenv.yaml` | Where the inputs come from (the harness, nixpkgs), plus `allow_unfree` | you, rarely; `harness init --force` rewrites it |
+| `devenv.nix` | The project's tools, toolchains, environment variables and ai-jail options | you, by hand; an agent proposes the diff |
+| `devenv.yaml` | Where the inputs come from (ai-jailer, nixpkgs), plus `allow_unfree` | you, rarely; `aj init --force` rewrites it |
 | `devenv.lock` | The exact revision of every input, nixpkgs included. Commit it | nobody: `devenv update` writes it |
-| `.envrc` | Makes direnv load the shell, ask before loading changes, and refuse a `devenv.local.*` (below) | nobody: `harness init --force` rewrites it |
+| `.envrc` | Makes direnv load the shell, ask before loading changes, and refuse a `devenv.local.*` (below) | nobody: `aj init --force` rewrites it |
 | `.claude/settings.json` | The project layer of the rules Claude Code runs under (your allow rules, extra deny rules and hosts, the repo's protected paths), generated at every shell entry, gitignored; absent with the guard rails off (below). The deny rules, hook and sandbox come from the host's managed settings, not from this file | nobody; edits are overwritten |
 
 There is no per-developer file beside them. devenv imports a
 `devenv.local.nix` or `devenv.local.yaml` without a `direnv allow`, so
 the `.envrc` refuses to load while either exists (`error: devenv.local.nix
-is refused in a harness repo`): remove it and `direnv reload`, or move
+is refused in a jail`): remove it and `direnv reload`, or move
 its content into `devenv.nix`.
 
 ## How a change lands
@@ -115,7 +115,7 @@ only: `devenv.nix` is committed and the agent reads it. Secrets stay in
 A command the project runs all the time can skip the permission prompt:
 
 ```nix
-  harness.settings.permissions.allow = [
+  ai-jail.settings.permissions.allow = [
     "Bash(terraform plan *)"
     "Bash(cargo test *)"
   ];
@@ -127,15 +127,15 @@ rule, the hook or the sandbox refuses, so a refused command stays refused
 however it is allowed here. The rules apply to everyone who uses the
 repo.
 
-To refuse more, add to the harness's list instead of replacing it:
+To refuse more, add to the jailer's list instead of replacing it:
 
 ```nix
-  harness.extraDeny = [ "Bash(az devops *)" ];
+  ai-jail.extraDeny = [ "Bash(az devops *)" ];
 ```
 
-Never set `harness.settings.permissions.deny` or a list under
-`harness.settings.sandbox`: `harness.settings` is merged into the
-generated file key by key, and a list there replaces the harness's own,
+Never set `ai-jail.settings.permissions.deny` or a list under
+`ai-jail.settings.sandbox`: `ai-jail.settings` is merged into the
+generated file key by key, and a list there replaces ai-jailer's own,
 the full deny set or the network allowlist with it. `extraDeny` and
 `extraAllowedDomains` are the options that add.
 
@@ -147,21 +147,21 @@ registries trivy uses. Anything else fails with a connection error naming
 the host. A project that needs more lists them:
 
 ```nix
-  harness.extraAllowedDomains = [ "dev.azure.com" "index.crates.io" "static.crates.io" ];
+  ai-jail.extraAllowedDomains = [ "dev.azure.com" "index.crates.io" "static.crates.io" ];
 ```
 
 Whether a managed sandbox honours a repo's list, merges it with the
 managed base list or ignores it is not settled: check V2 in the runbook
 (section 5) is pending as of 2026-10-27. Until it has run, treat this
 option as unconfirmed, and expect to put the host in the host-wide
-`extraAllowedDomains` of the harness checkout's `host.nix` if it turns out
+`extraAllowedDomains` of the ai-jailer checkout's `host.nix` if it turns out
 to be ignored. Hosts not on either list prompt in an interactive session and are
 refused in a `-p` one.
 
-## The other harness options
+## The other ai-jail options
 
-The `devenv.nix` `harness init` writes lists every option, the unused
-ones commented out; `devenv/devenv.nix` in the harness has the full
+The `devenv.nix` `aj init` writes lists every option, the unused
+ones commented out; `devenv/devenv.nix` in the jailer has the full
 descriptions.
 
 | Option | What it does |
@@ -169,8 +169,8 @@ descriptions.
 | `enable = false` | the guard rails off for this repo (next section) |
 | `readFence`, `extraAllowRead` | hide the rest of `$HOME` from sandboxed commands, and say what the project still reads there |
 | `allowConnectors` | the claude.ai account's connectors load in this repo's sessions |
-| `platform = "wsl"` | hide `/mnt/c` and `/run/WSL` from the sandbox; `harness init` sets it on a WSL host |
-| `claudeCode.enable` | Claude Code's CLI, tmux and jq from this shell, for `ccmux` and tmux sessions on a host with no `claude` of its own (default false); needs `allow_unfree: true`. `harness init` turns both on when it finds no `claude` on the host's `PATH`; with one there, it leaves them commented out |
+| `platform = "wsl"` | hide `/mnt/c` and `/run/WSL` from the sandbox; `aj init` sets it on a WSL host |
+| `claudeCode.enable` | Claude Code's CLI, tmux and jq from this shell, for `ajmux` and tmux sessions on a host with no `claude` of its own (default false); needs `allow_unfree: true`. `aj init` turns both on when it finds no `claude` on the host's `PATH`; with one there, it leaves them commented out |
 | `extraDeny`, `extraAllowedDomains`, `settings` | add deny rules, sandbox hosts and allow rules (above) |
 | `managedSettingsPath` | where the host keeps the managed settings (`/etc/claude-code/managed-settings.json`); every shell entry warns when it cannot be read |
 
@@ -182,17 +182,17 @@ module); a repo no longer sets the first two.
 ## Turning the guard rails off (and on)
 
 A repo that should not run under the guard rails turns them off with one
-line in `devenv.nix`. One that `harness init` wrote since 2026-10-24 has
-it, commented out, first in the `harness = { ... }` block: remove the
+line in `devenv.nix`. One that `aj init` wrote since 2026-10-24 has
+it, commented out, first in the `ai-jail = { ... }` block: remove the
 `#`. In an older one, add it there:
 
 ```nix
-  harness = {
+  ai-jail = {
     enable = false;
   };
 ```
 
-Outside that block the same line is `harness.enable = false;`. Then
+Outside that block the same line is `ai-jail.enable = false;`. Then
 `direnv allow` in the repo (step 3 above). From the next shell entry:
 
 - `.claude/settings.json` is gone: devenv removes the link it wrote
@@ -200,13 +200,13 @@ Outside that block the same line is `harness.enable = false;`. Then
   Sessions started in the repo lose the project layer only: your allow
   rules, extra deny rules and hosts, and the literal protected paths. The
   host's managed settings (deny rules, hook, sandbox) still apply.
-- Every shell entry says so: `harness: guard rails off for this repo
-  (harness.enable = false in devenv.nix)`.
-- The tools stay: `packages`, toolchains, `env.` variables, `ccmux`, and
-  Claude Code itself with `claudeCode.enable`. The other harness options
+- Every shell entry says so: `ai-jail: guard rails off for this repo
+  (ai-jail.enable = false in devenv.nix)`.
+- The tools stay: `packages`, toolchains, `env.` variables, `ajmux`, and
+  Claude Code itself with `claudeCode.enable`. The other ai-jail options
   stay in the file and do nothing until the rails are back on.
-- `harness init` on the repo reports `off` after the first shell entry
-  and checks nothing; `harness check` says it is not a harness repo.
+- `aj init` on the repo reports `off` after the first shell entry
+  and checks nothing; `aj check` says it is not a jail.
 
 A session that was already open may keep what it loaded: start new
 ones after the change, either way.
@@ -214,7 +214,7 @@ ones after the change, either way.
 An agent cannot flip the switch. It is a line in `devenv.nix`, and the
 deny rules and the hook refuse an agent's edits to that file (step 1
 above), as for every other line in it; one that could write the file
-could already loosen the rules through `harness.settings`, so the switch
+could already loosen the rules through `ai-jail.settings`, so the switch
 opens nothing new. A change to `devenv.nix` you did not make still shows
 up as `require approval` at the next `cd`.
 

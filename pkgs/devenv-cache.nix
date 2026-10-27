@@ -1,6 +1,6 @@
 # The devenv binary cache, for the root nix.conf. The single source:
-# pkgs/harness.nix exports it to bootstrap (HARNESS_DEVENV_CACHE and
-# HARNESS_DEVENV_KEY); scripts/install.sh keeps a literal copy because it
+# pkgs/aj.nix exports it to bootstrap (AI_JAILER_DEVENV_CACHE and
+# AI_JAILER_DEVENV_KEY); scripts/install.sh keeps a literal copy because it
 # runs before Nix exists.
 {
   url = "https://devenv.cachix.org";

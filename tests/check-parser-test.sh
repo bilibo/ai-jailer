@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#   check-parser-test.sh <path-to-harness> <fixtures-dir>
+#   check-parser-test.sh <path-to-aj> <fixtures-dir>
 #
-# `harness check --parse` over two saved stream-json transcripts: what the
+# `aj check --parse` over two saved stream-json transcripts: what the
 # verdicts see is tool output only. (a) the model's prose claims a denial
 # and even quotes the hook's message, the command's description echoes it,
 # but the tool result is the file's content: the refusal pattern must not
@@ -9,18 +9,18 @@
 # pattern must match. The pattern is check.sh's `blocked` plus the hook's
 # own message, as the credential case expects it.
 #
-# Then `harness check --dry-run` on fake repos, one per sandbox state. Every
+# Then `aj check --dry-run` on fake repos, one per sandbox state. Every
 # case is listed in each, none skipped, including sudo-text and home-fence; a
 # repo file with the sandbox off draws one warning and changes nothing else; a
 # masked settings file (/dev/null) draws none. Last, which claude the
 # sessions would run (stub direnv), and the exit 69 when there is none.
 set -uo pipefail
-harness="${1:?usage: check-parser-test.sh <harness> <fixtures-dir>}"
-fixtures="${2:?usage: check-parser-test.sh <harness> <fixtures-dir>}"
+aj="${1:?usage: check-parser-test.sh <aj> <fixtures-dir>}"
+fixtures="${2:?usage: check-parser-test.sh <aj> <fixtures-dir>}"
 pass=0; fail=0
 blocked='env-guard:|denied|Read-only file system|not permitted'
 
-parse() { out=$("$harness" check --parse "$fixtures/$1" 2>&1); rc=$?; }
+parse() { out=$("$aj" check --parse "$fixtures/$1" 2>&1); rc=$?; }
 check() { # check <description> <want-regex>
   if [[ "$out" =~ $2 ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: $1 (/$2/ not in: $out)"; fi
 }
@@ -40,7 +40,7 @@ check  "the hook's refusal is seen"           'env-guard: credential file access
 check  "the refusal matches the pattern"      "$blocked"
 refute "the model's comment not seen"         'the file was not read'
 
-out=$("$harness" check --parse "$fixtures/does-not-exist.jsonl" 2>&1); rc=$?
+out=$("$aj" check --parse "$fixtures/does-not-exist.jsonl" 2>&1); rc=$?
 if [ "$rc" = 66 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a missing transcript exits $rc, want 66"; fi
 
 # --dry-run by sandbox state. No direnv on PATH, so no claude is resolved
@@ -52,9 +52,9 @@ fake_repo() { # fake_repo <name> <settings JSON | @symlink target>
   mkdir -p "$tmp/$1/.claude"; : >"$tmp/$1/.envrc"
   case "$2" in @*) ln -s "${2#@}" "$tmp/$1/.claude/settings.json" ;; *) printf '%s\n' "$2" >"$tmp/$1/.claude/settings.json" ;; esac
 }
-dry_run() { # dry_run <name> [VAR=value...]: harness check --dry-run on the fake repo; sets out and rc
+dry_run() { # dry_run <name> [VAR=value...]: aj check --dry-run on the fake repo; sets out and rc
   local r="$tmp/$1"; shift
-  out=$(env -i HOME="$tmp" PATH=/var/empty "$@" "$harness" check --dry-run "$r" 2>&1); rc=$?
+  out=$(env -i HOME="$tmp" PATH=/var/empty "$@" "$aj" check --dry-run "$r" 2>&1); rc=$?
 }
 all_listed() { # all_listed <label>: every case listed to run, none skipped
   local c
@@ -89,7 +89,7 @@ refute "masked file: no warning" 'warn  '
 # does not load, a host claude outside the store. None: the dry run says so
 # and still lists; a real run exits 69 before any session. The stub direnv
 # puts <repo>/.shell/bin first on PATH, as a devenv shell with
-# harness.claudeCode.enable does, and fails like an .envrc not yet allowed
+# ai-jail.claudeCode.enable does, and fails like an .envrc not yet allowed
 # where <repo>/.blocked exists.
 mkdir -p "$tmp/dbin" "$tmp/hostbin" "$tmp/store/abc-claude-code/bin" "$tmp/cli/.shell/bin"
 fake_repo cli '{"sandbox":{"enabled":true}}'
@@ -104,7 +104,7 @@ PATH="$d/.shell/bin:$PATH" exec "$@"
 EOF
 chmod +x "$tmp/dbin/direnv"
 other="$tmp/store/abc-claude-code/bin" # another shell's claude, by NIX_STORE_DIR
-nocli="; harness\\.claudeCode\\.enable = true in $tmp/[a-z]+/devenv\\.nix puts claude in its shell \\(with allow_unfree: true in devenv\\.yaml\\), then direnv allow"
+nocli="; ai-jail\\.claudeCode\\.enable = true in $tmp/[a-z]+/devenv\\.nix puts claude in its shell \\(with allow_unfree: true in devenv\\.yaml\\), then direnv allow"
 dry_run work DEVENV_ROOT="$tmp/work" PATH="$other" NIX_STORE_DIR="$tmp/store"
 check "own shell: its claude"            "claude: $other/claude \\(PATH, the repo's shell\\)"
 dry_run cli PATH="$other:$tmp/dbin" NIX_STORE_DIR="$tmp/store"
@@ -119,9 +119,9 @@ check "not loading: warned"              "warn  $tmp/blocked's devenv shell does
 dry_run work PATH="$other" NIX_STORE_DIR="$tmp/store"
 check "only another shell's: none"       "claude: none \\(no claude on the host PATH, and no direnv on PATH to ask $tmp/work's devenv shell${nocli}\\)"
 check "none: the dry run still lists"    'dry run, no session started, 0 skipped'
-real_run() { # real_run <name> [VAR=value...]: harness check on the fake repo, sessions and all; only where no claude resolves
+real_run() { # real_run <name> [VAR=value...]: aj check on the fake repo, sessions and all; only where no claude resolves
   local r="$tmp/$1"; shift
-  out=$(env -i HOME="$tmp" PATH=/var/empty "$@" "$harness" check "$r" 2>&1); rc=$?
+  out=$(env -i HOME="$tmp" PATH=/var/empty "$@" "$aj" check "$r" 2>&1); rc=$?
 }
 for c in "work PATH=$tmp/dbin|no claude in $tmp/work's devenv shell or on the host PATH" \
          "blocked PATH=$tmp/dbin|no claude on the host PATH, and $tmp/blocked's devenv shell does not load \\(.*direnv allow $tmp/blocked\\)" \
@@ -129,7 +129,7 @@ for c in "work PATH=$tmp/dbin|no claude in $tmp/work's devenv shell or on the ho
   read -r -a a <<<"${c%%|*}"
   real_run "${a[@]}"
   if [ "$rc" = 69 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: no claude (${c%%|*}) exits $rc, want 69: $out"; fi
-  check  "no claude (${a[0]}): the error"         "^harness check: ${c#*|}${nocli}$"
+  check  "no claude (${a[0]}): the error"         "^aj check: ${c#*|}${nocli}$"
   refute "no claude (${a[0]}): no session started" 'transcripts:'
 done
 

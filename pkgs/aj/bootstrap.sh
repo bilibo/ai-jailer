@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#   harness bootstrap [--no-root] [--no-profile] [--trusted-user]
+#   aj bootstrap [--no-root] [--no-profile] [--trusted-user]
 #                     [--workers <a,b,...>] [--worker <name>] [--owner <login>]
 #                     [--owner-sudo nopasswd|password|none]
-#                     [--code-root <dir>] [--harness <flakeref>]
-#   harness upgrade   [the bootstrap flags]
-#   harness doctor    [--code-root <dir>]
-#   harness reset     [--no-root]
+#                     [--code-root <dir>] [--jailer <flakeref>]
+#   aj upgrade   [the bootstrap flags]
+#   aj doctor    [--code-root <dir>]
+#   aj reset     [--no-root]
 #   each also takes --dry-run, --yes, --verbose
 #
 # Takes a Linux host that has Nix (scripts/install.sh puts it there: on
@@ -13,13 +13,13 @@
 # nix-installer; NixOS has its own) and Claude Code to the shape of the
 # README: the host-wide managed rules at /etc/claude-code (the flake's
 # `managed` package, linked there), optionally one Linux user per customer,
-# direnv >= 2.38, devenv, ccmux and harness from this flake (`nix profile
+# direnv >= 2.38, devenv, ajmux and aj from this flake (`nix profile
 # add`, pinned by flake.lock), and the user-side configuration: direnv.toml,
-# the tmux rules, the direnv hook for bash and zsh, HARNESS_CODE_ROOT, the
+# the tmux rules, the direnv hook for bash and zsh, AI_JAILER_CODE_ROOT, the
 # session PATH for GUI-launched VS Code, mkhl.direnv. One route on every
-# Linux, run from the harness checkout's devenv shell (HARNESS_REF is the
+# Linux, run from the ai-jailer checkout's devenv shell (AI_JAILER_REF is the
 # checkout there, so the rules and this CLI come from one revision).
-# scripts/install.sh does the root steps `nix run` needs, then runs `harness
+# scripts/install.sh does the root steps `nix run` needs, then runs `aj
 # bootstrap`, which finds them done and does the rest.
 #
 # NixOS (/etc/NIXOS, or ID=nixos in os-release: the marker is not visible
@@ -28,34 +28,34 @@
 # written (a store symlink the system configuration owns): the nix.settings
 # block is printed where flakes or the devenv cache are missing. The
 # user-namespace sysctl is printed as a boot.kernel.sysctl option, not
-# written. No sudoers rule: /etc/sudoers has no @includedir there, so ccmux
+# written. No sudoers rule: /etc/sudoers has no @includedir there, so ajmux
 # hands over with whatever sudo the owner has (--owner-sudo is ignored with a
 # note). The worker users come from useradd, which holds only while
 # users.mutableUsers is true (the default; nothing here can read it): a
-# rebuild with it false removes them, and `harness doctor` reports a worker
+# rebuild with it false removes them, and `aj doctor` reports a worker
 # the receipt names but the host lacks. A user file that is a symlink into
 # the Nix store is home-manager's: it is skipped and the option that sets it
 # is printed; the rest is written as on any host. Independently of
 # detection, root_write refuses any target that resolves into the store. WSL
 # (binfmt WSLInterop, or WSL_DISTRO_NAME) links the `managed-wsl` tree (the
 # Windows side hidden from the sandbox) and is reported in the host line;
-# `harness init` sets harness.platform = "wsl" there.
+# `aj init` sets ai-jail.platform = "wsl" there.
 #
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
-# harness ref's current flake.lock (and relinks /etc/claude-code when the
+# ai-jailer ref's current flake.lock (and relinks /etc/claude-code when the
 # ref's rules changed). scripts/install.sh owns the root steps that come
 # before Nix (dnf on Fedora, the SELinux label, the nix-daemon socket); root
 # is needed here for the steps below. All go through sudo and say what they
 # do first; --no-root skips them (and with them --workers); --no-profile
-# skips the `nix profile` step for a host that gets direnv, devenv and ccmux
+# skips the `nix profile` step for a host that gets direnv, devenv and ajmux
 # some other way (the README's "your own configuration"). `doctor` changes
 # nothing and reports every prerequisite, `claude doctor`, the managed rules,
-# the worker accounts and, run in a harness repo, the repo's settings symlink
-# and direnv approval; exit 1 when one the harness needs is missing. claude
+# the worker accounts and, run in a jail, the repo's settings symlink
+# and direnv approval; exit 1 when one ai-jailer needs is missing. claude
 # and tmux are not among them: no host claude is an info line (the VS Code
-# extension brings its own, a repo's harness.claudeCode.enable the CLI), no
-# tmux a warning (ccmux brings its own; attaching by hand needs one). That is
+# extension brings its own, a repo's ai-jail.claudeCode.enable the CLI), no
+# tmux a warning (ajmux brings its own; attaching by hand needs one). That is
 # the host half of the runbook's verification section. --dry-run prints every
 # step and the command it would run, runs none of them and never calls sudo;
 # --verbose prints each command first.
@@ -63,7 +63,7 @@
 # Root steps, in this order:
 #  - /etc/nix/nix.conf: the devenv cache (also flakes where the installer
 #    left them off). DEVENV_CACHE and DEVENV_KEY come from
-#    pkgs/devenv-cache.nix through pkgs/harness.nix.
+#    pkgs/devenv-cache.nix through pkgs/aj.nix.
 #  - The user-namespace setting the Claude Code sandbox cannot run without,
 #    where the kernel confines unprivileged user namespaces. Ubuntu 23.10 and
 #    later do it through AppArmor (kernel.apparmor_restrict_unprivileged_userns
@@ -94,16 +94,16 @@
 #    guarded, so a second run runs none of them. The customers are recorded in
 #    the receipt (root.workers).
 #  - With --workers, unless --owner-sudo none, and never on NixOS:
-#    /etc/sudoers.d/claude-nix-harness holding `<owner> ALL=(%agents)
+#    /etc/sudoers.d/ai-jailer holding `<owner> ALL=(%agents)
 #    NOPASSWD: ALL` (`password` drops NOPASSWD:), checked with `visudo -cf`;
 #    a file that fails the check is removed and the run stops. --owner is the
-#    login (default $USER). This is the rule ccmux needs to hand a session to
+#    login (default $USER). This is the rule ajmux needs to hand a session to
 #    a worker.
-# Then, per worker, `sudo -u w-c -i nix run <ref>#harness -- bootstrap
-# --no-root --yes --harness <ref>`: the profile packages and the user steps
+# Then, per worker, `sudo -u w-c -i nix run <ref>#aj -- bootstrap
+# --no-root --yes --jailer <ref>`: the profile packages and the user steps
 # below, as that user, plus a git identity default (user.name "Claude (c)",
-# user.email claude-c@<host>.invalid) where none is set. --harness is passed
-# because `sudo -i` drops HARNESS_REF. A `path:` ref under the owner's home
+# user.email claude-c@<host>.invalid) where none is set. --jailer is passed
+# because `sudo -i` drops AI_JAILER_REF. A `path:` ref under the owner's home
 # is unreadable to a worker (0700 homes), so it is prefetched into the store
 # once (`nix flake prefetch`) and the worker gets that store path, the same
 # revision. A failure there is a warning: the root steps are already done.
@@ -115,8 +115,8 @@
 # user-scope settings block (strictAllowlist went with it). An old command
 # line fails with "unknown argument".
 #
-# The harness ref (what `nix profile add` installs from): --harness, else
-# HARNESS_REF, else the receipt's, else github:bilibo/claude-nix-harness. A `path:/nix/store/...` ref warns: a
+# The ai-jailer ref (what `nix profile add` installs from): --jailer, else
+# AI_JAILER_REF, else the receipt's, else github:bilibo/ai-jailer. A `path:/nix/store/...` ref warns: a
 # later upgrade cannot move it.
 #
 # --trusted-user adds the owner (you) to Nix's trusted-users. Not needed: the
@@ -130,10 +130,10 @@
 # prompts (2026-10-22, changelog); a copy an earlier bootstrap wrote is
 # removed.
 #
-# The receipt, ~/.local/state/claude-nix-harness/receipt.json, lists what
+# The receipt, ~/.local/state/ai-jailer/receipt.json, lists what
 # bootstrap put on the host: profile packages, files (whole files, marker
 # blocks, merged keys), dnf packages, root steps and worker customers, the
-# VS Code extension, the harness ref and revision. Each bootstrap and upgrade
+# VS Code extension, the ai-jailer ref and revision. Each bootstrap and upgrade
 # adds to it. Receipts written before 2026-10-27 may list the strictAllowlist
 # and sync keys of ~/.claude/settings.json; reset still strips them.
 #
@@ -149,23 +149,23 @@
 # shellcheck disable=SC1091,SC2015,SC2016,SC2088  # system files are not inputs; `x && ok || miss` reports, ok never fails; jq filters go through jq_edit; ~ in messages is text
 set -euo pipefail
 
-CMD="${HARNESS_CMD:-bootstrap}"   # bootstrap, upgrade, doctor or reset: pkgs/harness.nix sets it
+CMD="${AI_JAILER_CMD:-bootstrap}"   # bootstrap, upgrade, doctor or reset: pkgs/aj.nix sets it
 NO_ROOT=0; NO_PROFILE=0; TRUSTED_USER=0; YES=0; DRY_RUN=0; VERBOSE=0
 WORKERS=()   # customers (--workers); the Linux user of customer c is $WORKER_PREFIX$c
 OWNER="${USER:-$(id -un)}"; OWNER_SUDO=nopasswd
-WORKER_PREFIX="${HARNESS_WORKER_PREFIX:-w-}"
-CODE_ROOT="${HARNESS_CODE_ROOT:-$HOME/code/git}"
-# Run straight from a checkout (bash pkgs/harness/bootstrap.sh), the checkout is the ref.
-HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
-HARNESS_REF="${HARNESS_REF:-path:$HARNESS_DIR}"
-HARNESS_REF_FROM="${HARNESS_REF_FROM:-checkout}"
-usage() { sed -n '/^#   harness /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
-ORIG_ARGS=("$@")   # upgrade hands them to the upgraded harness (handover_steps)
+WORKER_PREFIX="${AI_JAILER_WORKER_PREFIX:-w-}"
+CODE_ROOT="${AI_JAILER_CODE_ROOT:-$HOME/code/git}"
+# Run straight from a checkout (bash pkgs/aj/bootstrap.sh), the checkout is the ref.
+AI_JAILER_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+AI_JAILER_REF="${AI_JAILER_REF:-path:$AI_JAILER_DIR}"
+AI_JAILER_REF_FROM="${AI_JAILER_REF_FROM:-checkout}"
+usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
+ORIG_ARGS=("$@")   # upgrade hands them to the upgraded aj (handover_steps)
 add_workers() { # add_workers <comma list>: customers, in order, no repeats
   local -a names; local w x seen
   IFS=, read -r -a names <<<"$1"
   for w in "${names[@]}"; do
-    [[ "$w" =~ ^[a-z][a-z0-9_-]*$ ]] || { echo "harness $CMD: worker name '$w' must be lower case letters, digits, - or _, starting with a letter" >&2; exit 64; }
+    [[ "$w" =~ ^[a-z][a-z0-9_-]*$ ]] || { echo "aj $CMD: worker name '$w' must be lower case letters, digits, - or _, starting with a letter" >&2; exit 64; }
     seen=0; for x in "${WORKERS[@]}"; do [ "$x" != "$w" ] || seen=1; done
     [ "$seen" = 1 ] || WORKERS+=("$w")
   done
@@ -182,48 +182,48 @@ while [ $# -gt 0 ]; do
     --owner) OWNER="${2:?--owner needs a login}"; shift ;;
     --owner-sudo) OWNER_SUDO="${2:?--owner-sudo needs nopasswd, password or none}"; shift ;;
     --code-root) CODE_ROOT="${2:?--code-root needs a directory}"; shift ;;
-    --harness) HARNESS_REF="${2:?--harness needs a flake reference}"; HARNESS_REF_FROM=--harness; shift ;;
+    --jailer) AI_JAILER_REF="${2:?--jailer needs a flake reference}"; AI_JAILER_REF_FROM=--jailer; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "harness $CMD: unknown argument $1 (see --help)" >&2; exit 64 ;;
+    *) echo "aj $CMD: unknown argument $1 (see --help)" >&2; exit 64 ;;
   esac
   shift
 done
 CODE_ROOT="${CODE_ROOT%/}"
-case "$OWNER_SUDO" in nopasswd|password|none) ;; *) echo "harness $CMD: --owner-sudo is nopasswd, password or none, not '$OWNER_SUDO'" >&2; exit 64 ;; esac
+case "$OWNER_SUDO" in nopasswd|password|none) ;; *) echo "aj $CMD: --owner-sudo is nopasswd, password or none, not '$OWNER_SUDO'" >&2; exit 64 ;; esac
 
-# The marker text predates the harness CLI; it stays so that blocks written by
+# The marker text predates the aj CLI; it stays so that blocks written by
 # earlier versions are still found.
-MARK_BEGIN="# --- claude-nix-harness (scripts/bootstrap-fedora.sh) ---"
-MARK_END="# --- end claude-nix-harness ---"
-# pkgs/devenv-cache.nix, exported by pkgs/harness.nix; the literals are for
+MARK_BEGIN="# --- ai-jailer (scripts/bootstrap-fedora.sh) ---"
+MARK_END="# --- end ai-jailer ---"
+# pkgs/devenv-cache.nix, exported by pkgs/aj.nix; the literals are for
 # running this file by hand.
-DEVENV_CACHE="${HARNESS_DEVENV_CACHE:-https://devenv.cachix.org}"
-DEVENV_KEY="${HARNESS_DEVENV_KEY:-devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=}"
+DEVENV_CACHE="${AI_JAILER_DEVENV_CACHE:-https://devenv.cachix.org}"
+DEVENV_KEY="${AI_JAILER_DEVENV_KEY:-devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=}"
 MIN_CLAUDE="2.1.295"   # onFailure: block in hook registrations
 MIN_DIRENV="2.38"      # require_allowed in .envrc
 MIN_TMUX="3.2"         # extended-keys
-RECEIPT="$HOME/.local/state/claude-nix-harness/receipt.json"
+RECEIPT="$HOME/.local/state/ai-jailer/receipt.json"
 # The built-in list: what bootstrap installs, and what upgrade falls back to
 # on a host without a receipt.
-PROFILE_PKGS=(direnv devenv ccmux harness)
-# The host files pkgs/ ships; pkgs/harness.nix points these at the store.
-DIRENV_TOML="${HARNESS_DIRENV_TOML:-$HARNESS_DIR/pkgs/direnv.toml}"
-TMUX_CONF="${HARNESS_TMUX_CONF:-$HARNESS_DIR/pkgs/tmux.conf}"
+PROFILE_PKGS=(direnv devenv ajmux aj)
+# The host files pkgs/ ships; pkgs/aj.nix points these at the store.
+DIRENV_TOML="${AI_JAILER_DIRENV_TOML:-$AI_JAILER_DIR/pkgs/direnv.toml}"
+TMUX_CONF="${AI_JAILER_TMUX_CONF:-$AI_JAILER_DIR/pkgs/tmux.conf}"
 # The system files the root steps touch; the tests point these, and the
 # os-release and CA bundle below, at a scratch directory.
-NIX_CONF="${HARNESS_NIX_CONF:-/etc/nix/nix.conf}"
-SYSCTL_DROPIN="${HARNESS_SYSCTL_DROPIN:-/etc/sysctl.d/99-claude-nix-harness.conf}"
-APPARMOR_PROFILE="${HARNESS_APPARMOR_PROFILE:-/etc/apparmor.d/bwrap}"
-NIX_INSTALLER="${HARNESS_NIX_INSTALLER:-/nix/nix-installer}"
-OS_RELEASE="${HARNESS_OS_RELEASE:-/etc/os-release}"
-NIXOS_MARKER="${HARNESS_NIXOS_MARKER:-/etc/NIXOS}"
-MANAGED_DIR="${HARNESS_MANAGED_DIR:-/etc/claude-code}"
-SUDOERS_FILE="${HARNESS_SUDOERS:-/etc/sudoers.d/claude-nix-harness}"
-STORE_DIR="${HARNESS_STORE_DIR:-/nix/store}"
-HOME_BASE="${HARNESS_HOME_BASE:-/home}"   # where useradd -m puts a home; only the tests move it
+NIX_CONF="${AI_JAILER_NIX_CONF:-/etc/nix/nix.conf}"
+SYSCTL_DROPIN="${AI_JAILER_SYSCTL_DROPIN:-/etc/sysctl.d/99-ai-jailer.conf}"
+APPARMOR_PROFILE="${AI_JAILER_APPARMOR_PROFILE:-/etc/apparmor.d/bwrap}"
+NIX_INSTALLER="${AI_JAILER_NIX_INSTALLER:-/nix/nix-installer}"
+OS_RELEASE="${AI_JAILER_OS_RELEASE:-/etc/os-release}"
+NIXOS_MARKER="${AI_JAILER_NIXOS_MARKER:-/etc/NIXOS}"
+MANAGED_DIR="${AI_JAILER_MANAGED_DIR:-/etc/claude-code}"
+SUDOERS_FILE="${AI_JAILER_SUDOERS:-/etc/sudoers.d/ai-jailer}"
+STORE_DIR="${AI_JAILER_STORE_DIR:-/nix/store}"
+HOME_BASE="${AI_JAILER_HOME_BASE:-/home}"   # where useradd -m puts a home; only the tests move it
 # Where NixOS programs.direnv puts the bash hook; doctor accepts it there.
-SYSTEM_BASHRC="${HARNESS_SYSTEM_BASHRC:-/etc/bashrc}"
-WSL_MARKER="${HARNESS_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
+SYSTEM_BASHRC="${AI_JAILER_SYSTEM_BASHRC:-/etc/bashrc}"
+WSL_MARKER="${AI_JAILER_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 DEFERRED=()   # declined root steps, printed at the end as commands for later
 
 # Nix-built tools (devenv's fetcher included) look for the CA bundle at the
@@ -231,7 +231,7 @@ DEFERRED=()   # declined root steps, printed at the end as commands for later
 # it only here (the legacy /etc/pki/tls/certs/ca-bundle.crt and
 # /etc/ssl/certs/ca-bundle.crt links are gone, which is also why Fedora's
 # own profile.d/nix-daemon.sh fails to set the variable).
-CA_BUNDLE="${HARNESS_CA_BUNDLE:-}"
+CA_BUNDLE="${AI_JAILER_CA_BUNDLE:-}"
 for f in /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt; do
   [ -z "$CA_BUNDLE" ] && [ -r "$f" ] && CA_BUNDLE="$f"
 done
@@ -240,9 +240,9 @@ missing=0; nmiss=0; nwarn=0
 ok()   { printf 'ok    %s\n' "$*"; }
 miss() { printf 'MISSING %s\n' "$*"; missing=1; nmiss=$((nmiss+1)); }
 warn() { printf 'warn  %s\n' "$*"; nwarn=$((nwarn+1)); }
-info() { printf 'info  %s\n' "$*"; }   # a shape the harness supports, not a gap: counted nowhere
+info() { printf 'info  %s\n' "$*"; }   # a shape ai-jailer supports, not a gap: counted nowhere
 step() { printf '\n==> %s\n' "$*"; }
-die()  { echo "harness $CMD: $*" >&2; exit 1; }
+die()  { echo "aj $CMD: $*" >&2; exit 1; }
 ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }  # ver_ge <have> <want>
 in_list() { local x="$1"; shift; printf '%s\n' "$@" | grep -q -x -F -e "$x"; }  # in_list <word> <list...>
 json_list() { jq -n '$ARGS.positional' --args "$@"; }
@@ -252,7 +252,7 @@ json_list() { jq -n '$ARGS.positional' --args "$@"; }
 # first, then the nix-installer's. The test sets the list empty: on a
 # nix-installer host the default profile's real nix would otherwise outrun
 # the stub (2026-10-22).
-NIX_PROFILE_D="${HARNESS_NIX_PROFILE_D-/etc/profile.d/nix-daemon.sh:/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
+NIX_PROFILE_D="${AI_JAILER_NIX_PROFILE_D-/etc/profile.d/nix-daemon.sh:/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
 nix_path() {
   local -a files; local f
   unset __ETC_PROFILE_NIX_SOURCED
@@ -328,7 +328,7 @@ root_link() {
   local path="$1" ref="$2" want nixbin
   if [ -e "$path" ] || [ -L "$path" ]; then
     [ -L "$path" ] || die "$path exists and is not a symlink: bootstrap does not replace it (move it aside, then run again)"
-    [[ "$(readlink "$path")" == "$STORE_DIR"/* ]] || die "$path is a symlink to $(readlink "$path"), not into $STORE_DIR: bootstrap does not replace it (a link via /etc/static is the old NixOS module's: drop harness.enable from the host configuration, rebuild, then run again)"
+    [[ "$(readlink "$path")" == "$STORE_DIR"/* ]] || die "$path is a symlink to $(readlink "$path"), not into $STORE_DIR: bootstrap does not replace it (a link via /etc/static is the old NixOS module's: drop ai-jail.enable from the host configuration, rebuild, then run again)"
     want=$(nix build --no-link --print-out-paths "$ref" 2>/dev/null | head -n1 || true)
     if [ -n "$want" ] && [ "$(readlink -f "$path")" = "$(readlink -f "$want")" ]; then
       echo "    $path already links $want"; return 0
@@ -338,12 +338,12 @@ root_link() {
   run sudo "$nixbin" build "$ref" --out-link "$path"
 }
 
-# without_block <file>: the file without the harness block.
+# without_block <file>: the file without the ai-jailer block.
 without_block() {
   awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }' "$1" 2>/dev/null || true
 }
 
-# put_block <file> <content>: the harness block, marked, after whatever else
+# put_block <file> <content>: the ai-jailer block, marked, after whatever else
 # the file holds; an older block is replaced. Recorded in the receipt as a
 # block, so reset strips it and leaves the rest.
 put_block() {
@@ -374,7 +374,7 @@ hm_skip() { # hm_skip <file> <home-manager option that sets it>
 hm_owned_count() {
   local f n=0
   for f in "$HOME/.config/direnv/direnv.toml" "$(tmux_file)" "$HOME/.bashrc" "$HOME/.zshrc" \
-           "$HOME/.config/environment.d/50-claude-nix-harness.conf" "$HOME/.config/Code/User/settings.json"; do
+           "$HOME/.config/environment.d/50-ai-jailer.conf" "$HOME/.config/Code/User/settings.json"; do
     hm_owned "$f" && n=$((n+1))
   done
   echo "$n"
@@ -383,12 +383,12 @@ hm_owned_count() {
 selinux_on() { command -v getenforce >/dev/null 2>&1 && command -v matchpathcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; }
 
 # ---------------------------------------------------------------- receipt
-# What this run put on the host, or found there in the harness's shape;
+# What this run put on the host, or found there in ai-jailer's shape;
 # write_receipt adds it to the receipt. scripts/install.sh hands over its own
-# root steps in HARNESS_ROOT_PACKAGES and HARNESS_ROOT_STEPS.
+# root steps in AI_JAILER_ROOT_PACKAGES and AI_JAILER_ROOT_STEPS.
 R_PROFILE=(); R_FILES=(); R_EXT=(); R_WORKERS=()
-read -r -a R_ROOT_PKGS <<<"${HARNESS_ROOT_PACKAGES:-}"
-read -r -a R_ROOT_STEPS <<<"${HARNESS_ROOT_STEPS:-}"
+read -r -a R_ROOT_PKGS <<<"${AI_JAILER_ROOT_PACKAGES:-}"
+read -r -a R_ROOT_STEPS <<<"${AI_JAILER_ROOT_STEPS:-}"
 
 record_file() { # record_file <file|block|keys> <path> [<key path as a JSON array>...]
   R_FILES+=("$(jq -cn --arg k "$1" --arg p "$2" '{kind: $k, path: $p} + ($ARGS.positional | map(fromjson) | if . == [] then {} else {keys: .} end)' --args "${@:3}")")
@@ -398,7 +398,7 @@ write_receipt() {
   local old=null new
   [ -s "$RECEIPT" ] && old=$(jq -c . "$RECEIPT" 2>/dev/null || echo null)
   new=$(jq -n --argjson old "$old" \
-    --arg ref "$HARNESS_REF" --arg rev "${HARNESS_REV:-unknown}" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg root "$CODE_ROOT" \
+    --arg ref "$AI_JAILER_REF" --arg rev "${AI_JAILER_REV:-unknown}" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg root "$CODE_ROOT" \
     --argjson profile "$(json_list "${R_PROFILE[@]}")" \
     --argjson files "$(printf '%s\n' "${R_FILES[@]}" | jq -s .)" \
     --argjson pkgs "$(json_list "${R_ROOT_PKGS[@]}")" \
@@ -407,7 +407,7 @@ write_receipt() {
     --argjson ext "$(json_list "${R_EXT[@]}")" '
     def union(a; b): (a // []) + b | unique;
     { version: 1,
-      harness: {ref: $ref, rev: $rev},
+      jailer: {ref: $ref, rev: $rev},
       timestamp: $ts,
       firstWritten: ($old.firstWritten // $ts),
       codeRoot: $root,
@@ -445,10 +445,10 @@ MANAGED_ATTR=managed; [ "$WSL" = 0 ] || MANAGED_ATTR=managed-wsl
 root_steps() {
   local conf="$NIX_CONF" want flakes=""
   if [ "$HOST" = nixos ]; then nixos_nix_conf; userns_steps; managed_step; worker_steps; sudoers_step; return 0; fi
-  # The harness block in nix.conf: the devenv cache; flakes when nothing else
+  # The ai-jailer block in nix.conf: the devenv cache; flakes when nothing else
   # turns them on (Fedora's package does, the nix-installer leaves them off);
   # trusted-users only on request (header).
-  # Everything but a previous harness block, then the block.
+  # Everything but a previous ai-jailer block, then the block.
   want=$(without_block "$conf")
   grep -q -E '^experimental-features' <<<"$want" || flakes="
 experimental-features = nix-command flakes"
@@ -461,7 +461,7 @@ trusted-users = root $USER"
   want="$want
 $MARK_END"
   if [ "$(cat "$conf" 2>/dev/null)" != "$want" ]; then
-    step "write $conf (harness block: devenv cache${flakes:+, flakes}$([ "$TRUSTED_USER" = 1 ] && echo ", trusted-users"))"
+    step "write $conf (ai-jailer block: devenv cache${flakes:+, flakes}$([ "$TRUSTED_USER" = 1 ] && echo ", trusted-users"))"
     root_write "$conf" "$want" "nix.settings.substituters, nix.settings.trusted-public-keys and nix.settings.experimental-features"
     systemctl is-active -q nix-daemon.service 2>/dev/null && run sudo systemctl restart nix-daemon.service
   fi
@@ -488,12 +488,12 @@ linger_on() { loginctl show-user "$1" -p Linger 2>/dev/null | grep -q '^Linger=y
 
 managed_step() {
   # host.nix reaches the tree only through a path: ref (flake.nix); the
-  # checkout's devenv shell sets HARNESS_REF to one.
-  if [ -e host.nix ] && [[ "$HARNESS_REF" != path:* ]]; then
-    warn "host.nix in $PWD is not in the managed tree: the ref is $HARNESS_REF, and only a path:<checkout> ref carries it (run from the checkout's devenv shell, or --harness path:$PWD)"
+  # checkout's devenv shell sets AI_JAILER_REF to one.
+  if [ -e host.nix ] && [[ "$AI_JAILER_REF" != path:* ]]; then
+    warn "host.nix in $PWD is not in the managed tree: the ref is $AI_JAILER_REF, and only a path:<checkout> ref carries it (run from the checkout's devenv shell, or --jailer path:$PWD)"
   fi
-  step "link the managed rules: $MANAGED_DIR -> $HARNESS_REF#$MANAGED_ATTR"
-  root_link "$MANAGED_DIR" "$HARNESS_REF#$MANAGED_ATTR"
+  step "link the managed rules: $MANAGED_DIR -> $AI_JAILER_REF#$MANAGED_ATTR"
+  root_link "$MANAGED_DIR" "$AI_JAILER_REF#$MANAGED_ATTR"
   R_ROOT_STEPS+=(managed)
 }
 
@@ -506,7 +506,7 @@ worker_steps() {
   for c in "${WORKERS[@]}"; do
     w="$WORKER_PREFIX$c"; home="$HOME_BASE/$w"
     group_exists "$w" || { step "create the group $w"; run sudo groupadd "$w"; }
-    user_exists "$w" || { step "create the user $w"; run sudo useradd -m -g "$w" -G agents -s /bin/bash -c "claude-nix-harness worker for $c" "$w"; }
+    user_exists "$w" || { step "create the user $w"; run sudo useradd -m -g "$w" -G agents -s /bin/bash -c "ai-jailer worker for $c" "$w"; }
     [ "$(stat -c %a "$home" 2>/dev/null || true)" = 750 ] || { step "chmod 0750 $home"; run sudo chmod 0750 "$home"; }
     group_has "$w" "$OWNER" || { step "add $OWNER to the group $w (reads $home)"; run sudo usermod -aG "$w" "$OWNER"; }
     linger_on "$w" || { step "enable linger for $w (its tmux survives logout)"; run sudo loginctl enable-linger "$w"; }
@@ -521,7 +521,7 @@ sudoers_step() {
   local line tag="NOPASSWD: " cur
   { [ "$OWNER_SUDO" != none ] && [ ${#WORKERS[@]} -gt 0 ]; } || return 0
   if [ "$HOST" = nixos ]; then
-    info "NixOS: no sudo rule is installed (/etc/sudoers has no @includedir); ccmux hands over to a worker with your own sudo, password or not (--owner-sudo ignored)"
+    info "NixOS: no sudo rule is installed (/etc/sudoers has no @includedir); ajmux hands over to a worker with your own sudo, password or not (--owner-sudo ignored)"
     return 0
   fi
   [ "$OWNER_SUDO" != password ] || tag=""
@@ -539,7 +539,7 @@ sudoers_step() {
 # environment, so the ref goes in as a flag. A failure is a warning: the root
 # steps are done and recorded, and the command can be run again by hand.
 worker_user_steps() {
-  local c w flags=(--no-root --yes) wref="$HARNESS_REF" sp
+  local c w flags=(--no-root --yes) wref="$AI_JAILER_REF" sp
   [ ${#WORKERS[@]} -gt 0 ] || return 0
   [ "$VERBOSE" != 1 ] || flags+=(--verbose)
   # A path: ref under the owner's home is unreadable to a worker (0700
@@ -557,8 +557,8 @@ worker_user_steps() {
   for c in "${WORKERS[@]}"; do
     w="$WORKER_PREFIX$c"
     step "bootstrap the user side of $w"
-    run sudo -u "$w" -i nix run "$wref#harness" -- bootstrap "${flags[@]}" --harness "$wref" \
-      || warn "the user steps for $w failed: run sudo -u $w -i nix run $wref#harness -- bootstrap --no-root --yes --harness $wref"
+    run sudo -u "$w" -i nix run "$wref#aj" -- bootstrap "${flags[@]}" --jailer "$wref" \
+      || warn "the user steps for $w failed: run sudo -u $w -i nix run $wref#aj -- bootstrap --no-root --yes --jailer $wref"
   done
 }
 
@@ -633,7 +633,7 @@ userns_steps() {
     else
       deferred="printf '%s\\n'"; while IFS= read -r l; do deferred="$deferred '$l'"; done <<<"$APPARMOR_TEXT"
       DEFERRED+=("$deferred | sudo tee $APPARMOR_PROFILE && sudo systemctl reload apparmor")
-      warn "declined: every Claude command is refused until it runs (harness doctor keeps reporting it)"
+      warn "declined: every Claude command is refused until it runs (aj doctor keeps reporting it)"
     fi
     return 0
   fi
@@ -645,26 +645,26 @@ userns_steps() {
     R_ROOT_STEPS+=(sysctl)
   else
     DEFERRED+=("sudo sysctl -w $key=$val && echo '$key = $val' | sudo tee $SYSCTL_DROPIN")
-    warn "declined: every Claude command is refused until it runs (harness doctor keeps reporting it)"
+    warn "declined: every Claude command is refused until it runs (aj doctor keeps reporting it)"
   fi
 }
 
 # ---------------------------------------------------------------- user steps
-# After `upgrade` has moved the profile, the user steps belong to the harness
+# After `upgrade` has moved the profile, the user steps belong to the upgraded aj
 # now in the profile, not to the one running: this process is the old build,
 # and its user steps are the old ones. On 2026-10-22 that wrote the scrub key
 # back into ~/.claude/settings.json right after upgrading to the build that
-# removes it. The wrapper exports its own store path as HARNESS_SELF; when
+# removes it. The wrapper exports its own store path as AI_JAILER_SELF; when
 # the profile's differs, the rest of the run is the new wrapper's
 # `bootstrap --no-root --no-profile` with the original flags (the root and
 # profile steps are done). No profile entry, or the same path: carry on.
 handover_steps() {
   [ "$CMD" = upgrade ] && [ "$NO_PROFILE" = 0 ] || return 0
   local new
-  new=$(readlink -f "$HOME/.nix-profile/bin/harness" 2>/dev/null || true)
-  if [ "$DRY_RUN" = 1 ]; then echo "    would hand the user steps to the upgraded harness (${new:-$HOME/.nix-profile/bin/harness})"; return 0; fi
-  [ -n "$new" ] && [ "$new" != "${HARNESS_SELF:-}" ] || return 0
-  step "hand the user steps to the upgraded harness ($new)"
+  new=$(readlink -f "$HOME/.nix-profile/bin/aj" 2>/dev/null || true)
+  if [ "$DRY_RUN" = 1 ]; then echo "    would hand the user steps to the upgraded aj (${new:-$HOME/.nix-profile/bin/aj})"; return 0; fi
+  [ -n "$new" ] && [ "$new" != "${AI_JAILER_SELF:-}" ] || return 0
+  step "hand the user steps to the upgraded aj ($new)"
   exec "$new" bootstrap --no-root --no-profile "${ORIG_ARGS[@]}"
 }
 
@@ -682,7 +682,7 @@ profile_steps() {
   nix_path
   if ! command -v nix >/dev/null; then
     [ "$DRY_RUN" = 1 ] || die "nix not on PATH: scripts/install.sh installs it (Fedora's packages, or the nix-installer elsewhere)"
-    for name in "${PROFILE_PKGS[@]}"; do step "nix profile add $HARNESS_REF#$name"; run nix profile add "$HARNESS_REF#$name"; done
+    for name in "${PROFILE_PKGS[@]}"; do step "nix profile add $AI_JAILER_REF#$name"; run nix profile add "$AI_JAILER_REF#$name"; done
     return 0
   fi
   nix store info >/dev/null 2>&1 || nix store ping >/dev/null 2>&1 || die "the nix daemon does not answer (systemctl status nix-daemon.socket)"
@@ -691,18 +691,18 @@ profile_steps() {
     if profile_has "$name"; then
       if [ "$CMD" = upgrade ]; then
         url=$(profile_url "$name")
-        if [ "$url" = "$HARNESS_REF" ]; then step "nix profile upgrade $name"; run nix profile upgrade "$name"
+        if [ "$url" = "$AI_JAILER_REF" ]; then step "nix profile upgrade $name"; run nix profile upgrade "$name"
         else
-          step "nix profile: $name from $HARNESS_REF (was ${url:-unknown})"
+          step "nix profile: $name from $AI_JAILER_REF (was ${url:-unknown})"
           # Built first: a bad ref or no network then fails here, with the old entry still in place.
-          run nix build --no-link "$HARNESS_REF#$name"
-          run nix profile remove "$name"; run nix profile "$sub" "$HARNESS_REF#$name"
+          run nix build --no-link "$AI_JAILER_REF#$name"
+          run nix profile remove "$name"; run nix profile "$sub" "$AI_JAILER_REF#$name"
         fi
       fi
     else
-      step "nix profile $sub $HARNESS_REF#$name"
+      step "nix profile $sub $AI_JAILER_REF#$name"
       [ "$name" = direnv ] && echo "    (direnv builds from source while nixpkgs ships < $MIN_DIRENV; a few minutes once)"
-      run nix profile "$sub" "$HARNESS_REF#$name"
+      run nix profile "$sub" "$AI_JAILER_REF#$name"
     fi
     R_PROFILE+=("$name")
   done
@@ -713,9 +713,9 @@ user_steps() {
   local f="$HOME/.config/direnv/direnv.toml" direnv_toml
   direnv_toml="$MARK_BEGIN
 $(cat "$DIRENV_TOML")"
-  if hm_owned "$f"; then hm_skip "$f" "programs.direnv.config.global (pkgs/direnv.toml), or the harness home module"
+  if hm_owned "$f"; then hm_skip "$f" "programs.direnv.config.global (pkgs/direnv.toml), or home-manager"
   elif [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
-    warn "$f exists and is not the harness one; merge by hand: strict_env, warn_timeout = \"2m\", load_dotenv = false, no whitelist"
+    warn "$f exists and is not the ai-jailer one; merge by hand: strict_env, warn_timeout = \"2m\", load_dotenv = false, no whitelist"
   else
     write_if_differs "$f" "$direnv_toml"; record_file file "$f"
   fi
@@ -733,9 +733,9 @@ $(cat "$DIRENV_TOML")"
   # run profile.d, so the nix profile is already on PATH here.
   local root_expr="$CODE_ROOT"
   [[ "$root_expr" == "$HOME/"* ]] && root_expr="\$HOME/${root_expr#"$HOME/"}"
-  f="$HOME/.bashrc.d/claude-nix-harness.sh"
+  f="$HOME/.bashrc.d/ai-jailer.sh"
   write_if_differs "$f" "$MARK_BEGIN
-export HARNESS_CODE_ROOT=\"$root_expr\"
+export AI_JAILER_CODE_ROOT=\"$root_expr\"
 # Fedora's own profile.d/nix-daemon.sh only knows the legacy bundle paths.
 [ -n \"\${NIX_SSL_CERT_FILE:-}\" ] || export NIX_SSL_CERT_FILE=\"${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem}\"
 if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook bash)\"; fi"
@@ -746,13 +746,13 @@ if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook bash)\"; fi"
   # unless the person runs zsh (a ~/.zshrc and nothing else). A ~/.zshrc
   # gets the same three lines as a block of its own.
   local rc="$HOME/.bashrc" zrc="$HOME/.zshrc"
-  if hm_owned "$rc"; then hm_skip "$rc" "programs.direnv.enableBashIntegration (the hook) and home.sessionVariables.HARNESS_CODE_ROOT"
+  if hm_owned "$rc"; then hm_skip "$rc" "programs.direnv.enableBashIntegration (the hook) and home.sessionVariables.AI_JAILER_CODE_ROOT"
   elif { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
-    put_block "$rc" '[ -r ~/.bashrc.d/claude-nix-harness.sh ] && . ~/.bashrc.d/claude-nix-harness.sh'
+    put_block "$rc" '[ -r ~/.bashrc.d/ai-jailer.sh ] && . ~/.bashrc.d/ai-jailer.sh'
   fi
-  if hm_owned "$zrc"; then hm_skip "$zrc" "programs.direnv.enableZshIntegration and home.sessionVariables.HARNESS_CODE_ROOT"
+  if hm_owned "$zrc"; then hm_skip "$zrc" "programs.direnv.enableZshIntegration and home.sessionVariables.AI_JAILER_CODE_ROOT"
   elif [ -e "$zrc" ]; then
-    put_block "$zrc" "export HARNESS_CODE_ROOT=\"$root_expr\"
+    put_block "$zrc" "export AI_JAILER_CODE_ROOT=\"$root_expr\"
 [ -n \"\${NIX_SSL_CERT_FILE:-}\" ] || export NIX_SSL_CERT_FILE=\"${CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}\"
 if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook zsh)\"; fi"
   fi
@@ -760,7 +760,7 @@ if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook zsh)\"; fi"
   # GUI session PATH: VS Code launched from the menu (and the claude it spawns)
   # otherwise never sees the nix profile. systemd user environment generator;
   # takes effect at the next login.
-  f="$HOME/.config/environment.d/50-claude-nix-harness.conf"
+  f="$HOME/.config/environment.d/50-ai-jailer.conf"
   if hm_owned "$f"; then hm_skip "$f" "home.sessionPath and home.sessionVariables"
   else
     write_if_differs "$f" "$MARK_BEGIN
@@ -788,7 +788,7 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     [ ${#gk[@]} -eq 0 ] || record_file keys "$gf" "${gk[@]}"
   fi
 
-  # Claude Code's user settings carry no harness keys any more (the managed
+  # Claude Code's user settings carry no ai-jailer keys any more (the managed
   # settings do); only the scrub key an earlier bootstrap wrote is removed.
   local cs="$HOME/.claude/settings.json"
   # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
@@ -821,7 +821,7 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 }
 
 # ---------------------------------------------------------------- reset
-# strip_block <file>: the file without the harness block; removes the file
+# strip_block <file>: the file without the ai-jailer block; removes the file
 # when nothing else is left.
 strip_block() {
   local f="$1" rest
@@ -829,15 +829,15 @@ strip_block() {
   grep -q -F "$MARK_BEGIN" "$f" || return 0
   rest=$(without_block "$f")
   if [ -z "$(printf '%s' "$rest" | tr -d '[:space:]')" ]; then step "remove $f"; run rm -f "$f"
-  else step "remove the harness block from $f"; put_file "$f" "$rest"; fi
+  else step "remove the ai-jailer block from $f"; put_file "$f" "$rest"; fi
 }
 
-# strip_keys <file> <key paths, JSON>: the harness's keys out of a JSON file,
+# strip_keys <file> <key paths, JSON>: the ai-jailer's keys out of a JSON file,
 # then the objects they leave empty.
 strip_keys() {
   local f="$1" k="$2"
   [ -s "$f" ] && jq -e --argjson k "$k" '. as $doc | any($k[]; . as $p | $doc | try (getpath($p) != null) catch false)' "$f" >/dev/null 2>&1 || return 0
-  step "remove the harness keys from $f"
+  step "remove the ai-jailer keys from $f"
   jq_edit "$f" --argjson k "$k" 'reduce $k[] as $p (.; try delpaths([$p]) catch .)
     | reduce ($k[] | . as $p | range(length - 1; 0; -1) | $p[:.]) as $q (.; if getpath($q) == {} then delpaths([$q]) else . end)'
 }
@@ -878,7 +878,7 @@ reset_steps() {
       installer) echo "  root:  Nix, by $NIX_INSTALLER uninstall (/nix, /etc/nix, the build users, its lines in the system rc files)" ;;
       *)
         in_list nix-daemon.socket "${steps[@]}" && echo "  root:  nix-daemon.socket disabled (Nix stays; install.sh enables it again)"
-        in_list nix.conf "${steps[@]}" && echo "  root:  the harness block in $NIX_CONF" ;;
+        in_list nix.conf "${steps[@]}" && echo "  root:  the ai-jailer block in $NIX_CONF" ;;
     esac
     in_list sudoers "${steps[@]}" && echo "  root:  $SUDOERS_FILE"
     in_list managed "${steps[@]}" && echo "  root:  the $MANAGED_DIR link (this host enforces nothing afterwards)"
@@ -921,7 +921,7 @@ reset_steps() {
         else warn "$NIX_INSTALLER is gone: Nix left as it is"; fi ;;
       *)
         if in_list nix.conf "${steps[@]}" && grep -q -F "$MARK_BEGIN" "$NIX_CONF" 2>/dev/null; then
-          step "remove the harness block from $NIX_CONF"
+          step "remove the ai-jailer block from $NIX_CONF"
           root_write "$NIX_CONF" "$(without_block "$NIX_CONF")"
         fi ;;
     esac
@@ -954,7 +954,7 @@ reset_steps() {
       if grep -q -F "$MARK_BEGIN" "$APPARMOR_PROFILE" 2>/dev/null; then
         step "remove $APPARMOR_PROFILE and reload AppArmor"
         run sudo rm -f "$APPARMOR_PROFILE"; run sudo systemctl reload apparmor
-      elif [ -e "$APPARMOR_PROFILE" ]; then warn "$APPARMOR_PROFILE no longer carries the harness marker: left alone"; fi
+      elif [ -e "$APPARMOR_PROFILE" ]; then warn "$APPARMOR_PROFILE no longer carries the ai-jailer marker: left alone"; fi
     fi
     if [ "$nix_from" = dnf ]; then
       step "remove the nixbld build users"
@@ -980,7 +980,7 @@ reset_steps() {
     case "$kind" in
       file)
         if grep -q -F "$MARK_BEGIN" "$f" 2>/dev/null; then step "remove $f"; run rm -f "$f"
-        elif [ -e "$f" ]; then warn "$f no longer carries the harness marker: left alone"; fi ;;
+        elif [ -e "$f" ]; then warn "$f no longer carries the ai-jailer marker: left alone"; fi ;;
       block) strip_block "$f" ;;
       keys) case "$f" in */.gitconfig) strip_gitkeys "$f" "$keys" ;; *) strip_keys "$f" "$keys" ;; esac ;;
     esac
@@ -1004,8 +1004,8 @@ reset_steps() {
   cat <<NEXT
 
 Reset done$([ "$DRY_RUN" = 1 ] && echo " (dry run: nothing changed)"). From zero again: open a new terminal (this one still has the old
-PATH), delete a test repo if you want \`harness init\` from scratch, e.g.
-  rm -rf $CODE_ROOT/raul/harness-test
+PATH), delete a test repo if you want \`aj init\` from scratch, e.g.
+  rm -rf $CODE_ROOT/raul/aj-test
 then scripts/install.sh (from a checkout, or the curl line in the README) and
 the rest of the runbook's "From zero" list. Log out and in once at the end for
 GUI-launched VS Code.
@@ -1023,19 +1023,19 @@ report() {
   esac
   [ "$WSL" = 0 ] || host="WSL2 ($host)"
   echo "host: $host ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
-  echo "harness: ${HARNESS_REV:-unknown}, ref $HARNESS_REF ($HARNESS_REF_FROM)"
-  # The repo shell's direnv exports the project (pkgs/ccmux.nix), so it is a
+  echo "aj: ${AI_JAILER_REV:-unknown}, ref $AI_JAILER_REF ($AI_JAILER_REF_FROM)"
+  # The repo shell's direnv exports the project (pkgs/ajmux.nix), so it is a
   # fact about this cwd, never MISSING.
-  info "HARNESS_CODE_ROOT ${HARNESS_CODE_ROOT:-$CODE_ROOT (default)}"
-  no_project="unset: not inside a harness repo's shell"
-  info "HARNESS_PROJECT ${HARNESS_PROJECT:-$no_project}"
-  if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
-  else warn "no receipt at $RECEIPT: reset has nothing to undo, upgrade uses the built-in package list (harness bootstrap writes one)"; fi
+  info "AI_JAILER_CODE_ROOT ${AI_JAILER_CODE_ROOT:-$CODE_ROOT (default)}"
+  no_project="unset: not inside a jail's shell"
+  info "AI_JAIL_PROJECT ${AI_JAIL_PROJECT:-$no_project}"
+  if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (ai-jailer $(jq -r '.jailer.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
+  else warn "no receipt at $RECEIPT: reset has nothing to undo, upgrade uses the built-in package list (aj bootstrap writes one)"; fi
 
   if command -v nix >/dev/null 2>&1; then
     v=$(nix --version | awk '{print $NF}')
     if nix store info >/dev/null 2>&1 || nix store ping >/dev/null 2>&1; then ok "nix $v, daemon answers"; else miss "nix $v installed but the daemon does not answer (systemctl enable --now nix-daemon.socket)"; fi
-    fix="harness bootstrap writes the line"; [ "$HOST" != nixos ] || fix="nix.settings in configuration.nix; harness bootstrap prints the block"
+    fix="aj bootstrap writes the line"; [ "$HOST" != nixos ] || fix="nix.settings in configuration.nix; aj bootstrap prints the block"
     grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null && ok "flakes enabled in $NIX_CONF" || miss "flakes not enabled in $NIX_CONF ($fix)"
     grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null && ok "devenv cache in $NIX_CONF" || warn "devenv cache not in $NIX_CONF: devenv builds more from source ($fix)"
     if selinux_on; then
@@ -1050,19 +1050,19 @@ report() {
   fi
 
   if [ -n "$CA_BUNDLE" ]; then ok "CA bundle for Nix-built tools: $CA_BUNDLE (NIX_SSL_CERT_FILE)"; else miss "no CA bundle found for NIX_SSL_CERT_FILE: devenv cannot fetch over https"; fi
-  fix="nix profile add $HARNESS_REF#direnv"; [ "$HOST" != nixos ] || fix="programs.direnv.enable in configuration.nix, or $fix"
+  fix="nix profile add $AI_JAILER_REF#direnv"; [ "$HOST" != nixos ] || fix="programs.direnv.enable in configuration.nix, or $fix"
   if command -v direnv >/dev/null 2>&1; then
     v=$(direnv version); ver_ge "$v" "$MIN_DIRENV" && ok "direnv $v ($(command -v direnv))" || miss "direnv $v is older than $MIN_DIRENV (require_allowed): $fix"
   else miss "direnv >= $MIN_DIRENV ($fix)"; fi
-  fix="nix profile add $HARNESS_REF#devenv"; [ "$HOST" != nixos ] || fix="devenv in environment.systemPackages, or $fix"
+  fix="nix profile add $AI_JAILER_REF#devenv"; [ "$HOST" != nixos ] || fix="devenv in environment.systemPackages, or $fix"
   if command -v devenv >/dev/null 2>&1; then ok "devenv $(devenv version 2>/dev/null | awk '{print $NF}') ($(command -v devenv))"; else miss "devenv ($fix)"; fi
-  if command -v ccmux >/dev/null 2>&1; then ok "ccmux ($(command -v ccmux))"; else warn "ccmux not on the host PATH (the devenv shell of a harness repo has it; nix profile add $HARNESS_REF#ccmux for everywhere)"; fi
+  if command -v ajmux >/dev/null 2>&1; then ok "ajmux ($(command -v ajmux))"; else warn "ajmux not on the host PATH (the devenv shell of a jail has it; nix profile add $AI_JAILER_REF#ajmux for everywhere)"; fi
 
   for t in bwrap socat; do command -v "$t" >/dev/null 2>&1 && ok "$t ($(command -v "$t"))" || miss "$t (bubblewrap and socat from your distro's packages; the devenv shell's claude-code brings its own): the sandbox refuses to start without it"; done
   v=$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 0)
   [ "$v" -gt 0 ] && ok "user namespaces enabled (max $v)" || miss "user namespaces disabled: bubblewrap cannot run"
   if command -v sysctl >/dev/null 2>&1; then
-    fix="harness bootstrap offers the sysctl"; [ "$HOST" != nixos ] || fix="boot.kernel.sysctl in configuration.nix"
+    fix="aj bootstrap offers the sysctl"; [ "$HOST" != nixos ] || fix="boot.kernel.sysctl in configuration.nix"
     if userns_restricted; then
       case "$USERNS_KEY" in
         kernel.apparmor_restrict_unprivileged_userns) miss "AppArmor confines unprivileged user namespaces ($USERNS_KEY = 1) and $APPARMOR_PROFILE is missing: bubblewrap cannot run; ${fix/offers the sysctl/writes the profile}" ;;
@@ -1074,11 +1074,11 @@ report() {
     else ok "no sysctl confines unprivileged user namespaces"; fi
   fi
   if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- /bin/true 2>/dev/null; then ok "bubblewrap works here"; else miss "bubblewrap cannot create a sandbox here"; fi
-  # ccmux carries its own tmux and a repo's harness.claudeCode.enable puts
+  # ajmux carries its own tmux and a repo's ai-jail.claudeCode.enable puts
   # one in its shell, so a host without tmux still runs sessions; `tmux
   # attach` or `tmux ls` from a plain terminal does not work there.
   if command -v tmux >/dev/null 2>&1; then v=$(tmux -V | awk '{print $2}'); ver_ge "${v//[a-z]/}" "$MIN_TMUX" && ok "tmux $v" || warn "tmux $v is older than $MIN_TMUX (extended-keys)"
-  else warn "tmux not on the host PATH: ccmux brings its own and harness.claudeCode.enable puts one in a repo's shell; tmux attach from a plain terminal needs your distro's package"; fi
+  else warn "tmux not on the host PATH: ajmux brings its own and ai-jail.claudeCode.enable puts one in a repo's shell; tmux attach from a plain terminal needs your distro's package"; fi
   command -v jq >/dev/null 2>&1 && ok "jq" || miss "jq (your distro's package)"
   command -v git >/dev/null 2>&1 && ok "git $(git --version | awk '{print $3}')" || miss "git (your distro's package)"
 
@@ -1087,11 +1087,11 @@ report() {
     ver_ge "$v" "$MIN_CLAUDE" && ok "claude $v ($(command -v claude), autoUpdates=$(jq -r 'if has("autoUpdates") then .autoUpdates else "default" end' "$HOME/.claude.json" 2>/dev/null))" || miss "claude $v is older than $MIN_CLAUDE (onFailure: block)"
   # No host-wide claude is a supported shape (the plain WSL host): VS Code's
   # extension runs its bundled binary, and repos bring the CLI.
-  else info "claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from harness.claudeCode.enable (harness init turns it on on such a host)"; fi
+  else info "claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from ai-jail.claudeCode.enable (aj init turns it on on such a host)"; fi
   local cs="$HOME/.claude/settings.json" ms="$MANAGED_DIR/managed-settings.json"
-  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (harness bootstrap removes it)"; fi
+  if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (aj bootstrap removes it)"; fi
   if [ -r "$ms" ]; then ok "managed settings $ms"; hooks_runnable "$ms"
-  else miss "no managed settings at $ms: this host enforces nothing (harness bootstrap --workers ... from the harness checkout's devenv shell)"; fi
+  else miss "no managed settings at $ms: this host enforces nothing (aj bootstrap --workers ... from the ai-jailer checkout's devenv shell)"; fi
   accounts_report
 
   # From inside a session `code` is on PATH but dies before printing (the
@@ -1113,7 +1113,7 @@ report() {
     fi
   fi
 
-  [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ccmux resolves <customer>/<repo> under it)"
+  [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ajmux resolves <customer>/<repo> under it)"
   # The file direnv reads: NixOS programs.direnv points DIRENV_CONFIG at
   # /etc/direnv. A store link is a Nix module's, taken as is; any other
   # file is judged by its two security keys.
@@ -1121,25 +1121,25 @@ report() {
   if hm_owned "$dt"; then
     if [[ "$dt" == "$HOME"/* ]]; then ok "direnv.toml (home-manager)"; else ok "direnv.toml $dt (system configuration)"; fi
   elif grep -q -E '^strict_env *= *true' "$dt" 2>/dev/null && grep -q -E '^load_dotenv *= *false' "$dt" 2>/dev/null; then ok "direnv.toml $dt"
-  elif [ -e "$dt" ]; then warn "$dt exists and is not the harness one (strict_env, warn_timeout, load_dotenv = false)"
+  elif [ -e "$dt" ]; then warn "$dt exists and is not the ai-jailer one (strict_env, warn_timeout, load_dotenv = false)"
   else miss "$dt"; fi
   tf=$(tmux_file)
   if hm_owned "$tf"; then ok "tmux config $(tilde "$tf") (home-manager)"
-  else grep -q -F "$MARK_BEGIN" "$tf" 2>/dev/null && ok "tmux harness block in $(tilde "$tf")" || miss "tmux harness block in $(tilde "$tf")"; fi
-  if hm_owned "$HOME/.bashrc"; then ok "~/.bashrc (home-manager: the direnv hook and HARNESS_CODE_ROOT come from it)"
+  else grep -q -F "$MARK_BEGIN" "$tf" 2>/dev/null && ok "tmux ai-jailer block in $(tilde "$tf")" || miss "tmux ai-jailer block in $(tilde "$tf")"; fi
+  if hm_owned "$HOME/.bashrc"; then ok "~/.bashrc (home-manager: the direnv hook and AI_JAILER_CODE_ROOT come from it)"
   elif grep -q 'direnv hook bash' "$SYSTEM_BASHRC" 2>/dev/null; then ok "direnv hook in $SYSTEM_BASHRC (system configuration)"
   else
-    grep -q 'direnv hook bash' "$HOME/.bashrc.d/claude-nix-harness.sh" 2>/dev/null && ok "direnv hook and HARNESS_CODE_ROOT in ~/.bashrc.d" || miss "~/.bashrc.d/claude-nix-harness.sh"
+    grep -q 'direnv hook bash' "$HOME/.bashrc.d/ai-jailer.sh" 2>/dev/null && ok "direnv hook and AI_JAILER_CODE_ROOT in ~/.bashrc.d" || miss "~/.bashrc.d/ai-jailer.sh"
     if [ -e "$HOME/.bashrc" ] || [ ! -e "$HOME/.zshrc" ]; then
-      grep -q 'bashrc\.d' "$HOME/.bashrc" 2>/dev/null && ok "~/.bashrc sources ~/.bashrc.d" || miss "~/.bashrc does not source ~/.bashrc.d (harness bootstrap adds the line)"
+      grep -q 'bashrc\.d' "$HOME/.bashrc" 2>/dev/null && ok "~/.bashrc sources ~/.bashrc.d" || miss "~/.bashrc does not source ~/.bashrc.d (aj bootstrap adds the line)"
     fi
   fi
   if hm_owned "$HOME/.zshrc"; then ok "~/.zshrc (home-manager)"
-  elif [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (harness bootstrap adds it)"; fi
+  elif [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (aj bootstrap adds it)"; fi
   # System packages are on every session's PATH already.
   if [[ "$(command -v direnv 2>/dev/null)" == /run/current-system/* ]]; then :
-  elif hm_owned "$HOME/.config/environment.d/50-claude-nix-harness.conf"; then ok "session PATH (home-manager)"
-  else [ -r "$HOME/.config/environment.d/50-claude-nix-harness.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"; fi
+  elif hm_owned "$HOME/.config/environment.d/50-ai-jailer.conf"; then ok "session PATH (home-manager)"
+  else [ -r "$HOME/.config/environment.d/50-ai-jailer.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"; fi
 }
 
 # hooks_runnable <settings file>: every hook command the file names exists,
@@ -1173,7 +1173,7 @@ accounts_report() {
   if [ -s "$RECEIPT" ]; then
     for c in $(jq -r '.root.workers[]?' "$RECEIPT" 2>/dev/null); do
       w="$WORKER_PREFIX$c"
-      user_exists "$w" || miss "$w is in the receipt but has no account (NixOS: users.mutableUsers = false removes it at rebuild; run harness bootstrap --workers $c again, or set it true)"
+      user_exists "$w" || miss "$w is in the receipt but has no account (NixOS: users.mutableUsers = false removes it at rebuild; run aj bootstrap --workers $c again, or set it true)"
     done
   fi
   # /etc/sudoers.d is root-only (0750) on most hosts, so a plain -e says
@@ -1187,7 +1187,7 @@ accounts_report() {
   if group_has agents "$me"; then info "standing: worker ($me is in agents): the managed rules bind every session as this user"
   else
     command -v getent >/dev/null 2>&1 && owned=$(getent group 2>/dev/null | awk -F: -v u="$me" -v p="$WORKER_PREFIX" 'index($1, p) == 1 { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == u) printf "%s ", $1 }')
-    if [ -n "$owned" ]; then info "standing: owner ($me is a member of ${owned% }): sessions here reach the workers through ccmux"
+    if [ -n "$owned" ]; then info "standing: owner ($me is a member of ${owned% }): sessions here reach the workers through ajmux"
     else info "standing: neither worker nor owner ($me is in no agents group and no $WORKER_PREFIX* group)"; fi
   fi
 }
@@ -1203,8 +1203,8 @@ claude_doctor() {
   else warn "claude doctor: $(grep -i -m1 -E 'issue|warn|error|fail' <<<"$out" || echo "exit $rc") (run claude doctor)"; fi
 }
 
-# repo_report: the harness repo in the current directory, the same things
-# `harness init` checks after the first shell entry.
+# repo_report: the jail in the current directory, the same things
+# `aj init` checks after the first shell entry.
 repo_report() {
   local s=.claude/settings.json
   echo; echo "repo: $PWD"
@@ -1220,7 +1220,7 @@ repo_report() {
   else miss "direnv: .envrc not allowed (read it, then direnv allow)"; fi
 }
 
-summary() { echo; echo "harness $CMD: $nmiss missing, $nwarn warnings"; }
+summary() { echo; echo "aj $CMD: $nmiss missing, $nwarn warnings"; }
 
 case "$CMD" in
   reset)
@@ -1233,8 +1233,8 @@ case "$CMD" in
     { [ -e .claude/settings.json ] || [ -L .claude/settings.json ]; } && [ -f .envrc ] && repo_report
     summary ;;
   bootstrap|upgrade)
-    if [[ "$HARNESS_REF" == path:/nix/store/* ]]; then
-      warn "the harness ref is this harness's store path ($HARNESS_REF_FROM): a later upgrade cannot move it; pass --harness github:bilibo/claude-nix-harness or --harness path:<checkout>"
+    if [[ "$AI_JAILER_REF" == path:/nix/store/* ]]; then
+      warn "the ai-jailer ref is this aj's store path ($AI_JAILER_REF_FROM): a later upgrade cannot move it; pass --jailer github:bilibo/ai-jailer or --jailer path:<checkout>"
     fi
     if [ "$CMD" = upgrade ]; then
       load_receipt
@@ -1255,8 +1255,8 @@ case "$CMD" in
     cat <<NEXT
 
 Next: open a new terminal (PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d), then
-  harness init <customer>/<repo>                  # a harness repo under $CODE_ROOT
-  harness check $CODE_ROOT/<customer>/<repo>       # the live checks (API calls)
+  aj init <customer>/<repo>                  # a jail under $CODE_ROOT
+  aj check $CODE_ROOT/<customer>/<repo>       # the live checks (API calls)
 Log out and in once so GUI-launched VS Code gets the nix profile on PATH.
 NEXT
     ;;
