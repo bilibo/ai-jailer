@@ -322,7 +322,7 @@ fi
 # The repo file registers no hook: the hook that enforces the rules is the
 # one in the host's managed settings, so that is the one unit-tested.
 managed="${HARNESS_MANAGED_SETTINGS:-/etc/claude-code/managed-settings.json}"
-[ -r "$managed" ] || note MISSING "no managed settings at $managed: this host enforces nothing (NixOS: harness.enable in the host configuration; other Linux: harness bootstrap)"
+[ -r "$managed" ] || note MISSING "no managed settings at $managed: this host enforces nothing (harness bootstrap from the harness checkout's devenv shell)"
 bash "$HARNESS_TESTS/project-settings-test.sh" "$settings" "$repo" || die "the generated settings file fails the harness checks"
 [ -r "$managed" ] || exit 1
 hook=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$managed")

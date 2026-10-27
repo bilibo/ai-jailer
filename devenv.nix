@@ -1,11 +1,18 @@
-# This repo is its own harnessed project and the template install.sh users
-# clone: Claude Code and tmux come from this shell. It is also the command
-# center (docs/roadmap.md, "Target flow"): the session here accepts what
-# project sessions propose. Every option a project devenv.nix can set is
-# listed below, the unused ones commented out; devenv/devenv.nix has the
-# descriptions. The hook refuses this file from a session: edit it by hand.
-_: {
+# This repo is its own harnessed project and the control point for the host:
+# the human runs `harness bootstrap` from this shell (never a session), with
+# this checkout as the harness ref, so the managed rules at /etc/claude-code,
+# the CLI and the workers come from one revision, and a host.nix here reaches
+# the rules. Claude Code and tmux come from this shell too. Every option a
+# project devenv.nix can set is listed below, the unused ones commented out;
+# devenv/devenv.nix has the descriptions. The hook refuses this file from a
+# session: edit it by hand.
+{ config, pkgs, ... }:
+{
   name = "claude-nix-harness";
+  # The `harness` CLI built from this checkout, and the ref bootstrap, upgrade
+  # and init use: `path:` carries untracked files such as host.nix.
+  packages = [ (import ./pkgs/harness.nix { inherit pkgs; }) ];
+  env.HARNESS_REF = "path:${config.devenv.root}";
   harness = {
     claudeCode.enable = true;
     # readFence = true;                # hide the rest of $HOME from sandboxed commands (roadmap 2.1)

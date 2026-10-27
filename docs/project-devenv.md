@@ -154,8 +154,8 @@ Whether a managed sandbox honours a repo's list, merges it with the
 managed base list or ignores it is not settled: check V2 in the runbook
 (section 5) is pending as of 2026-10-27. Until it has run, treat this
 option as unconfirmed, and expect to put the host in the host-wide
-`harness.extraAllowedDomains` of the NixOS module if it turns out to be
-ignored. Hosts not on either list prompt in an interactive session and are
+`extraAllowedDomains` of the harness checkout's `host.nix` if it turns out
+to be ignored. Hosts not on either list prompt in an interactive session and are
 refused in a `-p` one.
 
 ## The other harness options

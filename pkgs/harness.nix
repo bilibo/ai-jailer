@@ -17,6 +17,7 @@
 }:
 let
   inherit (pkgs) lib;
+  devenvCache = import ./devenv-cache.nix;
   # Prepended to the caller's PATH (inheritPath), so sudo, nix, claude, code,
   # dnf, rpm, systemctl, semanage, tmux and bwrap still come from the host.
   runtimeInputs = with pkgs; [
@@ -57,10 +58,13 @@ pkgs.writeShellApplication {
     HARNESS_REV = rev;
     HARNESS_TESTS = "${tests}";
     HARNESS_DEFAULT_REF = defaultRef;
-    # bootstrap writes these into the user's direnv and tmux config; the
-    # home module reads the same files.
+    # bootstrap writes these into the user's direnv and tmux config;
+    # host-config-test asserts the same files.
     HARNESS_DIRENV_TOML = "${./direnv.toml}";
     HARNESS_TMUX_CONF = "${./tmux.conf}";
+    # The devenv cache bootstrap puts into nix.conf (pkgs/devenv-cache.nix).
+    HARNESS_DEVENV_CACHE = devenvCache.url;
+    HARNESS_DEVENV_KEY = devenvCache.key;
   };
   text = ''
     usage() {

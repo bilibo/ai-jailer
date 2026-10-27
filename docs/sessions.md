@@ -159,9 +159,9 @@ dated roadmap entry.
 - The mod policy: `managed-tree-test` over both managed trees (no
   marketplace directory, no `extraKnownMarketplaces` or `enabledPlugins`,
   the guard option, an empty `strictKnownMarketplaces`,
-  `disableSideloadFlags`, `allowManagedHooksOnly`), `nixos-module-eval` for
-  the tree the NixOS module links, `hook-test` for the `claude plugin`
-  refusals.
+  `disableSideloadFlags`, `allowManagedHooksOnly`), `managed-host-eval` for
+  the host.nix options and the `managed-wsl` tree, `hook-test` for the
+  `claude plugin` refusals.
 - The proposal flow is a contract between models and a human, so its test
   is live: the live suite (`harness check`) is to gain a case where a work
   session's refused edit ends as a proposal in chat and not as an edit

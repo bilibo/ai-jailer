@@ -1,5 +1,5 @@
 {
-  description = "claude-nix-harness: project-scoped, guard-railed Claude Code for any host with Nix; NixOS adds the managed layer";
+  description = "claude-nix-harness: guard-railed Claude Code for any Linux host with Nix, set up from this checkout";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -23,12 +23,6 @@
         );
     in
     {
-      nixosModules.harness = ./nixos;
-      nixosModules.default = self.nixosModules.harness;
-
-      homeModules.harness = ./home;
-      homeModules.default = self.homeModules.harness;
-
       # For other module systems, e.g. a future nix-darwin module.
       lib = import ./lib { inherit (nixpkgs) lib; };
 
@@ -36,16 +30,37 @@
         pkgs:
         let
           direnvPackage = pkgs.direnv;
+          # Host-wide options for the managed tree (lib/managed-tree.nix's
+          # arguments: allowLocalCommits, allowMemoryEdits, allowConnectors,
+          # extraDeny, extraAllowedDomains, allowManagedHooksOnly,
+          # extraKnownMarketplaces, direnvPackage, platform) from an optional
+          # host.nix at the checkout root: an attrset, or a function of pkgs.
+          # Gitignored: it is one host's policy. A `path:<checkout>` ref, which
+          # bootstrap uses from a checkout, carries it; a `github:` ref never
+          # sees it and builds the defaults. An unknown key fails evaluation.
+          hostArgs =
+            if builtins.pathExists ./host.nix then
+              (
+                let
+                  h = import ./host.nix;
+                in
+                if builtins.isFunction h then h pkgs else h
+              )
+            else
+              { };
         in
         {
-          # Host tools for an unmanaged host, pinned by this flake's lock:
+          # Host tools, pinned by this flake's lock:
           # `nix profile add path:<checkout>#direnv path:<checkout>#devenv`
           # (`harness bootstrap` does this). The same direnv the hooks
-          # call, the same devenv the modules assume.
+          # call, the same devenv the devenv module assumes.
           direnv = direnvPackage;
           inherit (pkgs) devenv;
-          # The managed tree: every rule, for every user on the host.
-          managed = managedTree pkgs { };
+          # The managed tree: every rule, for every user on the host. Bootstrap
+          # links `managed-wsl` where it detects WSL (the Windows side hidden
+          # from the sandbox), `managed` elsewhere.
+          managed = managedTree pkgs hostArgs;
+          managed-wsl = managedTree pkgs (hostArgs // { platform = "wsl"; });
           # What the devenv module writes into a repo, with default options;
           # `/repo` stands for the checkout path devenv passes.
           project-settings = (pkgs.formats.json { }).generate "claude-settings.json" (
@@ -77,7 +92,7 @@
           default = self.packages.${pkgs.stdenv.hostPlatform.system}.managed;
         }
         # claude-code is unfree: exported, like the check below, only when the
-        # evaluator allows it. The home and devenv modules use the same file.
+        # evaluator allows it. The devenv module uses the same file.
         // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
           # pkgs.claude-code without the LD_LIBRARY_PATH its wrapper leaks
           # into every hook, command and MCP server (pkgs/claude-code.nix),
@@ -122,105 +137,17 @@
             inherit (pkgs) lib;
             direnvPackage = direnvStub;
           };
-          # The NixOS module evaluated with `extra` merged in, never built
-          # into a system: only the slices the checks read are forced (the
-          # tree linked at /etc/claude-code, the worker users, groups, sudo
-          # rule and substituters, config.assertions), none needs a
-          # toplevel. The root filesystem and grub lines are what a toplevel
-          # would need; they keep a forced one from failing on the fixture.
-          # Home Manager is not an input of this flake, so `options ?
-          # home-manager` is false here and the module's worker HM branch is
-          # never evaluated; that branch is live check V6.
-          nixosSystemWith =
-            extra:
-            nixpkgs.lib.nixosSystem {
-              inherit system;
-              modules = [
-                self.nixosModules.harness
-                {
-                  nixpkgs.pkgs = pkgs;
-                  harness.enable = true;
-                  system.stateVersion = "26.05";
-                  fileSystems."/" = {
-                    device = "x";
-                    fsType = "ext4";
-                  };
-                  boot.loader.grub.enable = false;
-                }
-                extra
-              ];
-            };
-          nixosConfig = extra: (nixosSystemWith extra).config;
-          managedEtc = (nixosConfig { }).environment.etc."claude-code".source;
-          workerFixture.harness = {
-            owner = "raul";
-            workers = {
-              acme = {
-                gitName = "Claude (acme)";
-                gitEmail = "claude-acme@example.invalid";
-              };
-              beta = {
-                uid = 1101;
-                gitName = "Claude (beta)";
-                gitEmail = "claude-beta@example.invalid";
-                homeManager = false;
-              };
-            };
+          # The managed tree with every host.nix option set, as a host would
+          # set it; managed-host-eval reads the settings it renders.
+          hostTree = managedTree pkgs {
+            allowLocalCommits = true;
+            allowMemoryEdits = true;
+            allowConnectors = true;
+            extraDeny = [ "Bash(x)" ];
+            extraAllowedDomains = [ "example.com" ];
+            extraKnownMarketplaces = [ "example-market" ];
+            allowManagedHooksOnly = false;
           };
-          workerSystem = nixosSystemWith workerFixture;
-          workerSlices =
-            let
-              c = workerSystem.config;
-            in
-            pkgs.writeText "nixos-workers.json" (
-              builtins.toJSON {
-                acme = {
-                  inherit (c.users.users."w-acme")
-                    group
-                    extraGroups
-                    homeMode
-                    linger
-                    ;
-                };
-                betaUid = c.users.users."w-beta".uid;
-                acmeMembers = c.users.groups."w-acme".members;
-                hasAgents = c.users.groups ? agents;
-                sudoRules = c.security.sudo.extraRules;
-                inherit (c.nix.settings) extra-substituters;
-                etc = "${c.environment.etc."claude-code".source}";
-                hasHomeManager = workerSystem.options ? home-manager;
-                failed = map (a: a.message) (builtins.filter (a: !a.assertion) c.assertions);
-              }
-            );
-          # Each case: module config and a substring of the first failing
-          # `harness:` assertion message it must produce (nixos/default.nix).
-          assertionCases = [
-            {
-              config.security.allowUserNamespaces = false;
-              expect = "harness: the Claude Code sandbox (bubblewrap) needs security.allowUserNamespaces = true.";
-            }
-            {
-              config = workerFixture // {
-                nix.settings.trusted-users = [ "w-acme" ];
-              };
-              expect = "harness: worker users and their groups must not be in nix.settings.trusted-users: w-acme.";
-            }
-            {
-              config = workerFixture // {
-                nix.settings.trusted-users = [ "@agents" ];
-              };
-              expect = "harness: worker users and their groups must not be in nix.settings.trusted-users: @agents.";
-            }
-            {
-              config.harness = { inherit (workerFixture.harness) workers; };
-              expect = "harness: harness.workers is set, so harness.owner must name the human's login.";
-            }
-          ];
-          harnessAssertion =
-            extra:
-            pkgs.lib.findFirst (a: pkgs.lib.hasPrefix "harness:" a.message) null (
-              builtins.filter (a: !a.assertion) (nixosConfig extra).assertions
-            );
           # The devenv module under lib.evalModules, not devenv: stand-ins
           # for the devenv options it sets or reads, the checkout at /repo.
           # The file it would write, its packages and its enterShell as JSON.
@@ -321,45 +248,25 @@
           check-parser-test =
             test "check-parser-test" ./tests/check-parser-test.sh
               "${p.harness}/bin/harness ${./tests/fixtures}";
-          # The module's managed tree: the sandbox block, the hook by its
-          # stable path, the deny rules, the mod policy with no marketplace
-          # directory. Then the worker fixture: users, groups, the owner's
-          # sudo rule, the devenv substituter, no failed assertion, and no
-          # Home Manager in the option tree (see nixosSystemWith).
-          nixos-module-eval = pkgs.runCommand "nixos-module-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
-            s=${managedEtc}/managed-settings.json
-            jq -e '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and .syncClaudeAiSkills == false and .syncClaudeAiPlugins == false and (.sandbox.network | has("strictAllowlist") | not)' "$s"
-            jq -e '[.hooks[][].hooks[].command] | length > 0 and all(startswith("/etc/claude-code/hooks/"))' "$s"
-            jq -e '.permissions.deny | index("Bash(git push)") and index("Bash(nh os switch)")' "$s"
-            jq -e '.allowManagedHooksOnly == true and .disableSideloadFlags == true and .strictKnownMarketplaces == [] and (has("enabledPlugins") or has("extraKnownMarketplaces") | not)' "$s"
-            test -x ${managedEtc}/hooks/env-guard.sh
-            test ! -e ${managedEtc}/plugins
-            w=${workerSlices}
-            jq -e '.acme.group == "w-acme" and (.acme.extraGroups | index("agents")) and .acme.homeMode == "0750" and .acme.linger == true' "$w"
-            jq -e '.betaUid == 1101 and (.acmeMembers | index("raul") and index("w-acme")) and .hasAgents' "$w"
-            jq -e '[.sudoRules[] | select(.runAs == "%agents")] | length == 1 and (.[0].users == ["raul"]) and (.[0].commands[0].options | index("NOPASSWD"))' "$w"
-            jq -e '(."extra-substituters" | index("https://devenv.cachix.org")) and (.etc | startswith("${builtins.storeDir}/")) and .hasHomeManager == false and .failed == []' "$w"
-            test -e "$(jq -r .etc "$w")/managed-settings.json"
-            echo "nixos-module-eval: managed tree ${managedEtc}, workers ok" | tee $out
+          # The host.nix options reach the managed tree: a tree with every
+          # option set against the default one, and the WSL variant hides the
+          # Windows side.
+          managed-host-eval = pkgs.runCommand "managed-host-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
+            d=${p.managed}/managed-settings.json
+            w=${p.managed-wsl}/managed-settings.json
+            h=${hostTree}/managed-settings.json
+            jq -e '.permissions.deny | index("Bash(x)") and index("Bash(git commit)") == null' "$h"
+            jq -e '.permissions.deny | index("Bash(x)") == null and index("Bash(git commit)")' "$d"
+            jq -e '.sandbox.network.allowedDomains | index("example.com")' "$h"
+            jq -e '.sandbox.network.allowedDomains | index("example.com") == null' "$d"
+            jq -e '.disableClaudeAiConnectors == false and (has("allowManagedHooksOnly") | not) and .strictKnownMarketplaces == ["example-market"]' "$h"
+            jq -e '.disableClaudeAiConnectors == true and .allowManagedHooksOnly == true and .strictKnownMarketplaces == []' "$d"
+            grep -q 'ALLOW_MEMORY_EDITS="1"' ${hostTree}/hooks/env-guard.sh
+            grep -q 'ALLOW_MEMORY_EDITS="0"' ${p.managed}/hooks/env-guard.sh
+            jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") and index("/run/WSL")' "$w"
+            jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") == null' "$d"
+            echo "managed-host-eval: host options and the wsl variant render as expected" | tee $out
           '';
-          nixos-module-assertion = pkgs.runCommand "nixos-module-assertion" { } (
-            pkgs.lib.concatMapStrings (
-              case:
-              let
-                a = harnessAssertion case.config;
-              in
-              if a == null || !pkgs.lib.hasInfix case.expect a.message then
-                ''
-                  echo ${pkgs.lib.escapeShellArg "expected: ${case.expect}"} >&2
-                  echo ${pkgs.lib.escapeShellArg "got: ${if a == null then "no failed harness assertion" else a.message}"} >&2
-                  exit 1
-                ''
-              else
-                ''
-                  echo ${pkgs.lib.escapeShellArg a.message} | tee -a $out
-                ''
-            ) assertionCases
-          );
           # The devenv module writes the project layer only: no hooks, no deny
           # rule but extraDeny, the sandbox scalars, the seven literal
           # denyWrite paths under the checkout (/repo), the project domains,

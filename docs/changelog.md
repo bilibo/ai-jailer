@@ -163,6 +163,70 @@ happened and what was learned on the day.
   `claude-code-test` now fails if the RUNPATH comes back. Verified:
   the override builds on both nixpkgs revisions with the version check
   on, and the test script passes 7 of 7 on each.
+- Found evaluating `bilibo/nixos-wsl` with the module (a host with the
+  Home Manager NixOS module): the README's `workers.acme = { };` failed
+  with `harness.workers.test.gitEmail was accessed but has no value
+  defined`, because the worker branch reads `gitName` and `gitEmail` and
+  neither had a default. `nix flake check` missed it: Home Manager is not
+  an input here, so the fixture never reaches that branch, and it set
+  both anyway. Both now default to bootstrap's identity (`Claude (<c>)`,
+  `claude-<c>@<hostName>.invalid`); the fixture's `acme` declares none
+  and `nixos-module-eval` checks the defaults. Also learned there: the
+  Home Manager NixOS module does not source `hm-session-vars.sh`, and
+  the worker branch does not enable `programs.bash`, so a worker's
+  `home.sessionVariables.HARNESS_CODE_ROOT` never reaches its shell.
+  With the default `codeRoot` it does not matter (ccmux bakes the root
+  in, and init and the devenv module fall back to `~/code/git`); a
+  non-default `codeRoot` reaches ccmux only. Not fixed.
+- Decision (the owner's), roadmap item 12, reopening item 11's NixOS
+  module and Home Manager decisions: one route on every Linux, `harness
+  bootstrap` from the harness checkout's devenv shell, which carries the
+  CLI built from the checkout and sets `HARNESS_REF=path:<checkout>`;
+  the host repo (`bilibo/nixos-wsl`) carries nothing of the harness but
+  `ccmux` and the tmux rules, so it stays usable on non-WSL NixOS. Why:
+  the NixOS module put the users, rules and options into the host
+  configuration, and a second route meant two things to keep in sync.
+- Done: `nixos/` and `home/` deleted with `nixosModules`, `homeModules`,
+  `nixos-module-eval` and `nixos-module-assertion`; three assertions
+  that lived only there (`failIfUnavailable`,
+  `allowUnsandboxedCommands = false`, `Bash(nh os switch)` denied) moved
+  to `managed-tree-test`. The host-wide options live in a gitignored
+  `host.nix` at the checkout root (an attrset, or a function of `pkgs`),
+  merged by `flake.nix` into `packages.managed`; `packages.managed-wsl`
+  is the `platform = "wsl"` variant; `managed-host-eval` checks both.
+  `pkgs/devenv-cache.nix` is the single source of the cache url and key:
+  `pkgs/harness.nix` exports them to bootstrap. The root `devenv.nix`
+  adds the `harness` package and `env.HARNESS_REF`.
+- `bootstrap.sh`: the NixOS `NO_ROOT` exception is gone; NixOS runs
+  the root steps with `nixos_nix_conf` (prints the `nix.settings` block,
+  never writes or records `nix.conf`), the sysctl printed as
+  `boot.kernel.sysctl` in `userns_steps`, no sudoers rule (an `info`
+  line, `--owner-sudo` ignored), `managed_step` linking `#managed-wsl`
+  under WSL, and `nixos_steps` with its `harness.*` lines deleted.
+  Doctor's NixOS-only "no receipt" info line is gone, and
+  `accounts_report` names a worker the receipt lists but `getent` lacks
+  (`users.mutableUsers = false` at a rebuild). `root_write` also refuses
+  `$STORE_DIR`; `root_link`'s refusal names the old module's
+  `/etc/static` link. `scripts/install.sh` no longer prints its own
+  `nix.settings` copy on NixOS and runs `worker_plan` there too, minus
+  the sudoers lines.
+- Learned: a `path:` ref under the owner's home is unreadable to a
+  worker (0700 homes, NixOS and Fedora alike), so every per-worker
+  bootstrap would have failed. `worker_user_steps` now prefetches the
+  checkout into the store once (`nix flake prefetch --json`) and hands
+  the workers that store path; open: the worker's `harness init` then
+  pins that store path in `devenv.yaml` (roadmap item 12). Also learned:
+  `writeShellApplication`'s `runtimeEnv` puts the cache url into the
+  wrapper text, so a test that symlinked `nix.conf` to the wrapper
+  stopped seeing the cache as missing; the test links a store directory
+  now. Checked on the NixOS-WSL host: `setup-etc.pl` removes only `/etc`
+  links into `/etc/static`; `/etc/sudoers` has no `@includedir`;
+  `users.mutableUsers` is true.
+- Tests: bootstrap 17 is the NixOS root-steps case, 24 the NixOS workers
+  case (argv order as test 20 minus the sudo rule), 27 WSL linking
+  `managed-wsl`, 28 a missing receipt worker, 29 the prefetched `path:`
+  ref; doctor and install tests follow. 271, 71 and 81 pass. Untested
+  live: everything of item 12's open list.
 
 ## 2026-10-26
 

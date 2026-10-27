@@ -1,5 +1,5 @@
-# direnv's global config on a harness host: the home module reads it on
-# NixOS, harness bootstrap writes it to ~/.config/direnv/direnv.toml elsewhere.
+# direnv's global config on a harness host: harness bootstrap writes it to
+# ~/.config/direnv/direnv.toml.
 [global]
 strict_env = true
 # devenv evaluations are slow; the default 5s warning is noise.

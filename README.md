@@ -17,15 +17,14 @@ live yet; the first-run checks are pending (runbook section 5), and the
 
 | Host | Route | Tested |
 | --- | --- | --- |
-| Fedora 44 or newer, Ubuntu, any other Linux | `scripts/install.sh --workers <a,b> [--owner <login>]` ("Any Linux" below): Nix if missing, then `harness bootstrap` creates the worker users, the sudo rule and the `/etc/claude-code` link, and sets each worker up as that user. Home Manager standalone per worker is the documented alternative (runbook section 4) | The previous shape (repo file only, one user) ran end to end on Fedora 44 and Ubuntu 26.10 laptops (2026-10-22). The worker route is covered by the stubbed-host tests only; `nix build --out-link /etc/claude-code` as root is untested |
-| NixOS, NixOS-WSL | The NixOS module with `harness.owner` and `harness.workers` ("Usage" below); it generates the users, groups, sudo rule, linger, devenv cache, the managed link and, where the host has the Home Manager module, each worker's home configuration | Module evaluation and assertions in `nix flake check`; no host has activated this shape |
+| Any Linux: Fedora 44 or newer, Ubuntu, NixOS, NixOS-WSL, other | One route, run from this checkout's devenv shell ("Usage" below): `harness bootstrap --workers <a,b> [--owner <login>]` links `/etc/claude-code`, creates the worker users, groups and linger, the sudo rule (not on NixOS: the owner's own sudo serves), and sets each worker up as that user. `scripts/install.sh` runs the same after putting Nix on a host that lacks it. NixOS differs in what bootstrap may write: `nix.conf` and the user-namespace sysctl are the system configuration's and are printed as options; the users come from `useradd` (`users.mutableUsers`, the default) | The previous shape (repo file only, one user) ran end to end on Fedora 44 and Ubuntu 26.10 laptops (2026-10-22). The worker route and the NixOS route are covered by the stubbed-host tests only; `nix build --out-link /etc/claude-code` as root is untested |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
 A host without the managed file enforces nothing: a repo that imports the
 devenv module warns at every shell entry, and `harness doctor` reports the
-file as MISSING. The earlier repo-file-only routes (a NixOS host with its
-own configuration, a plain NixOS-WSL host) no longer enforce anything and
-are not supported routes.
+file as MISSING. The earlier routes (a repo file only; the NixOS module
+with `harness.owner` and `harness.workers`, dropped 2026-10-27) are gone:
+a host configuration carries nothing of the harness.
 
 `devenv/` is the project side: every repo imports it. A container route
 was built and set aside; it lives in the claude-nix-harness-container repo,
@@ -41,9 +40,8 @@ tools, variables and rules without knowing Nix: `docs/project-devenv.md`.
 ```text
 lib/        pure Nix: deny rules, settings.nix (the managed body and the repo's project layer), hooks packaging, managed-tree packaging
 hooks/      env-guard.sh (the guard hook), tmux-notify.sh
-nixos/      NixOS module: harness.* -> /etc/claude-code, the worker users, the sudo rule
-home/       home-manager module: devenv, direnv, tmux, programs.claude-code, `ccmux`; applied per worker by the NixOS module
 devenv/     devenv module (devenv/devenv.nix) every repo imports: generates the project layer of .claude/settings.json
+host.nix    optional, gitignored: this host's managed-tree options (extra deny rules, domains, the memory and commit switches); flake.nix merges it into `packages.managed`
 pkgs/       ccmux launcher, direnv.toml and tmux.conf (the host-side settings), claude-code override (nixpkgs' package without the `LD_LIBRARY_PATH` every command would inherit), devenv-cache.nix (the devenv cache key), the `harness` CLI (harness.nix; bodies under harness/: bootstrap.sh for bootstrap, upgrade, doctor and reset, init.sh, check.sh)
 scripts/    install.sh: the one install route on Linux; what must happen before Nix exists (Fedora's packages, or the nix-installer), then `harness bootstrap` with the worker flags, then `harness init` on the checkout
 tests/      hook-test.sh (env-guard.sh unit tests), project-settings-test.sh (the generated repo file, plain and fenced), ccmux-test.sh, host-config-test.sh, install-test.sh and harness-bootstrap-test.sh (the install route with stubbed hosts), harness-doctor-test.sh, harness-init-test.sh, managed-tree-test.sh (the mod policy: no marketplace directory, the keys that refuse mods), claude-code-test.sh (the override: wrapper, binary untouched, `--version`; unfree, so only when the evaluator allows it), check-parser-test.sh (`harness check --parse` against the transcripts in fixtures/)
@@ -94,10 +92,11 @@ repo's shell brings the CLI, tmux and jq for `ccmux` sessions; with a host
 
 This repo keeps no Windows installer (since 2026-10-24). A host repo
 installs NixOS-WSL; `bilibo/nixos-wsl` is the reference one, and its README
-has the installer and its flags. Under this design that host needs the
-NixOS module above (`harness.owner`, `harness.workers`) to enforce
-anything; whether that repo's configuration has been moved over is not
-recorded here. The module's `platform` auto-detects WSL.
+has the installer and its flags. That repo carries nothing of the harness
+but `ccmux` and the tmux rules (since 2026-10-27); the rules and the
+workers come from `harness bootstrap`, run there as on any Linux ("Usage"
+below). Bootstrap detects WSL and links the `managed-wsl` tree, which
+hides `/mnt/c` and `/run/WSL` from the sandbox.
 
 What a session gets on WSL is in `lib/settings.nix` (`platform = "wsl"`):
 `/mnt/c` and `/run/WSL` hidden and `WSL_INTEROP` stripped, so it can
@@ -174,7 +173,8 @@ Some limits stay with whoever launches the session:
   hook and the sandbox are the gate, not the prompt.
 - The claude.ai account's connectors (Gmail, Drive, Notion, ...) are off
   through `disableClaudeAiConnectors`, which holds from any scope;
-  `harness.allowConnectors` turns them back on per repo, or per host.
+  `harness.allowConnectors` turns them back on per repo, or `allowConnectors`
+  in `host.nix` per host.
 
 ### Lockdown level
 
@@ -197,38 +197,59 @@ items, in order, is the "sandbox hardening" entry of the roadmap.
 
 ## Usage
 
-On NixOS (or NixOS-WSL), in the host flake:
+The checkout is the control point, on every Linux. Its devenv shell carries
+the `harness` CLI built from the checkout and sets the harness ref to the
+checkout, so the rules linked at `/etc/claude-code`, the CLI and the
+workers come from one revision:
 
-```nix
-# flake.nix of your NixOS configuration
-inputs.harness = {
-  url = "github:bilibo/claude-nix-harness";
-  inputs.nixpkgs.follows = "nixpkgs";
-};
-
-# NixOS
-imports = [ inputs.harness.nixosModules.harness ];
-harness = {
-  enable = true;                       # platform auto-detects wsl vs linux
-  owner = "raul";                      # your login; member of every worker group
-  workers.acme = { };                  # user w-acme, 0750 home, linger, sudo rule
-  workers.globex.gitEmail = "claude-globex@example.invalid";
-  # ownerSudo = "nopasswd";            # or "password" or "none"
-};
-security.allowUserNamespaces = true;   # the module asserts it
+```sh
+git clone https://github.com/bilibo/claude-nix-harness.git ~/code/claude-nix-harness
+cd ~/code/claude-nix-harness
+devenv shell                                   # or direnv allow, once bootstrap has put direnv on PATH
+harness bootstrap --workers acme,globex        # sudo: /etc/claude-code, the users, groups, linger, the sudo rule; then each worker's user side
+harness doctor
+git pull && harness upgrade                    # moves the rules, the profile packages and the workers to the checkout's lock
 ```
 
-The module also writes the managed tree to `/etc/claude-code`, puts
-devenv.cachix.org in the root `nix.conf` (`devenvCache`; workers cannot add
-substituters), keeps every worker out of `trusted-users` (asserted), and,
-where the host has the Home Manager NixOS module, applies
-`homeModules.harness` to each worker. The host-wide options
-(`allowLocalCommits`, `allowMemoryEdits`, `allowConnectors`,
-`allowManagedHooksOnly`, `extraDeny`, `extraAllowedDomains`,
-`extraKnownMarketplaces`) are in `nixos/default.nix`. While changing the
-harness itself, build the host from a checkout instead of the locked
-revision: `nixos-rebuild switch --override-input harness
-path:/path/to/claude-nix-harness`.
+The host needs Nix with flakes, the devenv cache in the root `nix.conf`
+(bootstrap writes it; on NixOS it prints the `nix.settings` block to add),
+`devenv` to enter the shell (`nix run nixpkgs#devenv -- shell` does without
+one on PATH), and `bubblewrap` and `socat` for the sandbox. On a host
+without Nix, `scripts/install.sh` puts it there first ("Any Linux" above).
+
+NixOS and NixOS-WSL run the same command. What differs is what bootstrap
+may write there: `/etc/nix/nix.conf` and the sysctls are the system
+configuration's (store symlinks), so the `nix.settings` and
+`boot.kernel.sysctl` lines are printed where the host lacks them; no sudo
+rule is installed (`/etc/sudoers` has no `@includedir`), so `ccmux` hands
+over to a worker with whatever sudo the owner has, password or not; the
+workers come from `useradd`, which holds while `users.mutableUsers` is true
+(the default): a rebuild with it false removes them, and `harness doctor`
+reports a worker the receipt names but the host lacks. The `/etc/claude-code`
+link survives rebuilds (NixOS only cleans links into `/etc/static`). A host
+configuration carries nothing of the harness; `bilibo/nixos-wsl` takes only
+`ccmux` and the tmux rules from this flake.
+
+The host-wide options of the managed tree go into `host.nix` at the
+checkout root, gitignored (it is this host's policy, not the harness's); a
+`path:<checkout>` ref, which the devenv shell sets, carries it, the
+published `github:` ref never does, and bootstrap says so when it finds one
+it cannot use. An attrset, or a function of `pkgs`; every key is an
+argument of `lib/managed-tree.nix`, and an unknown one fails the build:
+
+```nix
+# host.nix
+{
+  extraDeny = [ "Bash(az devops *)" ];
+  extraAllowedDomains = [ "dev.azure.com" ];
+  allowMemoryEdits = false;        # memory is a persistence channel (runbook section 4)
+  allowLocalCommits = false;
+  allowConnectors = false;
+  # allowManagedHooksOnly = true; extraKnownMarketplaces = [ ]; platform = "linux";
+}
+```
+
+`platform` needs no setting: bootstrap links `managed-wsl` under WSL.
 
 Every repo the harness should govern, on every host, in the worker's clone:
 
@@ -262,26 +283,26 @@ managed rules still apply (`docs/project-devenv.md`, "Turning the guard
 rails off (and on)"). Only a human can set it: the deny rules and the hook
 refuse an agent's edits to `devenv.nix`.
 
-The host needs direnv >= 2.38 for `require_allowed` in `.envrc` (the
-locked nixpkgs ships 2.38.2; the home module asserts the minimum),
-`devenv` on PATH, and `bubblewrap` and `socat` with user namespaces
-enabled for the sandbox (`failIfUnavailable` refuses to start a session
-without it). Without a module, `nix profile add path:<checkout>#direnv
-path:<checkout>#devenv path:<checkout>#ccmux` adds them from this flake,
-pinned by its lock, and `path:<checkout>#claude-code` when Claude Code
-itself comes from Nix: nixpkgs' wrapper exports an `LD_LIBRARY_PATH` that
-every hook, command and MCP server inherits and that kills a distro binary
-loading libasound (`pkgs/claude-code.nix` drops the variable; the binary
-is otherwise unpatched, so audio output, which needed it, does not work;
-the home and devenv modules use it). `harness doctor` reports
+Each user needs direnv >= 2.38 for `require_allowed` in `.envrc` (the
+locked nixpkgs ships 2.38.2; bootstrap checks the minimum), `devenv` on
+PATH, and the host `bubblewrap` and `socat` with user namespaces enabled
+for the sandbox (`failIfUnavailable` refuses to start a session without
+it). Bootstrap's profile step adds direnv, devenv, ccmux and harness from
+this flake, pinned by its lock (`nix profile add path:<checkout>#direnv
+...` by hand does the same), and `path:<checkout>#claude-code` is the
+package when Claude Code itself comes from Nix: nixpkgs' wrapper exports an
+`LD_LIBRARY_PATH` that every hook, command and MCP server inherits and that
+kills a distro binary loading libasound (`pkgs/claude-code.nix` drops the
+variable; the binary is otherwise unpatched, so audio output, which needed
+it, does not work; the devenv module uses it). `harness doctor` reports
 every host prerequisite, `claude doctor` included, and `harness init
 <customer>/<repo>` writes the files above into a repo and runs its first
 shell entry. `nix run path:<checkout>#harness -- <command>` runs the CLI
-from a checkout.
+from a checkout outside its shell.
 
-The home module seeds `~/.claude/settings.json` once, as a plain 0600 file,
-from `harness.userSettingsSeed` (default empty); it is never a store
-symlink, because Claude Code writes that file itself (`/model`).
+`~/.claude/settings.json` is the user's own and is never a store symlink:
+Claude Code writes it itself (`/model`). Whether it needs to exist at all
+is open (runbook, check V6).
 
 ### Where project configuration goes
 

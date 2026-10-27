@@ -46,7 +46,8 @@ where the hard rules live.
    ```
 
    The sudo rule is `<owner> ALL=(%agents) NOPASSWD: ALL`, so it asks for
-   no password unless you chose `ownerSudo = "password"`. Inside a repo
+   no password unless you chose `--owner-sudo password`; on NixOS there is
+   no rule and your own sudo decides. Inside a repo
    under the worker's code root, the project name is optional:
    `ccmux`, `ccmux --worktree`.
 3. Your own session in a repo of your own, or in this checkout, is an
@@ -159,16 +160,18 @@ script wrote:
 
 ## 4. Host configuration
 
-Two shapes; both end in the same thing: the managed tree at
-`/etc/claude-code`, a user and group per worker, the `agents` marker group
-holding every worker, the owner in each worker's group, linger on for each
-worker, and the one sudo rule.
+One shape on every Linux, run from the harness checkout's devenv shell
+(`cd ~/code/claude-nix-harness && devenv shell`), which carries the
+`harness` CLI built from the checkout and sets the ref to it: the managed
+tree at `/etc/claude-code`, a user and group per worker, the `agents`
+marker group holding every worker, the owner in each worker's group, linger
+on for each worker, and the one sudo rule where the host can take one.
 
-| Shape | Set |
+| Host | Set |
 | --- | --- |
-| NixOS, NixOS-WSL | The NixOS module: `harness.enable = true;`, `harness.owner = "<login>";`, `harness.workers.<customer> = { };` per customer, `security.allowUserNamespaces = true;`. Per worker options: `user` (default `w-<customer>`), `uid`, `gitName`, `gitEmail`, `extraGroups`, `homeManager` (default true), `codeRoot` (default `code/git` under the worker's home). `ownerSudo` is `nopasswd` (default), `password` or `none`. Where the host has the Home Manager NixOS module each worker gets `homeModules.harness` applied; without it the evaluation still works and the worker's tools come from `harness bootstrap --no-root`, run as the worker. `devenvCache` (default true) puts devenv.cachix.org in the root `nix.conf`. Rebuild with `nh os switch` or `boot`; never activated from a session. The module asserts user namespaces, `owner` set and not a worker, no worker or its groups in `trusted-users`, and valid, distinct names |
-| Fedora, Ubuntu, other Linux | `scripts/install.sh --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]`, which installs Nix where it is missing (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer) and hands over to `harness bootstrap`. Its root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (untested live); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/claude-nix-harness`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#harness -- bootstrap --no-root --yes`: profile packages (direnv, devenv, ccmux, harness), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` prints the planned worker steps and changes nothing. On NixOS bootstrap prints the module options instead of writing anything under `/etc` |
-| Fedora, Ubuntu with Home Manager standalone per worker | The alternative to bootstrap's per-worker step, for a host that already keeps its Home Manager configuration in a flake. The root steps above still run (`harness bootstrap --workers ... --no-profile`, untested); the worker's home then comes from the host flake: `sudo -u w-acme -i nix run github:nix-community/home-manager -- switch --flake <host-flake>#w-acme` (untested; check the command against Home Manager's documentation for the version in use) |
+| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `harness bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell; on a host without Nix, `scripts/install.sh` with the same flags installs it first (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing) and hands over. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL; untested live); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/claude-nix-harness`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#harness -- bootstrap --no-root --yes --harness <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ccmux, harness), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing |
+| NixOS, NixOS-WSL: the differences | `/etc/nix/nix.conf` and the sysctls are the system configuration's (store symlinks): bootstrap prints the `nix.settings` block where flakes or the devenv cache are missing, and the `boot.kernel.sysctl` option where user namespaces are confined, and writes neither. No sudo rule: `/etc/sudoers` has no `@includedir`, so `ccmux` hands over with the owner's own sudo, password or not (`--owner-sudo` is ignored with a note). The workers come from `useradd`, which holds while `users.mutableUsers` is true (the default; nothing here can read the value): a rebuild with it false removes them, and `harness doctor` reports a worker the receipt names but the host lacks. The `/etc/claude-code` link survives rebuilds (NixOS cleans only links into `/etc/static`); a link via `/etc/static` is the old module's and makes bootstrap stop with the fix. Nothing of the harness goes into the host configuration |
+| Home Manager standalone per worker | The alternative to bootstrap's per-worker step, for a host that already keeps its Home Manager configuration in a flake. The root steps above still run (`harness bootstrap --workers ... --no-profile`, untested); the worker's home then comes from the host flake: `sudo -u w-acme -i nix run github:nix-community/home-manager -- switch --flake <host-flake>#w-acme` (untested; check the command against Home Manager's documentation for the version in use). This flake ships no Home Manager module since 2026-10-27 |
 
 `harness bootstrap` flags: `--no-root`, `--no-profile`, `--trusted-user`,
 `--workers a,b`, `--worker x` (repeatable), `--owner <login>`,
@@ -177,10 +180,13 @@ worker, and the one sudo rule.
 `_`, starting with a letter. `HARNESS_WORKER_PREFIX` changes the `w-`
 prefix.
 
-See `nixos/default.nix` for every module option, including the host-wide
-`allowLocalCommits`, `allowMemoryEdits`, `allowConnectors`,
-`allowManagedHooksOnly`, `extraDeny`, `extraAllowedDomains` and
-`extraKnownMarketplaces`. `allowMemoryEdits` is off by default on purpose:
+The host-wide options, `allowLocalCommits`, `allowMemoryEdits`,
+`allowConnectors`, `allowManagedHooksOnly`, `extraDeny`,
+`extraAllowedDomains` and `extraKnownMarketplaces` (the arguments of
+`lib/managed-tree.nix`), go into `host.nix` at the checkout root, an
+attrset the flake merges into `packages.managed`; gitignored, reached only
+through the `path:<checkout>` ref the devenv shell sets (the README has an
+example). `allowMemoryEdits` is off by default on purpose:
 memory under `~/.claude/projects/<slug>/memory/` is text that every later
 session of that user reads as context, so it is a persistence channel for
 anything an agent picked up from a repo. With it on, only that directory
@@ -198,19 +204,17 @@ every shell entry prints `harness: guard rails off for this repo`, and
 `harness init` reports `off` and checks nothing. The managed file still
 applies in that repo (`docs/project-devenv.md`).
 
-The Home Manager module (`home/`) carries direnv config, tmux rules,
-`ccmux`, `programs.claude-code` and `HARNESS_CODE_ROOT`, and writes
-`harness.userSettingsSeed` (default empty) once to `~/.claude/settings.json`
-as a 0600 plain file after link generation; a second activation leaves it
-alone. It never carries deny rules. Whether Claude Code needs that file at
-all when absent is open (check V6).
+`~/.claude/settings.json` is each user's own plain file; nothing here
+writes it. Whether Claude Code needs it at all when absent is open (check
+V6).
 
 Windows: the host repo carries the installer, not this repo;
 `bilibo/nixos-wsl` is the reference one, and its README has the install and
-update steps. For rules to apply it needs this NixOS module; this
-repository does not record whether that configuration has been moved over.
-The VS Code extension runs its bundled binary inside WSL, as the owner;
-the managed file applies to it as well.
+update steps. It carries nothing of the harness but `ccmux` and the tmux
+rules (since 2026-10-27); the rules and the workers come from `harness
+bootstrap` run there, which links the `managed-wsl` tree. The VS Code
+extension runs its bundled binary inside WSL, as the owner; the managed
+file applies to it as well.
 
 ## 5. Verifying after a rebuild or a Claude Code upgrade
 
@@ -258,7 +262,7 @@ answer yet; the answers go in `docs/changelog.md`):
 | V3 | `allowedDomains = ["*"]`: open network or a literal host |
 | V4 | Owner watching a worker: `sudo -u w-test -i tmux attach`, against tmux `server-access` on a group-readable `-S` socket as the fallback |
 | V5 | `XDG_RUNTIME_DIR` under `sudo -u w-x -i` with linger: devenv, direnv and `tmux-notify.sh` work when ccmux exports `/run/user/$(id -u)` |
-| V6 | Home Manager seed: after activation `~/.claude/settings.json` is a plain 0600 file, `/model` rewrites it, a second activation leaves it; whether Claude Code needs the file when absent |
+| V6 | `~/.claude/settings.json`: whether Claude Code needs the file at all when absent (the Home Manager seed that wrote it went with the module, 2026-10-27) |
 | V7 | Group reads: the owner reads `/home/w-test/code/...`; `w-test` cannot list `/home/<owner>` or another worker's home |
 | V8 | A baseline `harness check` transcript in a worker repo |
 | V9 | Managed `syncClaudeAiSkills = false` honoured |
@@ -292,7 +296,7 @@ Unit tests, no Claude Code needed, from a checkout of this repo:
 ```sh
 nix flake check                                     # every suite under tests/, in the Nix sandbox
 nix shell nixpkgs#jq -c tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh   # the installed hook
-tests/ccmux-test.sh "$(command -v ccmux)"           # inside a repo shell, or after a Home Manager switch
+tests/ccmux-test.sh "$(command -v ccmux)"           # inside a repo shell, or after harness bootstrap
 ```
 
 Inside a Claude Code session the sandbox masks shell startup files and
@@ -323,24 +327,22 @@ which is the dangerous direction.
 
 ## 6. Upgrades and pins
 
-- Claude Code: from nixpkgs (`programs.claude-code`) on NixOS, auto-update
-  disabled, `nix flake update nixpkgs` moves it. Elsewhere the native
-  install; `claude update` moves it and `autoUpdates` stays off in
+- Claude Code: from a repo shell (`harness.claudeCode.enable`, this flake's
+  `claude-code` package) or the native install; `claude update` moves it and `autoUpdates` stays off in
   `~/.claude.json` so an upgrade is a decision, followed by `harness check`.
   Minimum 2.1.295 for `onFailure: block`; the settings keys were last
   checked against 2.1.296 (`lib/settings.nix` header), the Fedora host runs
   2.1.304.
-- The managed tree: on NixOS it moves with a rebuild (`nh os switch`). On
-  other Linux `harness upgrade` rebuilds `<ref>#managed` and moves the
+- The managed tree: on every host `harness upgrade` from the checkout's
+  shell, after `git pull`, rebuilds `<ref>#managed` and moves the
   `/etc/claude-code` link, re-adds direnv, devenv and ccmux to the profile
   from the current lock, then hands the user steps to the harness it just
   put in the profile (the running one is the old build). `harness
   bootstrap` alone reruns the steps with whatever harness is on PATH. A
   hook change reaches a session only through the managed link, not through
   the working tree.
-- direnv: plain `pkgs.direnv`; the home module asserts >= 2.38, so a host
-  configuration on an older nixpkgs fails to build rather than lose
-  `require_allowed`.
+- direnv: plain `pkgs.direnv`, >= 2.38 (`MIN_DIRENV` in bootstrap; doctor
+  reports an older one) for `require_allowed`.
 - devenv from nixpkgs (2.4.0 at the time of writing). Each repo pins its own
   devenv inputs in `devenv.lock`; `devenv update harness` bumps the harness
   input in one repo.
@@ -349,20 +351,20 @@ which is the dangerous direction.
 
 - **A warning at shell entry that the managed settings are unreadable, or
   `harness doctor` says `this host enforces nothing`.**
-  `/etc/claude-code/managed-settings.json` is missing or unreadable. NixOS: `harness.enable` is off or the host was
-  not rebuilt. Elsewhere: `harness bootstrap --workers ...` has not run its
-  root steps, or `harness reset` removed the link. Until it is back, no
+  `/etc/claude-code/managed-settings.json` is missing or unreadable:
+  `harness bootstrap --workers ...` has not run its root steps, or
+  `harness reset` removed the link. Until it is back, no
   rule applies on this host.
 - **`sudo -u w-acme -i` asks for a password or refuses.** The sudoers
-  file is missing, failed `visudo -cf`, or `ownerSudo` is `password` or
+  file is missing, failed `visudo -cf`, or `--owner-sudo` was `password` or
   `none`. `harness doctor` reports the file; the rule is `<owner>
   ALL=(%agents) NOPASSWD: ALL`. The worker must be in the `agents`
-  group, and the owner is the login named by `harness.owner`.
+  group, and the owner is the login bootstrap ran as (or `--owner`). On
+  NixOS there is no rule: the owner's own sudo applies, password or not.
 - **`ccmux` hands over but no tmux server or devenv shell works as the
   worker (`XDG_RUNTIME_DIR` unset, `/run/user/<uid>` missing).** Linger
   is off for the worker, so no user manager runs. `loginctl enable-linger
-  w-acme` (the module and bootstrap set it; `harness doctor` lists it per
-  worker). Use `sudo -u w-acme -i`, not a bare `sudo -u`, so the worker's
+  w-acme` (bootstrap sets it; `harness doctor` lists it per worker). Use `sudo -u w-acme -i`, not a bare `sudo -u`, so the worker's
   login shell sets its own `HARNESS_CODE_ROOT`.
 - **Agent's tools are the system ones, not the project's.** The env hook
   did not run or direnv is not allowed in that directory. Check
@@ -379,7 +381,8 @@ which is the dangerous direction.
   for the session.
 - **"sandbox unavailable" at start.** `failIfUnavailable` is on, so the
   session refuses to start. bubblewrap needs user namespaces
-  (`security.allowUserNamespaces`, asserted by the module) and works nested
+  (on NixOS the default; bootstrap prints the `boot.kernel.sysctl` line
+  where a kernel confines them) and works nested
   inside `vscode-fhs`. Inside a container it needs `/proc` unmasked.
 - **Repo hooks or project allow rules do not fire.** The hooks are the
   managed file's and always load. Project allow rules wait in an
@@ -438,9 +441,8 @@ which is the dangerous direction.
   '/nix/store/...-home-manager-files/.claude/settings.json.tmp...'`.**
   home-manager owns `~/.claude/settings.json` as a store symlink and Claude
   Code writes that file itself at user scope. Keep user-scope settings out
-  of `programs.claude-code.settings`: the managed settings carry everything
-  the harness needs, and the home module seeds the file once as a plain
-  file (`harness.userSettingsSeed`).
+  of a Home Manager `programs.claude-code.settings`: the managed settings
+  carry everything the harness needs.
 
 ## 8. Known gaps, by design
 

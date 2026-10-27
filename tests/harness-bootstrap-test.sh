@@ -21,9 +21,11 @@
 # reset still strips, --account-sync rejected, upgrade building before it
 # removes and handing the user steps to the upgraded harness, reset doing
 # nothing without a receipt, the store-symlink guard on nix.conf, a NixOS host
-# (no root step, the configuration.nix and harness.* lines printed,
-# home-manager's files left alone), the Fedora host line from doctor and a WSL
-# host line. Assumes no controlling terminal; the stub directory is the whole
+# (the root steps run but nix.conf and the sysctl, which are printed as
+# configuration.nix lines; no sudo rule; home-manager's files left alone),
+# NixOS with workers, a WSL host (its host line, the managed-wsl tree), a
+# worker the receipt names but the host lacks, and a path: ref prefetched into
+# the store for the workers. Assumes no controlling terminal; the stub directory is the whole
 # PATH (the harness adds coreutils, jq, git and friends in front, so a stub
 # named like one of those never runs: account checks use getent, not id).
 set -uo pipefail
@@ -100,6 +102,7 @@ stub nix 'case "$1" in
     [ -z "$out" ] || { rm -f "$out"; ln -s "$STUBROOT/store/managed" "$out"; }
     [ "$pf" = 0 ] || echo "$STUBROOT/store/managed" ;;
   run) shift; while [ "$1" != -- ]; do shift; done; shift; "$HARNESS_BIN" "$@"; exit $? ;;
+  flake) echo "{\"storePath\":\"$STUBROOT/store/source\"}" ;;
   profile) case "$2" in
     list) printf "{\"elements\":{"; sep=""; for n in $(cat "$PROFILE_STATE" 2>/dev/null); do printf "%s\"%s\":{}" "$sep" "$n"; sep=","; done; echo "}}" ;;
     add) [ "$3" = --help ] || echo "${3##*#}" >>"$PROFILE_STATE" ;;
@@ -130,7 +133,7 @@ harness() {
   local home="$1" cmd="$2"; shift 2
   : >"$log"
   out=$(cd "$tmp" && env -i HOME="$home" PATH="$tmp/bin" TMPDIR="$tmp" CALLS="$log" RESTRICTED="$tmp/restricted" CLONE_RESTRICTED="$tmp/clone-restricted" USER=tester \
-    PROFILE_STATE="$tmp/profile" HARNESS_REF=github:bilibo/claude-nix-harness HARNESS_ROOT_STEPS="${ROOT_STEPS-nix-installer}" \
+    PROFILE_STATE="$tmp/profile" HARNESS_REF="${REF:-github:bilibo/claude-nix-harness}" HARNESS_ROOT_STEPS="${ROOT_STEPS-nix-installer}" \
     STUBROOT="$tmp" STUB_GROUPS="$tmp/groups" STUB_USERS="$tmp/users" HARNESS_BIN="$harness" ${STUB_VISUDO_FAIL:+STUB_VISUDO_FAIL=1} \
     HARNESS_MANAGED_DIR="$tmp/etc-claude-code" HARNESS_SUDOERS="$tmp/etc/sudoers-claude" HARNESS_STORE_DIR="$tmp/store" HARNESS_HOME_BASE="$tmp/homes" \
     HARNESS_OS_RELEASE="$tmp/os-release" HARNESS_NIX_CONF="$tmp/etc/nix.conf" HARNESS_SYSCTL_DROPIN="$tmp/etc/99-userns.conf" HARNESS_APPARMOR_PROFILE="$tmp/etc/apparmor-bwrap" \
@@ -356,7 +359,7 @@ file_is "direnv allow database kept" "$h10/.local/share/direnv/allow/x" ''
 
 # 16. nix.conf is a symlink into the store (a NixOS system file) on a host
 # that is not detected as NixOS: root_write refuses, nothing is installed.
-store=$(readlink -f "$harness")   # any real store path; its content does not matter
+store=$(dirname "$(readlink -f "$harness")")   # any real store path that has no nix.conf lines in it (the wrapper names the devenv cache)
 rm -f "$tmp/etc/nix.conf"; ln -s "$store" "$tmp/etc/nix.conf"
 h11="$tmp/home11"; mkdir -p "$h11"
 harness "$h11" bootstrap --yes
@@ -365,17 +368,23 @@ says "names the store and the option" "nix.conf is a symlink into the Nix store 
 uncalled "nothing installed over it" 'install .*nix.conf'
 if [ -L "$tmp/etc/nix.conf" ]; then ok; else bad "the symlink was replaced"; fi
 
-# 17. NixOS, home-manager owns ~/.bashrc, direnv.toml and tmux.conf: no sudo
-# at all, the configuration.nix lines printed, those three files untouched
-# and named in the host line, the rest written as on any host.
+# 17. NixOS, home-manager owns ~/.bashrc, direnv.toml and tmux.conf: the
+# managed link is made, nix.conf (a store symlink) and the sysctl are printed
+# as configuration.nix lines and never written or recorded, those three files
+# untouched and named in the host line, the rest written as on any host.
 printf 'ID=nixos\nVERSION_ID="26.11"\nPRETTY_NAME="NixOS 26.11 (Xantusia)"\n' >"$tmp/os-release"
-touch "$tmp/restricted"; rm -f "$profile"; : >"$tmp/profile"
+touch "$tmp/restricted"; rm -f "$profile" "$tmp/etc-claude-code"; : >"$tmp/profile"
 h12="$tmp/home12"; mkdir -p "$h12/.config/direnv" "$h12/.config/tmux"
 ln -s "$store" "$h12/.bashrc"; ln -s "$store" "$h12/.config/direnv/direnv.toml"; ln -s "$store" "$h12/.config/tmux/tmux.conf"
-harness "$h12" bootstrap --yes
-uncalled "no sudo on nixos"        '^sudo'
+ROOT_STEPS="" harness "$h12" bootstrap --yes
+called "managed link on nixos"     "^sudo $tmp/bin/nix build github:bilibo/claude-nix-harness#managed --out-link $tmp/etc-claude-code$"
+uncalled "nix.conf not written"    'install .*nix.conf'
+uncalled "sysctl not written"      'sysctl -w|install .*99-userns'
+refutes "no sysctl offer"          'apply with sudo now'
 says "nix.settings printed"        'NixOS: .*nix.conf is the system configuration.s and lacks flakes the devenv cache.*nix\.settings = \{.*experimental-features = \[ "nix-command" "flakes" \];'
-says "sysctl as a NixOS option"    'boot\.kernel\.sysctl\."kernel\.apparmor_restrict_unprivileged_userns" = 0;'
+says "sysctl as a NixOS option"    'NixOS: user namespaces are confined.*boot\.kernel\.sysctl\."kernel\.apparmor_restrict_unprivileged_userns" = 0;'
+refutes "no module options"        'harness\.(enable|owner|workers)'
+if [ -L "$tmp/etc/nix.conf" ] && [ "$(readlink "$tmp/etc/nix.conf")" = "$store" ]; then ok; else bad "nix.conf was replaced"; fi
 says "bashrc skipped"              '~/\.bashrc is home-manager.s \(a store symlink\): left alone; it is set by programs\.direnv\.enableBashIntegration'
 says "direnv.toml skipped"         '~/\.config/direnv/direnv\.toml is home-manager.s .*programs\.direnv\.config\.global'
 says "tmux.conf skipped"           '~/\.config/tmux/tmux\.conf is home-manager.s .*programs\.tmux\.extraConfig'
@@ -383,8 +392,8 @@ for f in .bashrc .config/direnv/direnv.toml .config/tmux/tmux.conf; do
   if [ -L "$h12/$f" ] && [ "$(readlink "$h12/$f")" = "$store" ]; then ok; else bad "$f was changed"; fi
 done
 file_has "bashrc.d still written" "$h12/.bashrc.d/claude-nix-harness.sh" 'direnv hook bash'
-uncalled "no account commands on nixos" 'groupadd|useradd|usermod|loginctl|visudo|nix build'
-in_json "no root step in the receipt" "$h12/.local/state/claude-nix-harness/receipt.json" '.root.steps == ["nix-installer"]'
+uncalled "no account commands without workers" 'groupadd|useradd|usermod|loginctl|visudo'
+in_json "only the managed step in the receipt" "$h12/.local/state/claude-nix-harness/receipt.json" '.root.steps == ["managed"]'
 for p in direnv devenv ccmux harness; do called "profile add $p on nixos" "^nix profile add github:bilibo/claude-nix-harness#$p$"; done
 says "host line"                   'host: NixOS 26.11 \(Xantusia\) .*nix from the system configuration, 3 home-manager owned files skipped'
 says "doctor: hm bashrc ok"        'ok    ~/\.bashrc \(home-manager'
@@ -392,9 +401,13 @@ says "doctor: hm direnv.toml ok"   'ok    direnv\.toml \(home-manager\)'
 says "doctor: hm tmux ok"          'ok    tmux config ~/\.config/tmux/tmux\.conf \(home-manager\)'
 says "doctor: nixos fix for flakes" 'MISSING flakes not enabled in .*nix.settings in configuration.nix'
 says "doctor: nixos fix for userns" 'MISSING AppArmor confines unprivileged user namespaces .*boot.kernel.sysctl in configuration.nix'
-refutes "no bootstrap sysctl offer" 'apply with sudo now|would run: sudo'
 harness "$h12" doctor
 says "doctor host line"            'host: NixOS 26.11 .*3 home-manager owned files skipped'
+# reset on NixOS: the root block runs (the link, no nix.conf edit to undo).
+harness "$h12" reset --yes
+exits "nixos reset" 0
+called "nixos reset removes the link" "^sudo rm -f $tmp/etc-claude-code$"
+uncalled "nixos reset leaves nix.conf" 'install .*nix.conf'
 rm -f "$tmp/restricted" "$tmp/etc/nix.conf"
 ubuntu
 
@@ -547,16 +560,78 @@ exits "managed path is a directory" 1
 says "refuses the directory"       "$tmp/etc-claude-code exists and is not a symlink"
 rmdir "$tmp/etc-claude-code"
 
-# 24. NixOS with workers: the module's options printed, nothing run.
+# 24. NixOS with workers: the same root commands as test 20 minus the sudo
+# rule (--owner-sudo is ignored with a note), each worker's own bootstrap,
+# nothing of the old module printed; a second run runs nothing.
 printf 'ID=nixos\nVERSION_ID="26.11"\nPRETTY_NAME="NixOS 26.11 (Xantusia)"\n' >"$tmp/os-release"
-h18="$tmp/home18"; mkdir -p "$h18"
-harness "$h18" bootstrap --yes --workers acme,beta --owner raul
-says "module enable"               'harness\.enable = true;'
-says "module owner"                'harness\.owner = "raul";'
-says "module worker acme"          'harness\.workers\.acme = \{ gitName = "Claude \(acme\)"; gitEmail = "claude-acme@[^"]*\.invalid"; \};'
-says "module worker beta"          'harness\.workers\.beta = \{ gitName = "Claude \(beta\)"; '
-uncalled "nothing run on nixos"    'useradd|groupadd|usermod|enable-linger|^sudo (install|/|-u)'
+# The system configuration already carries flakes and the cache: nothing to print.
+printf 'experimental-features = nix-command flakes\nextra-substituters = https://devenv.cachix.org\n' >"$tmp/etc/nix.conf"
+: >"$tmp/groups"; : >"$tmp/users"; rm -rf "$tmp/etc-claude-code" "$tmp/homes" "$tmp/etc/sudoers-claude"; rm -f "$tmp"/linger-*
+rm -rf "$tmp"/home-w-*; mkdir -p "$tmp/homes"
+h18="$tmp/home18"; mkdir -p "$h18"; receipt18="$h18/.local/state/claude-nix-harness/receipt.json"
+ROOT_STEPS="" harness "$h18" bootstrap --yes --workers acme,beta --owner raul --owner-sudo password
+exits "nixos workers bootstrap" 0
+refutes "nix.settings not printed when present" 'nix\.settings'
+want="sudo T/bin/nix build $ref#managed --out-link T/etc-claude-code
+sudo groupadd agents
+sudo groupadd w-acme
+sudo useradd -m -g w-acme -G agents -s /bin/bash -c claude-nix-harness worker for acme w-acme
+sudo chmod 0750 T/homes/w-acme
+sudo usermod -aG w-acme raul
+sudo loginctl enable-linger w-acme
+sudo groupadd w-beta
+sudo useradd -m -g w-beta -G agents -s /bin/bash -c claude-nix-harness worker for beta w-beta
+sudo chmod 0750 T/homes/w-beta
+sudo usermod -aG w-beta raul
+sudo loginctl enable-linger w-beta
+sudo -u w-acme -i nix run $ref#harness -- bootstrap --no-root --yes --harness $ref
+sudo -u w-beta -i nix run $ref#harness -- bootstrap --no-root --yes --harness $ref"
+got=$(account_calls)
+if [ "$got" = "$want" ]; then ok; else bad "the NixOS root commands, in order (got:
+$got)"; fi
+says "owner-sudo ignored on nixos" 'info  NixOS: no sudo rule is installed .*--owner-sudo ignored'
+absent "no sudoers file on nixos" "$tmp/etc/sudoers-claude"
+refutes "no module options with workers" 'harness\.(enable|owner|workers)'
+in_json "receipt: workers on nixos" "$receipt18" '.root.workers == ["acme","beta"]'
+in_json "receipt: managed, no sudoers" "$receipt18" '.root.steps == ["managed"]'
+for w in acme beta; do
+  file_has "$w: direnv.toml written as that user" "$tmp/home-w-$w/.config/direnv/direnv.toml" '^strict_env = true$'
+  file_has "$w: git name" "$tmp/home-w-$w/.gitconfig" "^[[:space:]]*name = Claude \\($w\\)$"
+done
+says "doctor: agents members on nixos" 'info  agents group members: w-acme,w-beta'
+refutes "doctor: no sudoers verdict on nixos" 'visudo'
+ROOT_STEPS="" harness "$h18" bootstrap --yes --workers acme,beta --owner raul
+got=$(account_calls | grep -v '^sudo -u ' || true)
+if [ -z "$got" ]; then ok; else bad "the NixOS re-run ran root commands:
+$got"; fi
+
+# 27. WSL: the managed-wsl tree is linked (dry run, every command printed).
+touch "$tmp/wsl"; rm -f "$tmp/etc-claude-code"
+WSL_MARKER="$tmp/wsl" ROOT_STEPS="" harness "$h18" bootstrap --dry-run
+says "wsl links managed-wsl"       "would run: sudo $tmp/bin/nix build $ref#managed-wsl --out-link $tmp/etc-claude-code"
+uncalled "wsl dry run calls no sudo" '^sudo'
+
+# 28. A worker the receipt names but the host lacks (a NixOS rebuild with
+# users.mutableUsers = false): doctor reports it and exits 1.
+grep -v -x -e w-beta "$tmp/users" >"$tmp/users.new"; mv "$tmp/users.new" "$tmp/users"
+harness "$h18" doctor
+exits "doctor with a missing worker" 1
+says "missing worker named"        'MISSING w-beta is in the receipt but has no account \(NixOS: users.mutableUsers = false'
 ubuntu
+
+# 29. A path: ref (the checkout route): prefetched into the store once, and
+# the workers get the store path; the owner's receipt keeps the checkout.
+: >"$tmp/groups"; : >"$tmp/users"; rm -rf "$tmp/etc-claude-code" "$tmp/homes" "$tmp"/home-w-*; rm -f "$tmp"/linger-*; mkdir -p "$tmp/homes" "$tmp/store/source"
+h20="$tmp/home20"; mkdir -p "$h20"
+REF="path:$tmp/checkout" ROOT_STEPS="" harness "$h20" bootstrap --yes --workers gamma
+exits "path ref bootstrap" 0
+called "checkout prefetched"       "^nix flake prefetch --json path:$tmp/checkout$"
+called "worker gets the store path" "^sudo -u w-gamma -i nix run path:$tmp/store/source#harness -- bootstrap --no-root --yes --harness path:$tmp/store/source$"
+called "managed from the checkout" "^sudo $tmp/bin/nix build path:$tmp/checkout#managed --out-link"
+in_json "owner receipt keeps the checkout ref" "$h20/.local/state/claude-nix-harness/receipt.json" ".harness.ref == \"path:$tmp/checkout\""
+REF="path:$tmp/checkout" ROOT_STEPS="" harness "$h20" bootstrap --dry-run --workers gamma
+says "dry run names the prefetch"  "would run: nix flake prefetch --json path:$tmp/checkout"
+says "dry run keeps the checkout ref for the worker" "would run: sudo -u w-gamma -i nix run path:$tmp/checkout#harness"
 
 # 25. A receipt from before 2026-10-27 recorded the user-scope keys: reset
 # still strips them, the user's own keys stay.

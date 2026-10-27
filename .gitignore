@@ -1,5 +1,8 @@
 result
 result-*
+# One host's managed-tree options (flake.nix, packages.managed); a
+# `path:<checkout>` ref carries it, the published ref never does.
+host.nix
 .direnv/
 .devenv/
 .claude/

@@ -167,8 +167,8 @@ called "socket recorded"           'HARNESS_ROOT_STEPS=\[nix-daemon.socket\]'
 WITH_NIX=1 run fedora 43 "$tmp/checkout" --yes
 uncalled "fedora 43 is the installer route" 'dnf'
 
-# NixOS: no installer, no dnf, no sudo; nix.conf is the system's, so the
-# nix.settings block is printed while it lacks the lines, then bootstrap.
+# NixOS: no installer, no dnf, no sudo; nix.conf is the system's, and the
+# nix.settings block is bootstrap's to print, not this script's.
 : >"$tmp/nix.conf"
 WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --yes
 exits "nixos" 0
@@ -176,13 +176,19 @@ uncalled "no installer on nixos"   '^curl|^installer'
 uncalled "no dnf on nixos"         'dnf'
 uncalled "no sudo on nixos"        '^sudo'
 says "nixos named"                 'NixOS: nix from the system configuration, no installer'
-says "nix.settings printed"        'nix\.settings = \{.*experimental-features = \[ "nix-command" "flakes" \];.*substituters = \[ "https://devenv\.cachix\.org" \];'
+if [[ "$out" =~ nix\.settings ]]; then fail=$((fail+1)); echo "FAIL: install.sh prints nix.settings on NixOS (bootstrap does)"; else pass=$((pass+1)); fi
 called "bootstrap on nixos"        "^nix run path:$tmp/checkout#harness -- bootstrap --yes$"
 called "nothing recorded on nixos" 'HARNESS_ROOT_STEPS=\[\]'
 printf 'experimental-features = nix-command flakes\nextra-substituters = https://devenv.cachix.org\n' >"$tmp/nix.conf"
 WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --yes
 says "nixos again"                 'NixOS: nix from the system configuration'
 if [[ "$out" =~ nix\.settings ]]; then fail=$((fail+1)); echo "FAIL: nix.settings printed although nix.conf has the lines"; else pass=$((pass+1)); fi
+# --check with workers on NixOS: the worker lines, no sudoers, the wsl note.
+WITH_NIX=1 run nixos 26.11 "$tmp/checkout" --check --workers acme --owner raul
+exits "nixos --check with workers" 0
+says "nixos check: worker user"    "would run: sudo useradd -m -g w-acme -G agents -s /bin/bash -c 'claude-nix-harness worker for acme' w-acme"
+says "nixos check: wsl note"       '#managed --out-link /etc/claude-code   \(#managed-wsl under WSL\)'
+if [[ "$out" =~ sudoers ]]; then fail=$((fail+1)); echo "FAIL: --check prints the sudoers lines on NixOS"; else pass=$((pass+1)); fi
 # Without nix there is nothing to run: refused, nothing downloaded.
 run nixos 26.11 "$tmp/checkout" --yes
 exits "nixos without nix" 1

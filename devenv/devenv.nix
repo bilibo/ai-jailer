@@ -109,7 +109,7 @@ in
         a project entry (merged, ignored or prompted) is open: live check V2
         of the 2026-10-27 redesign, pending. Until it passes, a domain the
         project cannot work without also belongs in the host's list
-        (`harness.extraAllowedDomains` in the NixOS module).
+        (`extraAllowedDomains` in the harness checkout's host.nix).
       '';
     };
 
@@ -130,7 +130,7 @@ in
       type = lib.types.bool;
       default = false;
       example = true;
-      description = "claude-code, tmux and jq in the project shell, for hosts where no home module installs them. Needs `allow_unfree: true` in devenv.yaml.";
+      description = "claude-code, tmux and jq in the project shell, for hosts that do not put them on PATH. Needs `allow_unfree: true` in devenv.yaml.";
     };
 
     managedSettingsPath = lib.mkOption {
@@ -143,8 +143,8 @@ in
 
   config = lib.mkMerge [
     # Tools, not rules: in the shell whether or not the guard rails are on.
-    # `ccmux` in the project shell only; the home module adds it host-wide
-    # on managed hosts.
+    # `ccmux` in the project shell only; harness bootstrap adds it to the
+    # user's profile host-wide.
     {
       packages = [
         ccmux
@@ -170,7 +170,7 @@ in
       }) cfg.settings;
 
       enterShell = ''
-        [ -r "${cfg.managedSettingsPath}" ] || echo "harness: ${cfg.managedSettingsPath} is missing: no deny rules, hook or sandbox on this host (NixOS: harness.enable in the host configuration; other Linux: harness bootstrap)" >&2
+        [ -r "${cfg.managedSettingsPath}" ] || echo "harness: ${cfg.managedSettingsPath} is missing: no deny rules, hook or sandbox on this host (harness bootstrap from the harness checkout's devenv shell)" >&2
         # Name this project for `ccmux`: <customer>/<repo> relative to the code
         # root, from the main checkout or any worktree under it, else
         # local/<name> with the directory alongside. A bare `ccmux` in this

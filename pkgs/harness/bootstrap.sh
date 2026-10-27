@@ -10,30 +10,36 @@
 #
 # Takes a Linux host that has Nix (scripts/install.sh puts it there: on
 # Fedora 44 or newer from Fedora's own packages, on any other distro with the
-# nix-installer) and Claude Code to the shape of the README: the host-wide
-# managed rules at /etc/claude-code (the flake's `managed` package, linked
-# there), optionally one Linux user per customer, direnv >= 2.38, devenv,
-# ccmux and harness from this flake (`nix profile add`, pinned by flake.lock),
-# and the user-side configuration the home module would write on a managed
-# host: direnv.toml, the tmux rules, the direnv hook for bash and zsh,
-# HARNESS_CODE_ROOT, the session PATH for GUI-launched VS Code, mkhl.direnv.
-# This mirrors the NixOS module (harness.enable, harness.owner,
-# harness.workers) on Fedora, Ubuntu and other non-NixOS Linux.
+# nix-installer; NixOS has its own) and Claude Code to the shape of the
+# README: the host-wide managed rules at /etc/claude-code (the flake's
+# `managed` package, linked there), optionally one Linux user per customer,
+# direnv >= 2.38, devenv, ccmux and harness from this flake (`nix profile
+# add`, pinned by flake.lock), and the user-side configuration: direnv.toml,
+# the tmux rules, the direnv hook for bash and zsh, HARNESS_CODE_ROOT, the
+# session PATH for GUI-launched VS Code, mkhl.direnv. One route on every
+# Linux, run from the harness checkout's devenv shell (HARNESS_REF is the
+# checkout there, so the rules and this CLI come from one revision).
 # scripts/install.sh does the root steps `nix run` needs, then runs `harness
 # bootstrap`, which finds them done and does the rest.
 #
 # NixOS (/etc/NIXOS, or ID=nixos in os-release: the marker is not visible
-# from inside a sandboxed session) has no root steps: /etc/nix/nix.conf, the
-# sysctls, /etc/claude-code, the users and the sudo rule belong to the system
-# configuration, so --no-root is implied and the nix.settings,
-# boot.kernel.sysctl and harness.* lines are printed where the host lacks
-# them (harness.enable; harness.owner and harness.workers.<customer> when
-# --workers is given). A user file that is a symlink into the Nix store is
-# home-manager's: it is skipped and the option that sets it is printed; the
-# rest is written as on any host. Independently of detection, root_write
-# refuses any target that resolves into the store. WSL (binfmt WSLInterop, or
-# WSL_DISTRO_NAME) is reported in the host line; `harness init` sets
-# harness.platform = "wsl" there.
+# from inside a sandboxed session) runs the same root steps through the
+# owner's own sudo, with four differences. /etc/nix/nix.conf is never
+# written (a store symlink the system configuration owns): the nix.settings
+# block is printed where flakes or the devenv cache are missing. The
+# user-namespace sysctl is printed as a boot.kernel.sysctl option, not
+# written. No sudoers rule: /etc/sudoers has no @includedir there, so ccmux
+# hands over with whatever sudo the owner has (--owner-sudo is ignored with a
+# note). The worker users come from useradd, which holds only while
+# users.mutableUsers is true (the default; nothing here can read it): a
+# rebuild with it false removes them, and `harness doctor` reports a worker
+# the receipt names but the host lacks. A user file that is a symlink into
+# the Nix store is home-manager's: it is skipped and the option that sets it
+# is printed; the rest is written as on any host. Independently of
+# detection, root_write refuses any target that resolves into the store. WSL
+# (binfmt WSLInterop, or WSL_DISTRO_NAME) links the `managed-wsl` tree (the
+# Windows side hidden from the sandbox) and is reported in the host line;
+# `harness init` sets harness.platform = "wsl" there.
 #
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
@@ -56,8 +62,8 @@
 #
 # Root steps, in this order:
 #  - /etc/nix/nix.conf: the devenv cache (also flakes where the installer
-#    left them off). DEVENV_CACHE and DEVENV_KEY below must match
-#    pkgs/devenv-cache.nix, which the NixOS module reads.
+#    left them off). DEVENV_CACHE and DEVENV_KEY come from
+#    pkgs/devenv-cache.nix through pkgs/harness.nix.
 #  - The user-namespace setting the Claude Code sandbox cannot run without,
 #    where the kernel confines unprivileged user namespaces. Ubuntu 23.10 and
 #    later do it through AppArmor (kernel.apparmor_restrict_unprivileged_userns
@@ -69,12 +75,17 @@
 #    own (--yes answers it); declined, the command is printed for later and
 #    doctor keeps reporting it.
 #  - `managed`: /etc/claude-code is linked to the managed tree (`sudo nix
-#    build <ref>#managed --out-link /etc/claude-code`; the out-link is an
-#    indirect GC root). Claude Code reads /etc/claude-code/managed-settings.json
-#    for every user of the host, the owner's sessions included. A path that
-#    exists and is not a store symlink is never replaced. Untested
-#    (2026-10-27): `nix build --out-link` under sudo on a host where the
-#    daemon does the build.
+#    build <ref>#managed --out-link /etc/claude-code`, `#managed-wsl` under
+#    WSL; the out-link is an indirect GC root). A `path:<checkout>` ref
+#    carries the checkout's host.nix (the host-wide options: extra deny
+#    rules, domains, memory and commit switches); a `github:` ref builds
+#    the defaults, which bootstrap says when a host.nix sits in the cwd.
+#    Claude Code reads /etc/claude-code/managed-settings.json for every user
+#    of the host, the owner's sessions included. A path that exists and is
+#    not a store symlink is never replaced; a link via /etc/static is the
+#    old NixOS module's. On NixOS the link survives rebuilds (setup-etc only
+#    removes links into /etc/static). Untested (2026-10-27): `nix build
+#    --out-link` under sudo on a host where the daemon does the build.
 #  - With --workers (or --worker, repeatable): the group `agents`, and per
 #    customer c the user w-c (primary group w-c, member of agents, home 0750,
 #    shell bash), the owner added to group w-c so that the owner can read the
@@ -82,19 +93,22 @@
 #    survives logout. A user that exists is not recreated. Each command is
 #    guarded, so a second run runs none of them. The customers are recorded in
 #    the receipt (root.workers).
-#  - With --workers, unless --owner-sudo none: /etc/sudoers.d/claude-nix-harness
-#    holding `<owner> ALL=(%agents) NOPASSWD: ALL` (`password` drops
-#    NOPASSWD:), checked with `visudo -cf`; a file that fails the check is
-#    removed and the run stops. --owner is the login (default $USER). This is
-#    the rule ccmux needs to hand a session to a worker.
+#  - With --workers, unless --owner-sudo none, and never on NixOS:
+#    /etc/sudoers.d/claude-nix-harness holding `<owner> ALL=(%agents)
+#    NOPASSWD: ALL` (`password` drops NOPASSWD:), checked with `visudo -cf`;
+#    a file that fails the check is removed and the run stops. --owner is the
+#    login (default $USER). This is the rule ccmux needs to hand a session to
+#    a worker.
 # Then, per worker, `sudo -u w-c -i nix run <ref>#harness -- bootstrap
 # --no-root --yes --harness <ref>`: the profile packages and the user steps
 # below, as that user, plus a git identity default (user.name "Claude (c)",
 # user.email claude-c@<host>.invalid) where none is set. --harness is passed
-# because `sudo -i` drops HARNESS_REF. A failure there is a warning: the root
-# steps are already done. Home Manager standalone per worker is the
-# alternative to this step (the runbook describes it); bootstrap does not use
-# Home Manager.
+# because `sudo -i` drops HARNESS_REF. A `path:` ref under the owner's home
+# is unreadable to a worker (0700 homes), so it is prefetched into the store
+# once (`nix flake prefetch`) and the worker gets that store path, the same
+# revision. A failure there is a warning: the root steps are already done.
+# Home Manager standalone per worker is the alternative to this step (the
+# runbook describes it); bootstrap does not use Home Manager.
 #
 # --account-sync and --no-account-sync are gone (2026-10-27): the claude.ai
 # sync keys now live in the managed settings, and bootstrap no longer writes a
@@ -181,9 +195,10 @@ case "$OWNER_SUDO" in nopasswd|password|none) ;; *) echo "harness $CMD: --owner-
 # earlier versions are still found.
 MARK_BEGIN="# --- claude-nix-harness (scripts/bootstrap-fedora.sh) ---"
 MARK_END="# --- end claude-nix-harness ---"
-# Same url and key as pkgs/devenv-cache.nix (the NixOS module's copy); change both.
-DEVENV_CACHE="https://devenv.cachix.org"
-DEVENV_KEY="devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
+# pkgs/devenv-cache.nix, exported by pkgs/harness.nix; the literals are for
+# running this file by hand.
+DEVENV_CACHE="${HARNESS_DEVENV_CACHE:-https://devenv.cachix.org}"
+DEVENV_KEY="${HARNESS_DEVENV_KEY:-devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=}"
 MIN_CLAUDE="2.1.295"   # onFailure: block in hook registrations
 MIN_DIRENV="2.38"      # require_allowed in .envrc
 MIN_TMUX="3.2"         # extended-keys
@@ -296,7 +311,7 @@ root_write() { # root_write <path> <content> [<NixOS option> [<mode>]]: a root-o
   # A store symlink is the NixOS configuration's: `install` would replace it
   # with a plain file that the next rebuild silently restores.
   real=$(readlink -f "$1" 2>/dev/null || true)
-  [[ "$real" != /nix/store/* ]] || die "$1 is a symlink into the Nix store ($real): the system configuration owns it; set ${3:-the matching option} in configuration.nix instead"
+  { [[ "$real" != /nix/store/* ]] && [[ "$real" != "$STORE_DIR"/* ]]; } || die "$1 is a symlink into the Nix store ($real): the system configuration owns it; set ${3:-the matching option} in configuration.nix instead"
   if [ "$DRY_RUN" = 1 ]; then echo "    would run: sudo install -m $mode -o root -g root <new content> $1"; return 0; fi
   tmp=$(mktemp); printf '%s\n' "$2" >"$tmp"
   run sudo install -m "$mode" -o root -g root "$tmp" "$1"; rm -f "$tmp"
@@ -313,7 +328,7 @@ root_link() {
   local path="$1" ref="$2" want nixbin
   if [ -e "$path" ] || [ -L "$path" ]; then
     [ -L "$path" ] || die "$path exists and is not a symlink: bootstrap does not replace it (move it aside, then run again)"
-    [[ "$(readlink "$path")" == "$STORE_DIR"/* ]] || die "$path is a symlink to $(readlink "$path"), not into $STORE_DIR: bootstrap does not replace it"
+    [[ "$(readlink "$path")" == "$STORE_DIR"/* ]] || die "$path is a symlink to $(readlink "$path"), not into $STORE_DIR: bootstrap does not replace it (a link via /etc/static is the old NixOS module's: drop harness.enable from the host configuration, rebuild, then run again)"
     want=$(nix build --no-link --print-out-paths "$ref" 2>/dev/null | head -n1 || true)
     if [ -n "$want" ] && [ "$(readlink -f "$path")" = "$(readlink -f "$want")" ]; then
       echo "    $path already links $want"; return 0
@@ -423,13 +438,13 @@ HOST=generic; WSL=0
 [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null && HOST=fedora
 { [ -e "$NIXOS_MARKER" ] || [ "${ID:-}" = nixos ]; } && HOST=nixos
 { [ -e "$WSL_MARKER" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; } && WSL=1
-# NixOS: the root files are the system configuration's (nixos_steps).
-[ "$HOST" != nixos ] || NO_ROOT=1
+MANAGED_ATTR=managed; [ "$WSL" = 0 ] || MANAGED_ATTR=managed-wsl
 [ "$CMD" = doctor ] || [ "$(id -u)" != 0 ] || die "run as your own user; sudo is used where root is needed"
 
 # ---------------------------------------------------------------- root steps
 root_steps() {
   local conf="$NIX_CONF" want flakes=""
+  if [ "$HOST" = nixos ]; then nixos_nix_conf; userns_steps; managed_step; worker_steps; sudoers_step; return 0; fi
   # The harness block in nix.conf: the devenv cache; flakes when nothing else
   # turns them on (Fedora's package does, the nix-installer leaves them off);
   # trusted-users only on request (header).
@@ -472,13 +487,18 @@ user_exists() { command -v getent >/dev/null 2>&1 && getent passwd "$1" >/dev/nu
 linger_on() { loginctl show-user "$1" -p Linger 2>/dev/null | grep -q '^Linger=yes$'; }
 
 managed_step() {
-  step "link the managed rules: $MANAGED_DIR -> $HARNESS_REF#managed"
-  root_link "$MANAGED_DIR" "$HARNESS_REF#managed"
+  # host.nix reaches the tree only through a path: ref (flake.nix); the
+  # checkout's devenv shell sets HARNESS_REF to one.
+  if [ -e host.nix ] && [[ "$HARNESS_REF" != path:* ]]; then
+    warn "host.nix in $PWD is not in the managed tree: the ref is $HARNESS_REF, and only a path:<checkout> ref carries it (run from the checkout's devenv shell, or --harness path:$PWD)"
+  fi
+  step "link the managed rules: $MANAGED_DIR -> $HARNESS_REF#$MANAGED_ATTR"
+  root_link "$MANAGED_DIR" "$HARNESS_REF#$MANAGED_ATTR"
   R_ROOT_STEPS+=(managed)
 }
 
-# One Linux user per customer (the NixOS module's harness.workers). A user
-# that already exists is left as it is, whatever its groups.
+# One Linux user per customer. A user that already exists is left as it is,
+# whatever its groups.
 worker_steps() {
   local c w home
   [ ${#WORKERS[@]} -gt 0 ] || return 0
@@ -500,6 +520,10 @@ worker_steps() {
 sudoers_step() {
   local line tag="NOPASSWD: " cur
   { [ "$OWNER_SUDO" != none ] && [ ${#WORKERS[@]} -gt 0 ]; } || return 0
+  if [ "$HOST" = nixos ]; then
+    info "NixOS: no sudo rule is installed (/etc/sudoers has no @includedir); ccmux hands over to a worker with your own sudo, password or not (--owner-sudo ignored)"
+    return 0
+  fi
   [ "$OWNER_SUDO" != password ] || tag=""
   line="$OWNER ALL=(%agents) ${tag}ALL"
   if [ "$DRY_RUN" = 1 ]; then cur=$(cat "$SUDOERS_FILE" 2>/dev/null || true); else cur=$(sudo cat "$SUDOERS_FILE" 2>/dev/null || true); fi
@@ -515,14 +539,26 @@ sudoers_step() {
 # environment, so the ref goes in as a flag. A failure is a warning: the root
 # steps are done and recorded, and the command can be run again by hand.
 worker_user_steps() {
-  local c w flags=(--no-root --yes)
+  local c w flags=(--no-root --yes) wref="$HARNESS_REF" sp
   [ ${#WORKERS[@]} -gt 0 ] || return 0
   [ "$VERBOSE" != 1 ] || flags+=(--verbose)
+  # A path: ref under the owner's home is unreadable to a worker (0700
+  # homes): the same revision goes to the store once, world-readable.
+  if [[ "$wref" == path:* ]] && [[ "$wref" != path:"$STORE_DIR"/* ]] && [[ "$wref" != path:/nix/store/* ]]; then
+    step "prefetch $wref into the store for the workers"
+    if [ "$DRY_RUN" = 1 ]; then echo "    would run: nix flake prefetch --json $wref"
+    else
+      [ "$VERBOSE" != 1 ] || echo "    + nix flake prefetch --json $wref"
+      sp=$(nix flake prefetch --json "$wref" | jq -r '.storePath // empty')
+      [ -n "$sp" ] || die "nix flake prefetch gave no store path for $wref"
+      wref="path:$sp"
+    fi
+  fi
   for c in "${WORKERS[@]}"; do
     w="$WORKER_PREFIX$c"
     step "bootstrap the user side of $w"
-    run sudo -u "$w" -i nix run "$HARNESS_REF#harness" -- bootstrap "${flags[@]}" --harness "$HARNESS_REF" \
-      || warn "the user steps for $w failed: run sudo -u $w -i nix run $HARNESS_REF#harness -- bootstrap --no-root --yes"
+    run sudo -u "$w" -i nix run "$wref#harness" -- bootstrap "${flags[@]}" --harness "$wref" \
+      || warn "the user steps for $w failed: run sudo -u $w -i nix run $wref#harness -- bootstrap --no-root --yes --harness $wref"
   done
 }
 
@@ -556,46 +592,37 @@ profile bwrap /usr/bin/bwrap flags=(unconfined) {
   include if exists <local/bwrap>
 }"
 
-# NixOS: what root_steps would write, printed as configuration.nix lines
-# where the host lacks it.
+# NixOS: /etc/nix/nix.conf is the system configuration's (a store symlink);
+# what the nix.conf step would write is printed as configuration.nix lines
+# where the host lacks it, and the step is not recorded.
 NIXOS_NIX_SETTINGS='  nix.settings = {
     experimental-features = [ "nix-command" "flakes" ];
     substituters = [ "'$DEVENV_CACHE'" ];
     trusted-public-keys = [ "'$DEVENV_KEY'" ];
   };'
-nixos_steps() {
-  local lack=() c
+nixos_nix_conf() {
+  local lack=()
   grep -q -E '^experimental-features.*flakes' "$NIX_CONF" 2>/dev/null || lack+=(flakes)
   grep -q -F "$DEVENV_CACHE" "$NIX_CONF" 2>/dev/null || lack+=("the devenv cache")
   if [ ${#lack[@]} -gt 0 ]; then
     step "NixOS: $NIX_CONF is the system configuration's and lacks ${lack[*]}; add to configuration.nix and rebuild:"
     printf '%s\n' "$NIXOS_NIX_SETTINGS"
   fi
-  if userns_restricted; then
-    step "NixOS: user namespaces are confined ($USERNS_KEY = $((1 - USERNS_VAL))), and the Claude Code sandbox (bubblewrap) needs them; in configuration.nix:"
-    printf '  boot.kernel.sysctl."%s" = %s;\n' "$USERNS_KEY" "$USERNS_VAL"
-  fi
-  # The managed rules, the worker users, linger and the sudo rule are the
-  # module's (nixos/default.nix); this prints the options that do what
-  # root_steps does elsewhere.
-  step "NixOS: the managed rules at $MANAGED_DIR$([ ${#WORKERS[@]} -gt 0 ] && echo ", the worker users and the sudo rule") come from the harness module; in configuration.nix:"
-  printf '  harness.enable = true;\n'
-  if [ ${#WORKERS[@]} -gt 0 ]; then
-    printf '  harness.owner = "%s";\n' "$OWNER"
-    [ "$OWNER_SUDO" = nopasswd ] || printf '  harness.ownerSudo = "%s";\n' "$OWNER_SUDO"
-    for c in "${WORKERS[@]}"; do
-      printf '  harness.workers.%s = { gitName = "Claude (%s)"; gitEmail = "claude-%s@%s.invalid"; };\n' "$c" "$c" "$c" "$(uname -n)"
-    done
-  fi
 }
 
 # A kernel setting, so it is asked for on its own: what runs is shown,
 # --yes answers it, and a decline prints it for later (doctor keeps
-# reporting the restriction).
+# reporting the restriction). On NixOS the sysctls are the system
+# configuration's: the option is printed, nothing written or deferred.
 userns_steps() {
   local key val l deferred
   userns_restricted || return 0
   key=$USERNS_KEY; val=$USERNS_VAL
+  if [ "$HOST" = nixos ]; then
+    step "NixOS: user namespaces are confined ($key = $((1 - val))), and the Claude Code sandbox (bubblewrap) needs them; in configuration.nix:"
+    printf '  boot.kernel.sysctl."%s" = %s;\n' "$key" "$val"
+    return 0
+  fi
   if [ "$key" = kernel.apparmor_restrict_unprivileged_userns ]; then
     step "user namespaces: AppArmor confines them ($key = 1), and the Claude Code sandbox (bubblewrap) needs them"
     echo "    this writes $APPARMOR_PROFILE (the bwrap profile from the Claude Code sandboxing docs) and runs sudo systemctl reload apparmor"
@@ -1003,9 +1030,6 @@ report() {
   no_project="unset: not inside a harness repo's shell"
   info "HARNESS_PROJECT ${HARNESS_PROJECT:-$no_project}"
   if [ -s "$RECEIPT" ]; then ok "receipt $RECEIPT (harness $(jq -r '.harness.rev // "?"' "$RECEIPT" 2>/dev/null), $(jq -r '.timestamp // "?"' "$RECEIPT" 2>/dev/null))"
-  # A NixOS configuration can carry the whole user side (the README's "your
-  # own configuration"); the checks below say whether it does.
-  elif [ "$HOST" = nixos ]; then info "no receipt: harness bootstrap has not run here; on NixOS the system configuration can provide everything below"
   else warn "no receipt at $RECEIPT: reset has nothing to undo, upgrade uses the built-in package list (harness bootstrap writes one)"; fi
 
   if command -v nix >/dev/null 2>&1; then
@@ -1067,7 +1091,7 @@ report() {
   local cs="$HOME/.claude/settings.json" ms="$MANAGED_DIR/managed-settings.json"
   if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (harness bootstrap removes it)"; fi
   if [ -r "$ms" ]; then ok "managed settings $ms"; hooks_runnable "$ms"
-  else miss "no managed settings at $ms: this host enforces nothing (NixOS: harness.enable; other Linux: harness bootstrap --workers ...)"; fi
+  else miss "no managed settings at $ms: this host enforces nothing (harness bootstrap --workers ... from the harness checkout's devenv shell)"; fi
   accounts_report
 
   # From inside a session `code` is on PATH but dies before printing (the
@@ -1144,6 +1168,14 @@ accounts_report() {
       else warn "linger is off for $w: its tmux and devenv processes stop at logout (sudo loginctl enable-linger $w)"; fi
     done
   fi
+  # A worker the receipt names but the host lacks: on NixOS, a rebuild with
+  # users.mutableUsers = false removes useradd's users.
+  if [ -s "$RECEIPT" ]; then
+    for c in $(jq -r '.root.workers[]?' "$RECEIPT" 2>/dev/null); do
+      w="$WORKER_PREFIX$c"
+      user_exists "$w" || miss "$w is in the receipt but has no account (NixOS: users.mutableUsers = false removes it at rebuild; run harness bootstrap --workers $c again, or set it true)"
+    done
+  fi
   # /etc/sudoers.d is root-only (0750) on most hosts, so a plain -e says
   # "absent" for a file that is there; ask sudo, but only on a host with
   # workers, and never under --dry-run. -n: no password prompt in a report.
@@ -1208,8 +1240,7 @@ case "$CMD" in
       load_receipt
       [ "$HAVE_RECEIPT" = 0 ] || [ -z "$(rq '.profile[]?')" ] || mapfile -t PROFILE_PKGS < <(rq '.profile[]')
     fi
-    [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for /etc/nix/nix.conf and the user-namespace setting (or pass --no-root after doing those by hand)"; root_steps; }
-    [ "$HOST" != nixos ] || nixos_steps
+    [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for the root steps (nix.conf, the user-namespace setting, the managed link, the worker users; or pass --no-root after doing those by hand)"; root_steps; }
     [ "$NO_ROOT" = 1 ] || worker_user_steps
     [ "$NO_PROFILE" = 1 ] || profile_steps
     handover_steps

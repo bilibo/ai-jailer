@@ -49,7 +49,7 @@ check "ran to the summary"      'harness doctor: [0-9]+ missing, [0-9]+ warnings
 refute "no shell error"         'unbound variable|syntax error|line [0-9]+:|command not found'
 refute "no repo part outside a repo" 'repo: '
 # No managed settings: this host enforces nothing, and says so.
-check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(NixOS: harness\.enable; other Linux: harness bootstrap --workers \.\.\.\)'
+check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(harness bootstrap --workers \.\.\. from the harness checkout.s devenv shell\)'
 check "no getent: no agents group" 'info  no agents group: no worker users on this host'
 refute "no sudoers verdict without the file" 'visudo'
 refute "strictAllowlist is gone"  'strictAllowlist|strict network'
@@ -119,8 +119,7 @@ refute "no extension verdict"   'VS Code extension [a-z]+\.' # the verdict names
 printf 'ID=nixos\nPRETTY_NAME="NixOS 26.11 (Xantusia)"\n' >"$tmp/os-release"
 OS_RELEASE="$tmp/os-release" doctor "$tmp/empty"
 check "nixos host line"         'host: NixOS 26.11 \(Xantusia\) .*nix from the system configuration, 0 home-manager owned files skipped'
-check "nixos without a receipt is an info line" 'info  no receipt: harness bootstrap has not run here'
-refute "nixos without a receipt is no warning" 'warn  no receipt'
+check "nixos without a receipt is a warning too" 'warn  no receipt at'
 # The user side from the system configuration (NixOS programs.direnv):
 # direnv.toml under DIRENV_CONFIG and the hook in /etc/bashrc, nothing in HOME.
 mkdir -p "$tmp/etc-direnv"; printf '[global]\nload_dotenv = false\nstrict_env = true\nwarn_timeout = "2m"\n' >"$tmp/etc-direnv/direnv.toml"

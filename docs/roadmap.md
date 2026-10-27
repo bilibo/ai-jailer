@@ -48,7 +48,8 @@ The gaps, in order:
   installer, and bootstrap must not write `/etc/nix/nix.conf` (a store
   symlink the next rebuild restores): print the `nix.settings` lines for
   the devenv cache instead, or point at the NixOS and home modules (the
-  README's managed row), then do the user steps. WSL
+  README's managed row), then do the user steps. 2026-10-27, item 12:
+  bootstrap runs the root steps on NixOS too; the modules are gone. WSL
   (`/proc/sys/fs/binfmt_misc/WSLInterop` or `WSL_DISTRO_NAME`): check
   that systemd runs in the distro (`[boot] systemd=true` in
   `/etc/wsl.conf`; the nix-installer's daemon needs it, else
@@ -331,7 +332,8 @@ The gaps, in order:
    (`examples/nixos-wsl-host.nix`). 2026-10-26: `examples/` removed; the
    WSL shapes live in `bilibo/nixos-wsl`, and the README's managed-host
    row carries the import lines. What remains here is the native NixOS
-   managed host, when someone wants one.
+   managed host, when someone wants one. 2026-10-27, item 12: the module
+   is gone; `harness bootstrap` is the route on NixOS as everywhere.
 8. **Broker mod: dropped 2026-10-24.** A mod is a hooks module the engine
    loads into every session on the machine, outside the Bash sandbox, and
    an enabled organisation mod is the one kind the built-in guard lets
@@ -495,7 +497,64 @@ The gaps, in order:
       host, not live): either the home module enables `programs.bash`
       for workers, or the NixOS module exports the variable system-wide
       per worker; the host sets the worker's `codeRoot` to its
-      system-level value meanwhile.
+      system-level value meanwhile. Superseded 2026-10-27 by item 12:
+      both modules are gone.
+
+12. **One route on every Linux, run from the checkout (2026-10-27).**
+    Reopens item 11's "one Linux user per customer from
+    `harness.workers` in the NixOS module" and "Home Manager per
+    worker": the owner found that the NixOS route put harness users,
+    rules and options into the host repo (`bilibo/nixos-wsl`), which
+    must stay usable on non-WSL NixOS and carry nothing of the harness.
+    Decisions, the owner's:
+    - The harness repo is the control point. Its checkout's devenv
+      shell carries the `harness` CLI built from the checkout and sets
+      `HARNESS_REF=path:<checkout>`; `harness bootstrap --workers ...`
+      from that shell builds the Unix user and group model and links
+      the managed tree on every Linux: Fedora 44+, Ubuntu, other
+      Linux, NixOS and NixOS-WSL. `scripts/install.sh` stays the
+      pre-Nix step for hosts without Nix.
+    - NixOS runs the root steps like every host, with the differences
+      bootstrap can live with: `nix.conf` and the sysctls are printed
+      as options (store symlinks); no sudo rule (`/etc/sudoers` has no
+      `@includedir`; the owner's own sudo serves, password or not,
+      `--owner-sudo` ignored with a note); users from `useradd`
+      (`users.mutableUsers`, the default; doctor reports a worker the
+      receipt names but the host lacks). Checked 2026-10-27 on the
+      NixOS-WSL host: setup-etc.pl removes only links into
+      `/etc/static`, so the `/etc/claude-code` link survives rebuilds.
+    - The NixOS module (`nixos/`) and the Home Manager module
+      (`home/`) are dropped, with `nixos-module-eval` and
+      `nixos-module-assertion`; three of their assertions moved to
+      `managed-tree-test`. The host-wide options move to an optional,
+      gitignored `host.nix` at the checkout root, merged by `flake.nix`
+      into `packages.managed`; `packages.managed-wsl` is the `platform
+      = "wsl"` variant, which bootstrap links under WSL;
+      `managed-host-eval` checks both. A `github:` ref never carries
+      `host.nix`; bootstrap warns when it finds one it cannot use.
+    - Found while wiring it: a `path:` ref under the owner's 0700 home
+      is unreadable to a worker, so `worker_user_steps` prefetches it
+      into the store once (`nix flake prefetch --json`) and hands the
+      workers that store path.
+    - A host repo (`bilibo/nixos-wsl`) carries only `ccmux` and the
+      tmux rules from this flake: no module, no CLI, no users.
+
+    Open:
+    - [ ] V1 to V9 of item 11 stay as written, V6 narrowed to whether
+      Claude Code needs `~/.claude/settings.json` at all (the seed that
+      wrote it went with the home module).
+    - [ ] A worker's `harness init` writes the receipt's ref into the
+      repo's `devenv.yaml`; after the prefetch that is a store path
+      with no GC root (init warns). Options: a world-readable checkout
+      location, or `github:` in worker repos' `devenv.yaml` (the hard
+      rules come from `/etc/claude-code` either way).
+    - [ ] `users.mutableUsers = false` removes the workers at the next
+      rebuild; only doctor's receipt-versus-passwd line reports it.
+    - [ ] `nix flake prefetch` on Fedora's packaged Nix, and `nix build
+      --out-link /etc/claude-code` as root through the daemon: untested.
+    - [ ] The first live run: `harness bootstrap --dry-run --workers
+      test` from the checkout's shell on the NixOS-WSL host, then the
+      real run as the gate for V1 to V9.
 
 ## Open questions
 
@@ -534,8 +593,8 @@ The gaps, in order:
   2026-10-24 (changelog): nixpkgs' `claude-code` wrapper (`--prefix
   LD_LIBRARY_PATH : <alsa-lib>/lib`), inherited by every hook and Bash
   command. Closed the same day: `pkgs/claude-code.nix` drops the wrapper
-  line and put alsa-lib on the binary's RUNPATH; the home module,
-  `packages.claude-code` and the devenv module use it; `claude-code-test`
+  line and put alsa-lib on the binary's RUNPATH; the home module (gone
+  2026-10-27, item 12), `packages.claude-code` and the devenv module use it; `claude-code-test`
   checks it (changelog). Not the hook preamble: that would have covered
   the Bash tool only. The RUNPATH went on 2026-10-27 (changelog): it
   segfaults claude-code 2.1.303, and it never reached the audio addon's
@@ -585,7 +644,9 @@ The gaps, in order:
 - Container route: built and set aside in the claude-nix-harness-container
   repo (same `lib/`, root-owned store behind a nix-daemon, devcontainer
   files per engine; never run under podman or VS Code). The WSL tier does
-  not use it; NixOS-WSL builds its distro tarball from the NixOS module.
+  not use it; NixOS-WSL builds its distro tarball from the NixOS module
+  (the harness module is gone since 2026-10-27, item 12; `bilibo/nixos-wsl`
+  is its own flake).
 - A parser-based second guard (cc-safety-net rulebooks) beside the regex
   hook.
 - An assertion in `devenv/devenv.nix` that `harness.settings` sets no
