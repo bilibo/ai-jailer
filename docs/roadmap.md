@@ -467,9 +467,10 @@ The gaps, in order:
       activation leaves it; also whether Claude Code needs the file when
       absent, whether `harnessSeedClaudeSettings` after `linkGeneration`
       removes an older generation's store symlink first (suspected, not
-      verified), whether `programs.git.userName` moved to
-      `programs.git.settings.user.*` in recent Home Manager, and whether
-      `home.stateVersion` accepts "26.05".
+      verified), and whether `home.stateVersion` accepts "26.05". The
+      git identity form is settled (2026-10-27, later that day): the
+      module's worker branch uses `programs.git.settings.user`, the form
+      the host's home-manager (nix-community at 6d9655f) takes.
     - [ ] V7 group reads: the owner reads `/home/w-x/code/...`; `w-x`
       cannot list `/home/<owner>` or another worker's home.
     - [ ] V8 a baseline `harness check` transcript in a worker repo.
@@ -486,7 +487,15 @@ The gaps, in order:
     - [ ] Follow-ups: `check_env`'s `fix: direnv allow <dir>` advice now
       names a command the hook refuses; place `extraAllowedDomains`
       after V2; the `grep 'direnv allow'` false positive; a `harness
-      check` case for the direnv rule.
+      check` case for the direnv rule; the home module's
+      `home.sessionVariables` (`HARNESS_CODE_ROOT`) reach a worker's
+      shell only where something sources Home Manager's session file,
+      which a host without `programs.bash` under Home Manager does not
+      (found 2026-10-27 reading the sources while wiring the NixOS-WSL
+      host, not live): either the home module enables `programs.bash`
+      for workers, or the NixOS module exports the variable system-wide
+      per worker; the host sets the worker's `codeRoot` to its
+      system-level value meanwhile.
 
 ## Open questions
 

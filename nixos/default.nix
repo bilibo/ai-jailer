@@ -315,10 +315,15 @@ in
               enable = true;
               codeRoot = "/home/${w.user}/${w.codeRoot}";
             };
+            # `settings.user`, not `userName`/`userEmail`: the host's
+            # home-manager (nix-community/home-manager at 6d9655f, 2026-10-27)
+            # takes the identity under `programs.git.settings`.
             programs.git = {
               enable = true;
-              userName = w.gitName;
-              userEmail = w.gitEmail;
+              settings.user = {
+                name = w.gitName;
+                email = w.gitEmail;
+              };
             };
             home.stateVersion = config.system.stateVersion;
           }

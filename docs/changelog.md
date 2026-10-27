@@ -130,10 +130,12 @@ happened and what was learned on the day.
   whether `harness.extraAllowedDomains` stays in the devenv module); V3
   `allowedDomains = ["*"]`; V4 the owner attaching to a worker's tmux
   (`sudo -u w-x -i tmux attach` against `server-access`); V5
-  `XDG_RUNTIME_DIR` under `sudo -i` with linger; V6 Home Manager seeding,
-  including `programs.git.userName` possibly moved to
-  `programs.git.settings.user.*` in recent Home Manager and
-  `home.stateVersion` accepting "26.05"; V7 group reads; V8 a `harness
+  `XDG_RUNTIME_DIR` under `sudo -i` with linger; V6 Home Manager seeding
+  and `home.stateVersion` accepting "26.05" (the identity question is
+  settled: the host's home-manager, nix-community at 6d9655f, takes it
+  under `programs.git.settings.user`, which the host's own user block
+  already uses, so the module's worker branch was changed to that form
+  the same day); V7 group reads; V8 a `harness
   check` baseline; V9 managed `syncClaudeAiSkills = false` honoured.
   Also untested: `nix build --out-link` under sudo on a daemon host, and
   the whole `home-manager.users.<w>` branch (Home Manager is not an
