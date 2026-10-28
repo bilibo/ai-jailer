@@ -129,6 +129,7 @@ OS_RELEASE="$tmp/os-release" DIRENV_CONFIG="$tmp/etc-direnv" SYSTEM_BASHRC="$tmp
 check "direnv.toml from DIRENV_CONFIG" "ok    direnv\.toml $tmp/etc-direnv/direnv\.toml"
 check "hook from the system bashrc" "ok    direnv hook in $tmp/etc-bashrc \(system configuration\)"
 refute "no bashrc.d verdict with a system hook" 'bashrc\.d'
+refute "no environment.d verdict on nixos" 'environment\.d'   # the profiles are on every session's PATH there
 printf '[global]\nstrict_env = false\n' >"$tmp/etc-direnv/direnv.toml"
 OS_RELEASE="$tmp/os-release" DIRENV_CONFIG="$tmp/etc-direnv" doctor "$tmp/empty"
 check "a foreign direnv.toml is a warning" "warn  $tmp/etc-direnv/direnv\.toml exists and is not the ai-jailer one"
@@ -204,8 +205,14 @@ refute "no sudoers verdict while the file is absent" 'visudo'
 # Standing: in agents is a worker; in a w-* group an owner; else neither.
 T_USER=w-acme doctor "$tmp/empty" "$tmp/abin"
 check "standing: worker"        'info  standing: worker \(w-acme is in agents\)'
+chmod 0755 "$tmp/home"
 T_USER=raul doctor "$tmp/empty" "$tmp/abin"
 check "standing: owner"         'info  standing: owner \(raul is a member of w-acme w-beta\)'
+check "an open owner home is missing" "MISSING the home $tmp/home is world-accessible \(mode 755\): a worker can read it"
+chmod 0750 "$tmp/home"
+T_USER=raul doctor "$tmp/empty" "$tmp/abin"
+check "a 0750 owner home is closed to the workers" "ok    the home $tmp/home is closed to the workers \(mode 750\)"
+chmod 0700 "$tmp/home"
 T_USER=stranger doctor "$tmp/empty" "$tmp/abin"
 check "standing: neither"       'info  standing: neither worker nor owner \(stranger is in no agents group and no w-\* group\)'
 # The sudoers file, checked with visudo -cf through sudo.

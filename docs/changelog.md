@@ -5,6 +5,34 @@ happened and what was learned on the day.
 
 ## 2026-10-28
 
+- `aj bootstrap` on NixOS writes nothing the system configuration already
+  provides. Seen on the first NixOS-WSL bootstrap (`programs.direnv`,
+  `devenv` and `ajmux` in `environment.systemPackages`): the owner got a
+  nix profile that shadowed the system's direnv and devenv, a
+  `~/.bashrc.d` with a second direnv hook, a `~/.config/direnv/direnv.toml`
+  that `DIRENV_CONFIG=/etc/direnv` hides, an `environment.d` PATH entry
+  for a desktop WSL does not have, and `~/.config/Code/User/settings.json`,
+  which Remote-WSL never reads (the remote's file is
+  `~/.vscode-server/data/Machine/settings.json`). All of it came back at
+  every `upgrade`, since the user steps skip only store symlinks. Now:
+  direnv.toml is skipped when `DIRENV_CONFIG` points elsewhere, the rc
+  files when the hook is in `/etc/bashrc` and the code root is the
+  default, environment.d on NixOS always, the VS Code user settings under
+  WSL always (the extension is still installed: from a VS Code terminal
+  the Remote-WSL CLI puts it in the remote, which doctor's comment had
+  wrong); doctor stops asking NixOS for an environment.d entry. The nix
+  profile is still `--no-profile`'s to decline: bootstrap cannot tell a
+  system package from a profile one by PATH alone, and a NixOS host
+  without those packages needs the profile. Not moved into home-manager:
+  the host's configuration keeps `~/.bashrc` the person's and `aj` in the
+  checkout, and owning dead files there to placate the bootstrap would
+  be the wrong side of the fix.
+- `aj doctor` checks the claim the worker boundary rests on: as an owner
+  (a member of a `w-*` group) it reads the mode of its own home and
+  reports MISSING when the world bits are set (a worker is in no group of
+  the owner's, so 0750 passes). The host's side, nixos-wsl: `homeMode =
+  "700"` written out (the default; activation chmods the home to it
+  every time) and `verify.sh` no longer accepts 755.
 - Checked after the rename, from a session in this checkout: every
   suite that runs without a Nix build passes, run by hand against
   stand-ins for the store paths (hook-test 373, install 81, host-config

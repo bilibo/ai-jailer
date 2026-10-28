@@ -23,11 +23,17 @@
 # nothing without a receipt, the store-symlink guard on nix.conf, a NixOS host
 # (the root steps run but nix.conf and the sysctl, which are printed as
 # configuration.nix lines; no sudo rule; home-manager's files left alone),
+# a NixOS whose system configuration provides the user side (programs.direnv:
+# nothing written in HOME but the tmux block, and under WSL the Linux-side
+# VS Code user settings never; a code root of the person's own still gets
+# ~/.bashrc.d),
 # NixOS with workers, a WSL host (its host line, the managed-wsl tree), a
 # worker the receipt names but the host lacks, and a path: ref prefetched into
 # the store for the workers. Assumes no controlling terminal; the stub directory is the whole
 # PATH (aj adds coreutils, jq, git and friends in front, so a stub
 # named like one of those never runs: account checks use getent, not id).
+# shellcheck disable=SC2088  # ~ in labels and expected output is aj's literal text
+# shellcheck disable=SC2016  # $ in stub bodies, written files and expected content is literal
 set -uo pipefail
 aj="${1:?usage: aj-bootstrap-test.sh <aj>}"
 pass=0; fail=0
@@ -141,7 +147,8 @@ aj() {
     AI_JAILER_MANAGED_DIR="$tmp/etc-claude-code" AI_JAILER_SUDOERS="$tmp/etc/sudoers-claude" AI_JAILER_STORE_DIR="$tmp/store" AI_JAILER_HOME_BASE="$tmp/homes" \
     AI_JAILER_OS_RELEASE="$tmp/os-release" AI_JAILER_NIX_CONF="$tmp/etc/nix.conf" AI_JAILER_SYSCTL_DROPIN="$tmp/etc/99-userns.conf" AI_JAILER_APPARMOR_PROFILE="$tmp/etc/apparmor-bwrap" \
     AI_JAILER_NIX_INSTALLER="$tmp/nix/nix-installer" AI_JAILER_CA_BUNDLE="$tmp/ca.pem" AI_JAILER_NIX_PROFILE_D= \
-    AI_JAILER_NIXOS_MARKER=/var/empty/none AI_JAILER_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" AI_JAILER_SYSTEM_BASHRC=/var/empty/none \
+    AI_JAILER_NIXOS_MARKER=/var/empty/none AI_JAILER_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" AI_JAILER_SYSTEM_BASHRC="${SYSTEM_BASHRC:-/var/empty/none}" \
+    ${T_DIRENV_CONFIG:+"DIRENV_CONFIG=$T_DIRENV_CONFIG"} \
     "$aj" "$cmd" "$@" 2>&1 </dev/null); rc=$?
 }
 ok()   { pass=$((pass+1)); }
@@ -412,6 +419,50 @@ exits "nixos reset" 0
 called "nixos reset removes the link" "^sudo rm -f $tmp/etc-claude-code$"
 uncalled "nixos reset leaves nix.conf" 'install .*nix.conf'
 rm -f "$tmp/restricted" "$tmp/etc/nix.conf"
+
+# 17b. NixOS whose system configuration provides the user side (programs.direnv:
+# the hook in /etc/bashrc, direnv.toml under DIRENV_CONFIG), under WSL, with
+# the Remote-WSL `code` on PATH: no direnv.toml, no ~/.bashrc.d, no ~/.bashrc,
+# no environment.d; the tmux block as always; the extension installed in the
+# remote and recorded, the Linux-side VS Code user settings never written.
+# Doctor agrees with every skip. A code root of the person's own still needs
+# the variable, so that run gets ~/.bashrc.d and a ~/.bashrc. The system
+# configuration has flakes and the cache, and nothing confines user namespaces.
+printf 'experimental-features = nix-command flakes\nextra-substituters = https://devenv.cachix.org\n' >"$tmp/etc/nix.conf"
+mkdir -p "$tmp/etc-direnv"; printf '[global]\nload_dotenv = false\nstrict_env = true\nwarn_timeout = "2m"\n' >"$tmp/etc-direnv/direnv.toml"
+printf 'eval "$(/nix/store/x-direnv/bin/direnv hook bash)"\n' >"$tmp/etc-bashrc"
+stub code 'case "$1" in --version) echo 1.144.0 ;; --list-extensions) cat "$STUBROOT/exts" 2>/dev/null ;; --install-extension) echo "$2" >>"$STUBROOT/exts" ;; esac'
+h12b="$tmp/home12b"; mkdir -p "$h12b"; touch "$tmp/wsl"
+SYSTEM_BASHRC="$tmp/etc-bashrc" T_DIRENV_CONFIG="$tmp/etc-direnv" WSL_MARKER="$tmp/wsl" ROOT_STEPS="" aj "$h12b" bootstrap --yes --no-profile
+exits "nixos system-side bootstrap" 0
+says "nothing missing"             'aj bootstrap: 0 missing'
+says "direnv.toml skipped"         "direnv reads $tmp/etc-direnv/direnv\.toml \(DIRENV_CONFIG.*~/\.config/direnv/direnv\.toml would never be read"
+absent "no direnv.toml" "$h12b/.config/direnv/direnv.toml"
+says "rc files skipped"            "the direnv hook is in $tmp/etc-bashrc .*the code root is the default: ~/\.bashrc\.d and ~/\.bashrc left alone"
+absent "no ~/.bashrc" "$h12b/.bashrc"
+absent "no ~/.bashrc.d" "$h12b/.bashrc.d/ai-jailer.sh"
+says "environment.d skipped"       'NixOS puts the nix profiles on every session.s PATH .*50-ai-jailer\.conf left alone'
+absent "no environment.d" "$h12b/.config/environment.d/50-ai-jailer.conf"
+count_is "tmux block" "$h12b/.config/tmux/tmux.conf" "$mark" 1
+called "extension installed in the remote" '^code --install-extension mkhl.direnv$'
+says "Code user settings skipped"  'WSL: ~/\.config/Code/User/settings\.json is never read'
+absent "no Code user settings" "$h12b/.config/Code/User/settings.json"
+uncalled "no profile with --no-profile" '^nix profile add'
+receipt12b="$h12b/.local/state/ai-jailer/receipt.json"
+in_json "receipt: the extension"   "$receipt12b" '.vscodeExtensions == ["mkhl.direnv"]'
+in_json "receipt: no file written" "$receipt12b" '[.files[] | select(.kind == "file" or .kind == "keys")] == []'
+SYSTEM_BASHRC="$tmp/etc-bashrc" T_DIRENV_CONFIG="$tmp/etc-direnv" WSL_MARKER="$tmp/wsl" aj "$h12b" doctor
+exits "doctor on it" 0
+says "doctor: direnv.toml from DIRENV_CONFIG" "ok    direnv\.toml $tmp/etc-direnv/direnv\.toml"
+says "doctor: hook from the system bashrc" "ok    direnv hook in $tmp/etc-bashrc \(system configuration\)"
+says "doctor: the extension"       'ok    VS Code extension mkhl\.direnv'
+refutes "doctor: no environment.d verdict" 'environment\.d'
+refutes "doctor: no bashrc.d verdict" 'bashrc\.d'
+SYSTEM_BASHRC="$tmp/etc-bashrc" T_DIRENV_CONFIG="$tmp/etc-direnv" WSL_MARKER="$tmp/wsl" ROOT_STEPS="" aj "$h12b" bootstrap --yes --no-profile --code-root "$h12b/work"
+exits "own code root bootstrap" 0
+file_has "own code root in ~/.bashrc.d" "$h12b/.bashrc.d/ai-jailer.sh" 'export AI_JAILER_CODE_ROOT="\$HOME/work"'
+count_is "~/.bashrc created for it" "$h12b/.bashrc" "$mark" 1
+rm -f "$tmp/bin/code" "$tmp/exts" "$tmp/wsl" "$tmp/etc/nix.conf"
 ubuntu
 
 # 18. WSL: the host line says so; nothing else changes here.
@@ -445,7 +496,7 @@ rm -f "$tmp/clone-restricted" "$tmp/etc/99-userns.conf"
 rm -rf "$tmp"/home-w-*; mkdir -p "$tmp/homes"
 # beta's Claude Code settings already hold a key of its own (/model wrote it).
 mkdir -p "$tmp/home-w-beta/.claude"; echo '{"model":"opus"}' >"$tmp/home-w-beta/.claude/settings.json"
-h15="$tmp/home15"; mkdir -p "$h15"; receipt15="$h15/.local/state/ai-jailer/receipt.json"
+h15="$tmp/home15"; mkdir -p "$h15"; chmod 0700 "$h15"; receipt15="$h15/.local/state/ai-jailer/receipt.json"
 account_calls() { grep -E "^sudo (/.*nix build|groupadd|useradd|chmod|usermod|loginctl|visudo|install .*sudoers|-u)" "$log" | sed -e "s#$tmp/tmp\\.[A-Za-z0-9]*#TMPFILE#" -e "s#$tmp#T#g"; }
 ROOT_STEPS="" aj "$h15" bootstrap --yes --workers acme,beta
 exits "workers bootstrap" 0
@@ -492,7 +543,13 @@ says "doctor: agents members"      'info  agents group members: w-acme,w-beta'
 says "doctor: linger on"           'ok    linger on for w-acme'
 says "doctor: sudoers checked"     "ok    $tmp/etc/sudoers-claude passes visudo -cf"
 says "doctor: standing owner"      'info  standing: owner \(tester is a member of w-acme w-beta\)'
+says "doctor: owner home closed"   "ok    the home $h15 is closed to the workers \(mode 700\)"
 says "doctor: managed hook"        "ok    1 hooks in $tmp/etc-claude-code/managed-settings.json runnable"
+# A world-readable owner home breaks the boundary the workers rest on.
+chmod 0755 "$h15"; aj "$h15" doctor
+exits "doctor with an open owner home" 1
+says "open owner home is missing"  "MISSING the home $h15 is world-accessible \(mode 755\): a worker can read it \(chmod 0750"
+chmod 0700 "$h15"
 
 # A second run runs none of the root commands (the per-worker user step is
 # not guarded: it is itself idempotent).
@@ -535,7 +592,7 @@ if grep -q -E 'name = Real Name$' "$tmp/home-w-beta/.gitconfig" && ! grep -q -E 
 
 # 21. --owner-sudo: none writes no rule; password drops NOPASSWD; a visudo
 # failure removes the file and stops.
-h16="$tmp/home16"; mkdir -p "$h16"
+h16="$tmp/home16"; mkdir -p "$h16"; chmod 0700 "$h16"
 ROOT_STEPS="" aj "$h16" bootstrap --yes --workers gamma --owner-sudo none
 exits "owner-sudo none" 0
 absent "no sudoers file for none" "$tmp/etc/sudoers-claude"
@@ -635,7 +692,7 @@ ubuntu
 # 29. A path: ref (the checkout route): prefetched into the store once, and
 # the workers get the store path; the owner's receipt keeps the checkout.
 : >"$tmp/groups"; : >"$tmp/users"; rm -rf "$tmp/etc-claude-code" "$tmp/homes" "$tmp"/home-w-*; rm -f "$tmp"/linger-*; mkdir -p "$tmp/homes" "$tmp/store/source"
-h20="$tmp/home20"; mkdir -p "$h20"
+h20="$tmp/home20"; mkdir -p "$h20"; chmod 0700 "$h20"
 REF="path:$tmp/checkout" ROOT_STEPS="" aj "$h20" bootstrap --yes --workers gamma
 exits "path ref bootstrap" 0
 called "checkout prefetched"       "^nix flake prefetch --json path:$tmp/checkout$"

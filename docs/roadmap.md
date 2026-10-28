@@ -803,6 +803,8 @@ The gaps, in order:
   (ai-jailer's own jobs, headless agents on the managed host; three
   test cases before any code), and the agent's cloud identity (Entra
   Agent ID) as a separate repository with three seams into this one.
+  Also (2026-10-28) staleness: a host never learns its rules are old;
+  a one-line signal at the factory shell's entry when it bites.
 - Tighten the hook with the gaps listed in the runbook's known-gaps section:
   gh and package publishing as project rules, git exec-vector config keys,
   az transfer verbs, and a fail-closed rule for dynamic shell constructs

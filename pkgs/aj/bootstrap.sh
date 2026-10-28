@@ -35,7 +35,14 @@
 # rebuild with it false removes them, and `aj doctor` reports a worker
 # the receipt names but the host lacks. A user file that is a symlink into
 # the Nix store is home-manager's: it is skipped and the option that sets it
-# is printed; the rest is written as on any host. Independently of
+# is printed. What the system configuration already provides is skipped too
+# (2026-10-28, seen on NixOS-WSL with programs.direnv): a direnv.toml under
+# DIRENV_CONFIG makes ~/.config/direnv/direnv.toml unread; the hook in
+# /etc/bashrc makes ~/.bashrc.d pointless while the code root is the default
+# (Nix-built tools find NixOS's CA bundle by themselves); environment.d is
+# never needed, NixOS puts the profiles on every session's PATH; and under
+# WSL the Linux-side VS Code user settings are read by nothing. The rest is
+# written as on any host. Independently of
 # detection, root_write refuses any target that resolves into the store. WSL
 # (binfmt WSLInterop, or WSL_DISTRO_NAME) links the `managed-wsl` tree (the
 # Windows side hidden from the sandbox) and is reported in the host line;
@@ -709,11 +716,16 @@ profile_steps() {
 }
 
 user_steps() {
-  # direnv: the home module's programs.direnv.config.global.
-  local f="$HOME/.config/direnv/direnv.toml" direnv_toml
+  # direnv: the home module's programs.direnv.config.global. direnv reads
+  # $DIRENV_CONFIG/direnv.toml when the variable is set (NixOS
+  # programs.direnv points it at /etc/direnv): the user file is then never
+  # read, and doctor judges the one direnv does read.
+  local f="$HOME/.config/direnv/direnv.toml" direnv_toml dc="${DIRENV_CONFIG:-}"
   direnv_toml="$MARK_BEGIN
 $(cat "$DIRENV_TOML")"
-  if hm_owned "$f"; then hm_skip "$f" "programs.direnv.config.global (pkgs/direnv.toml), or home-manager"
+  if [ -n "$dc" ] && [ "$dc" != "${XDG_CONFIG_HOME:-$HOME/.config}/direnv" ]; then
+    step "direnv reads $dc/direnv.toml (DIRENV_CONFIG, the system configuration's): $(tilde "$f") would never be read, left alone"
+  elif hm_owned "$f"; then hm_skip "$f" "programs.direnv.config.global (pkgs/direnv.toml), or home-manager"
   elif [ -e "$f" ] && ! grep -q -F "$MARK_BEGIN" "$f"; then
     warn "$f exists and is not the ai-jailer one; merge by hand: strict_env, warn_timeout = \"2m\", load_dotenv = false, no whitelist"
   else
@@ -731,25 +743,33 @@ $(cat "$DIRENV_TOML")"
   # bash: the direnv hook and the code root (home.sessionVariables), in
   # ~/.bashrc.d, which Fedora's stock ~/.bashrc sources after /etc/bashrc has
   # run profile.d, so the nix profile is already on PATH here.
-  local root_expr="$CODE_ROOT"
+  local root_expr="$CODE_ROOT" rc="$HOME/.bashrc" zrc="$HOME/.zshrc"
   [[ "$root_expr" == "$HOME/"* ]] && root_expr="\$HOME/${root_expr#"$HOME/"}"
   f="$HOME/.bashrc.d/ai-jailer.sh"
-  write_if_differs "$f" "$MARK_BEGIN
+  # NixOS programs.direnv hooks every interactive bash from /etc/bashrc, and
+  # Nix-built tools find NixOS's CA bundle without the variable. With the
+  # default code root nothing is left for the file, so none is written and a
+  # ~/.bashrc of the person's own is not touched; a code root of their own
+  # still needs the variable, and gets the file as on any host.
+  if [ "$HOST" = nixos ] && grep -q 'direnv hook bash' "$SYSTEM_BASHRC" 2>/dev/null && [ "$CODE_ROOT" = "$HOME/code/git" ]; then
+    step "the direnv hook is in $SYSTEM_BASHRC (programs.direnv in the system configuration) and the code root is the default: ~/.bashrc.d and ~/.bashrc left alone"
+  else
+    write_if_differs "$f" "$MARK_BEGIN
 export AI_JAILER_CODE_ROOT=\"$root_expr\"
 # Fedora's own profile.d/nix-daemon.sh only knows the legacy bundle paths.
 [ -n \"\${NIX_SSL_CERT_FILE:-}\" ] || export NIX_SSL_CERT_FILE=\"${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem}\"
 if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook bash)\"; fi"
-  record_file file "$f"
+    record_file file "$f"
 
-  # Another distro's ~/.bashrc does not source ~/.bashrc.d, so it gets one
-  # line (a marked block) to do so. No rc file at all: ~/.bashrc is created,
-  # unless the person runs zsh (a ~/.zshrc and nothing else). A ~/.zshrc
-  # gets the same three lines as a block of its own.
-  local rc="$HOME/.bashrc" zrc="$HOME/.zshrc"
-  if hm_owned "$rc"; then hm_skip "$rc" "programs.direnv.enableBashIntegration (the hook) and home.sessionVariables.AI_JAILER_CODE_ROOT"
-  elif { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
-    put_block "$rc" '[ -r ~/.bashrc.d/ai-jailer.sh ] && . ~/.bashrc.d/ai-jailer.sh'
+    # Another distro's ~/.bashrc does not source ~/.bashrc.d, so it gets one
+    # line (a marked block) to do so. No rc file at all: ~/.bashrc is created,
+    # unless the person runs zsh (a ~/.zshrc and nothing else).
+    if hm_owned "$rc"; then hm_skip "$rc" "programs.direnv.enableBashIntegration (the hook) and home.sessionVariables.AI_JAILER_CODE_ROOT"
+    elif { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
+      put_block "$rc" '[ -r ~/.bashrc.d/ai-jailer.sh ] && . ~/.bashrc.d/ai-jailer.sh'
+    fi
   fi
+  # A ~/.zshrc gets the same three lines as a block of its own.
   if hm_owned "$zrc"; then hm_skip "$zrc" "programs.direnv.enableZshIntegration and home.sessionVariables.AI_JAILER_CODE_ROOT"
   elif [ -e "$zrc" ]; then
     put_block "$zrc" "export AI_JAILER_CODE_ROOT=\"$root_expr\"
@@ -759,9 +779,11 @@ if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook zsh)\"; fi"
 
   # GUI session PATH: VS Code launched from the menu (and the claude it spawns)
   # otherwise never sees the nix profile. systemd user environment generator;
-  # takes effect at the next login.
+  # takes effect at the next login. Not on NixOS: /etc/set-environment puts
+  # ~/.nix-profile/bin and the other profiles on every session's PATH.
   f="$HOME/.config/environment.d/50-ai-jailer.conf"
-  if hm_owned "$f"; then hm_skip "$f" "home.sessionPath and home.sessionVariables"
+  if [ "$HOST" = nixos ]; then step "NixOS puts the nix profiles on every session's PATH (environment.profiles, /etc/set-environment): $(tilde "$f") left alone"
+  elif hm_owned "$f"; then hm_skip "$f" "home.sessionPath and home.sessionVariables"
   else
     write_if_differs "$f" "$MARK_BEGIN
 PATH=\$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:\$HOME/.local/bin:\$PATH
@@ -827,15 +849,23 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
       run -q code --install-extension mkhl.direnv
     fi
     R_EXT+=(mkhl.direnv)
-    local direnv_bin
-    nix_path; direnv_bin=$(command -v direnv 2>/dev/null || echo "$HOME/.nix-profile/bin/direnv")
-    if ! jq -e --arg p "$direnv_bin" --arg c "$CA_BUNDLE" \
-         '.["direnv.path.executable"] == $p and .["direnv.extraEnv"].NIX_SSL_CERT_FILE == $c' "$vs" >/dev/null 2>&1; then
-      step "set direnv.path.executable and direnv.extraEnv.NIX_SSL_CERT_FILE in $vs"
-      jq_edit "$vs" --arg p "$direnv_bin" --arg c "$CA_BUNDLE" \
-        '. + {"direnv.path.executable": $p} | .["direnv.extraEnv"] = ((.["direnv.extraEnv"] // {}) + {NIX_SSL_CERT_FILE: $c})'
+    # Under WSL `code` is the Remote-WSL CLI (on PATH in a VS Code terminal):
+    # the extension lands in the remote, but this file is a Linux desktop VS
+    # Code's and nothing reads it there. The client's settings are on Windows,
+    # the remote's are ~/.vscode-server/data/Machine/settings.json, and the
+    # remote finds direnv on its login-shell PATH.
+    if [ "$WSL" = 1 ]; then step "WSL: $(tilde "$vs") is never read (the client is on Windows, the remote reads ~/.vscode-server/data/Machine/settings.json): left alone"
+    else
+      local direnv_bin
+      nix_path; direnv_bin=$(command -v direnv 2>/dev/null || echo "$HOME/.nix-profile/bin/direnv")
+      if ! jq -e --arg p "$direnv_bin" --arg c "$CA_BUNDLE" \
+           '.["direnv.path.executable"] == $p and .["direnv.extraEnv"].NIX_SSL_CERT_FILE == $c' "$vs" >/dev/null 2>&1; then
+        step "set direnv.path.executable and direnv.extraEnv.NIX_SSL_CERT_FILE in $vs"
+        jq_edit "$vs" --arg p "$direnv_bin" --arg c "$CA_BUNDLE" \
+          '. + {"direnv.path.executable": $p} | .["direnv.extraEnv"] = ((.["direnv.extraEnv"] // {}) + {NIX_SSL_CERT_FILE: $c})'
+      fi
+      record_file keys "$vs" '["direnv.path.executable"]' '["direnv.extraEnv","NIX_SSL_CERT_FILE"]'
     fi
-    record_file keys "$vs" '["direnv.path.executable"]' '["direnv.extraEnv","NIX_SSL_CERT_FILE"]'
   fi
 }
 
@@ -1124,8 +1154,10 @@ report() {
       ok "code $v"
       code --list-extensions 2>/dev/null | grep -q -i -x 'anthropic.claude-code' && ok "VS Code extension anthropic.claude-code" || warn "VS Code extension anthropic.claude-code not installed"
       # On WSL `code` is the Remote-WSL CLI, so this lists the remote's
-      # extensions. There mkhl.direnv is a manual install (no bootstrap), and
-      # on the Windows side it only raises errors.
+      # extensions. A bootstrap run from a VS Code terminal installs
+      # mkhl.direnv there (the CLI is on PATH only in one); from anywhere
+      # else it is a manual install, and on the Windows side it only raises
+      # errors.
       if code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then ok "VS Code extension mkhl.direnv"
       elif [ "$WSL" = 1 ]; then info "VS Code extension mkhl.direnv not in the WSL remote: without it the Claude Code extension, language servers and tasks run outside the repo's devenv shell; install it from the Extensions view with \"Install in WSL\", never on Windows"
       else miss "VS Code extension mkhl.direnv (code --install-extension mkhl.direnv)"; fi
@@ -1155,8 +1187,9 @@ report() {
   fi
   if hm_owned "$HOME/.zshrc"; then ok "~/.zshrc (home-manager)"
   elif [ -e "$HOME/.zshrc" ]; then grep -q 'direnv hook zsh' "$HOME/.zshrc" && ok "direnv hook in ~/.zshrc" || miss "~/.zshrc has no direnv hook (aj bootstrap adds it)"; fi
-  # System packages are on every session's PATH already.
-  if [[ "$(command -v direnv 2>/dev/null)" == /run/current-system/* ]]; then :
+  # System packages are on every session's PATH already, and so are the nix
+  # profiles on NixOS (bootstrap writes no environment.d there).
+  if [ "$HOST" = nixos ] || [[ "$(command -v direnv 2>/dev/null)" == /run/current-system/* ]]; then :
   elif hm_owned "$HOME/.config/environment.d/50-ai-jailer.conf"; then ok "session PATH (home-manager)"
   else [ -r "$HOME/.config/environment.d/50-ai-jailer.conf" ] && ok "session PATH (environment.d; next login)" || warn "no environment.d PATH entry: GUI-launched VS Code will not see the nix profile"; fi
 }
@@ -1177,7 +1210,7 @@ hooks_runnable() {
 # rule, and which side of them the caller stands on. Facts, not gaps, on a
 # host without workers.
 accounts_report() {
-  local members w me="${USER:-$(id -un)}" owned="" out
+  local members w me="${USER:-$(id -un)}" owned="" out m
   if ! group_exists agents; then info "no agents group: no worker users on this host"
   else
     members=$(group_members agents)
@@ -1214,6 +1247,14 @@ accounts_report() {
     info "sessions as $me are bound by the law alone (credential reads, git commit, git push): no sandbox, no jail; the jail is the workers'"
     command -v getent >/dev/null 2>&1 && owned=$(getent group 2>/dev/null | awk -F: -v u="$me" -v p="$WORKER_PREFIX" 'index($1, p) == 1 { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == u) printf "%s ", $1 }')
     if [ -n "$owned" ]; then info "standing: owner ($me is a member of ${owned% }): sessions here reach the workers through ajmux"
+      # The claim behind every worker boundary: a worker cannot read the
+      # owner's home. The world bits decide it (a worker is in no group of
+      # the owner's); the group bits are the owner's own business.
+      m=$(stat -c %a "$HOME" 2>/dev/null || echo '?')
+      case "$m" in
+        *0) ok "the home $HOME is closed to the workers (mode $m)" ;;
+        *) miss "the home $HOME is world-accessible (mode $m): a worker can read it (chmod 0750 $HOME; NixOS: users.users.<owner>.homeMode = \"700\")" ;;
+      esac
     else info "standing: neither worker nor owner ($me is in no agents group and no $WORKER_PREFIX* group)"; fi
   fi
 }

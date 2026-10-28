@@ -142,3 +142,34 @@ repo second; the `agentAuth` value and the doctor line when phase 3
 lands; the attestation output when something reads it. The README gains
 one paragraph when the identity repo exists: the jailer is the endpoint
 half, the identity half lives in the tenant, with the link.
+
+## 3. Staleness is silent (written 2026-10-28)
+
+A host does not notice that its rules are old. The managed tree under
+`/etc/claude-code` is built from one revision of this repo and stays
+there until someone runs `aj upgrade`; a host configuration that takes
+`ajmux`, `direnv.toml` or `tmux.conf` from this flake (nixos-wsl does)
+pins its own revision in its lock, and nothing compares the two. The
+tools that would say so, `aj doctor` and the host's `verify.sh`, are
+operator tools: run at install, after a rebuild, when something is
+broken. The daily flow is `aj init <customer>/<repo>` and then work,
+and nothing in it reads a revision.
+
+What holds without any of that is fail-closed: the hook blocks on its
+own failure and a worker's settings are checked against the jail
+reference on the host, so drift means older rules, never no rules. The
+same as any unpatched tool, and acceptable while one person runs the
+host and the factory.
+
+The foot gun is later: more hosts, or one that someone else runs, and a
+rule change here that never reaches them, with nobody told. The one
+place a signal would be seen is where changes come from, the factory
+checkout's shell: `enterShell` already warns when `/etc/claude-code` is
+missing, `aj` is rebuilt from the working tree at every entry, and the
+same spot can say "`/etc/claude-code` is not what this checkout builds:
+`aj upgrade`" for about a second of eval. Nowhere else: not `aj init`
+(it runs as a worker, from a pinned snapshot) and nothing periodic. For
+hosts the factory does not sit on, the honest answer is the one every
+distribution gives: a release note and an `aj upgrade` the operator
+runs. Decided 2026-10-28 to leave it until it bites or a second host
+exists, whichever first.
