@@ -60,8 +60,8 @@ property of the operating system. Section 5 keeps the old words.
 
 | Tier | Who | Rules | Part in the flow |
 |---|---|---|---|
-| work | the worker user `w-<customer>`, one per customer: private 0750 home, own Claude login, own git identity, own clones under its code root (`~/code/git/<customer>/<repo>`), no push credential, no sudo | the host's managed settings: full deny set, hook, sandbox, mod policy; plus the repo's project layer | proposes; never applies a change the rules refused |
-| owner | your own account, a member of every worker's group, with `sudo -u w-<customer>` to the workers and no sudo rule the other way | the same managed settings: the owner's sessions are bound too | the human: accepts or rejects proposals, applies diffs as the owner or as the worker, reads the workers' clones through the group |
+| work | the worker user `w-<customer>`, one per customer: private 0750 home, own Claude login, own git identity, own clones under its code root (`~/code/git/<customer>/<repo>`), no push credential, no sudo | the host's managed settings: full deny set, hook, sandbox lists, mod policy; the sandbox itself from the worker's user settings, which the hook requires (2026-10-28); plus the repo's project layer | proposes; never applies a change the rules refused |
+| owner | your own account, a member of every worker's group, with `sudo -u w-<customer>` to the workers and no sudo rule the other way | the same managed settings, so the owner's sessions are bound by the deny rules and the hook too; no sandbox (2026-10-28, roadmap item 13): the ai-jailer checkout needs nix, sudo and the daemon socket | the human: accepts or rejects proposals, applies diffs as the owner or as the worker, reads the workers' clones through the group |
 
 Which tier a session is in is its UID, not a line in a file an agent could
 edit: a worker cannot become the owner, cannot read the owner's home or

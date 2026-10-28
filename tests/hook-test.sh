@@ -533,5 +533,37 @@ if [ "${2:-}" = --direnv-stub ]; then
   rm -rf "$wt"
 fi
 
+# --- worker sandbox (2026-10-28) ------------------------------------------
+# The same hook with WORKER_GROUP set to this runner's own group, so the
+# runner is a worker. A worker's tools need sandbox.enabled to resolve to
+# true over user < project < local settings. Every case above ran as a
+# non-worker with no settings files, which is the owner's case.
+wk=$(mktemp -d); wg=$(id -gn)
+sed "s/^WORKER_GROUP=.*/WORKER_GROUP=\"$wg\"/" "$hook" >"$wk/env-guard.sh"; chmod +x "$wk/env-guard.sh"
+mkdir -p "$wk/home/.claude" "$wk/repo/.claude"
+wrun() { # wrun <expected-exit> <description> <user json|-> <project json|-> <local json|-> [<tool json>]
+  local want="$1" d="$2" got f
+  for f in "home/.claude/settings.json:$3" "repo/.claude/settings.json:$4" "repo/.claude/settings.local.json:$5"; do
+    rm -f "$wk/${f%%:*}"; [ "${f#*:}" = - ] || printf '%s' "${f#*:}" >"$wk/${f%%:*}"
+  done
+  printf '%s' "${6:-$(cwd="$wk/repo" bash_cmd 'git status')}" | HOME="$wk/home" CLAUDE_PROJECT_DIR="$wk/repo" "$wk/env-guard.sh" >/dev/null 2>&1; got=$?
+  if [ "$got" = "$want" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL (want $want, got $got): worker: $d"; fi
+}
+on='{"sandbox":{"enabled":true}}' off='{"sandbox":{"enabled":false}}'
+wrun 2 "no settings at all"              -    -    -
+wrun 0 "user on"                         "$on" -   -
+wrun 0 "user on, project silent"         "$on" '{"sandbox":{"filesystem":{}}}' -
+wrun 2 "user on, project off"            "$on" "$off" -
+wrun 0 "user on, project off, local on"  "$on" "$off" "$on"
+wrun 2 "user on, local off"              "$on" -   "$off"
+wrun 0 "project on, no user file"        -    "$on" -
+wrun 2 "user off"                        "$off" -  -
+wrun 2 "user sandbox not an object"      '{"sandbox":true}' - -
+wrun 2 "project file does not parse"     "$on" '{not json' -
+wrun 2 "edit refused too"                -    -    -    "$(cwd="$wk/repo" edit_file "$wk/repo/README.md")"
+wrun 0 "edit with user on"               "$on" -   -    "$(cwd="$wk/repo" edit_file "$wk/repo/README.md")"
+wrun 2 "a rule still applies when on"    "$on" -   -    "$(cwd="$wk/repo" bash_cmd 'git push')"
+rm -rf "$wk"
+
 echo "hook-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

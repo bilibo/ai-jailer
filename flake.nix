@@ -76,6 +76,14 @@
               extraAllowRead = [ "~/.cargo" ];
             }
           );
+          # The same with `ai-jail.sandbox.enable = false` (the ai-jailer
+          # checkout): no `sandbox.enabled` key, so the user scope decides.
+          project-settings-unsandboxed = (pkgs.formats.json { }).generate "claude-settings-unsandboxed.json" (
+            (jailerLib pkgs).projectSettings {
+              repoRoot = "/repo";
+              enableSandbox = false;
+            }
+          );
           # The same at a real-looking path: aj init runs the test on the
           # file devenv wrote for the actual repo, never at /repo.
           project-settings-elsewhere = (pkgs.formats.json { }).generate "claude-settings-elsewhere.json" (
@@ -222,6 +230,9 @@
           project-settings-fenced-test =
             test "project-settings-fenced-test" ./tests/project-settings-test.sh
               "${p.project-settings-fenced} fenced";
+          project-settings-unsandboxed-test =
+            test "project-settings-unsandboxed-test" ./tests/project-settings-test.sh
+              "${p.project-settings-unsandboxed} unsandboxed";
           project-settings-root-test =
             test "project-settings-root-test" ./tests/project-settings-test.sh
               "${p.project-settings-elsewhere} /home/acme/code/git/acme/demo";

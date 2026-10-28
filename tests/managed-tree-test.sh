@@ -35,7 +35,9 @@ ok "only managed hooks run"                     jq -e '.allowManagedHooksOnly ==
 ok "claude.ai skills not synced"                jq -e '.syncClaudeAiSkills == false' "$s"
 ok "claude.ai plugins not synced"               jq -e '.syncClaudeAiPlugins == false' "$s"
 ok "no sealed network variant"                  jq -e '.sandbox.network | has("strictAllowlist") | not' "$s"
-ok "sandbox on"                                 jq -e '.sandbox.enabled == true' "$s"
+# Not here since 2026-10-28: each worker's user settings turn it on, and the
+# hook refuses a worker's tools without it; the owner's sessions run without.
+ok "sandbox left to the workers"                jq -e '.sandbox | has("enabled") | not' "$s"
 ok "no session without the sandbox"             jq -e '.sandbox.failIfUnavailable == true' "$s"
 ok "no unsandboxed command"                     jq -e '.sandbox.allowUnsandboxedCommands == false' "$s"
 ok "git push denied"                            jq -e '.permissions.deny | index("Bash(git push)") != null' "$s"

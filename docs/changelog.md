@@ -5,6 +5,43 @@ happened and what was learned on the day.
 
 ## 2026-10-28
 
+- Checked after the rename, from a session in this checkout: every
+  suite that runs without a Nix build passes, run by hand against
+  stand-ins for the store paths (hook-test 373, install 81, host-config
+  7, check-parser 93, project-settings 17/18/17, managed-tree 25 for
+  linux and wsl, aj-bootstrap 271, aj-doctor 71, aj-init 82; ajmux 49 of
+  54, the five being tmux refused its socket by the session's sandbox).
+  Not run: `managed-host-eval`, `devenv-module-eval`,
+  `claude-code-test`, statix and deadnix. Learned: the session's sandbox
+  came from this checkout's own repo layer, which has no
+  `allowAllUnixSockets`, so no `nix` command reached the daemon
+  (`cannot create Unix domain socket: Operation not permitted`) and the
+  CLAUDE.md "Checks" recipe could not run; `/proc/sys/user/max_user_namespaces`
+  reads 0 inside the sandbox, so `aj doctor` run from a sandboxed session
+  reports user namespaces MISSING on a healthy host. Fixed:
+  `aj-bootstrap-test` read the host's `/etc/bashrc` (no
+  `AI_JAILER_SYSTEM_BASHRC` pin, which `aj-doctor-test` has), so a run
+  by hand on a NixOS host with `programs.direnv` failed where the Nix
+  build sandbox, which has no `/etc/bashrc`, passed.
+- Decision (the owner's), roadmap item 14, which reopens item 11 for the
+  owner and supersedes item 13: the jailer is bound by the law only
+  (credential reads, `git push`, and the managed-only keys until each
+  is decided), the jail is the prisoner's and lives on the worker user,
+  written by `aj bootstrap` and checked by the managed hook against a
+  reference copy; `aj init` builds a cell. Item 13's option and its
+  proposal patch are cut. Nothing built yet; the item lists the work.
+- Decision (the owner's), roadmap item 13, which reopens item 11 for the
+  owner: the ai-jailer checkout runs unsandboxed, and the sandbox moves
+  from the managed body to each worker's user settings, with a hook rule
+  that refuses a worker's tools unless `sandbox.enabled` resolves to
+  true. Handoffs go to `proposals/` in the checkout, gitignored; the
+  session scratchpad is private to the session. Built and staged:
+  `lib/settings.nix`, `hooks/env-guard.sh`, `pkgs/aj/bootstrap.sh`,
+  the tests, `flake.nix` (`project-settings-unsandboxed-test`); hook-test
+  386, aj-bootstrap 280, project-settings unsandboxed 17, the others as
+  above. The devenv module and this checkout's devenv.nix are
+  `proposals/2026-10-28-unsandboxed-checkout.patch`. Until it is applied
+  and the shell re-entered, a session here is still sandboxed.
 - Decision (the owner's): the project is renamed. The repo and flake are
   `ai-jailer` (`bilibo/ai-jailer`; GitHub redirects the old URL, so
   existing `flake.lock` and `devenv.lock` files keep resolving), the CLI

@@ -3,6 +3,10 @@ result-*
 # One host's managed-tree options (flake.nix, packages.managed); a
 # `path:<checkout>` ref carries it, the published ref never does.
 host.nix
+# What a session hands the human: patches for files the hook refuses
+# (devenv.nix, .envrc, ...), applied with `git apply`. The session scratchpad
+# is private to the session.
+proposals/
 .direnv/
 .devenv/
 .claude/

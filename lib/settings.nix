@@ -3,8 +3,10 @@
 # `managed = true` is the root-owned /etc/claude-code/managed-settings.json.
 # It is host-wide (there is no per-user or per-group managed file) and binds
 # every user, the owner and each worker alike: every deny rule, every hook,
-# the sandbox with its credential and network lists, and the mod policy.
-# Nothing in ~/.claude or in a repo overrides a key set there.
+# the sandbox's credential, filesystem and network lists, and the mod policy.
+# Nothing in ~/.claude or in a repo overrides a key set there. Not
+# `sandbox.enabled` (2026-10-28): a worker's user settings carry it, and the
+# hook refuses a worker's tools without it.
 #
 # `managed = false` is the repo's .claude/settings.json the devenv module
 # writes: the project layer. Allow rules come from `ai-jail.settings`
@@ -61,6 +63,10 @@
   # Further `allowRead` entries for a fenced repo: a `path:` devenv input,
   # `~/.cargo` for a Rust project, ...
   extraAllowRead ? [ ],
+  # Repo only. false leaves `sandbox.enabled` out of the repo file (never
+  # writes false), so the scope below decides: a worker's user settings turn
+  # it on, the owner's do not. The ai-jailer checkout sets it false.
+  enableSandbox ? true,
 }:
 assert lib.assertMsg (
   !managed || hookDir != null
@@ -123,8 +129,13 @@ let
     disableClaudeAiConnectors = !allowConnectors;
     includeCoAuthoredBy = false;
   };
+  # `enabled` is not among them in the managed body (2026-10-28, roadmap
+  # item 13): managed settings are host-wide, and the owner's sessions run
+  # unsandboxed. Each worker's ~/.claude/settings.json turns it on (aj
+  # bootstrap), and the managed hook refuses every tool call of a worker
+  # whose effective `sandbox.enabled` is not true. The rest binds whichever
+  # scope enables it.
   sandboxScalars = {
-    enabled = true;
     # In managed settings a false holds against a repo's true (2.1.285+).
     allowUnsandboxedCommands = false;
     failIfUnavailable = true;
@@ -333,19 +344,22 @@ let
       disableBypassPermissionsMode = "disable";
       deny = extraDeny;
     };
-    sandbox = sandboxScalars // {
-      filesystem = withFence {
-        # Not devenv.local.*: a literal entry is masked as an unreadable device
-        # node whether or not the file exists, and devenv reads both files
-        # when they exist, so listing them stopped every shell evaluation
-        # inside the sandbox (`aj check` case 2, 2026-10-22). The hook
-        # still refuses shell writes to them by name.
-        denyWrite = map (p: "${repoRoot}/${p}") (
-          lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected
-        );
+    sandbox =
+      sandboxScalars
+      // lib.optionalAttrs enableSandbox { enabled = true; }
+      // {
+        filesystem = withFence {
+          # Not devenv.local.*: a literal entry is masked as an unreadable device
+          # node whether or not the file exists, and devenv reads both files
+          # when they exist, so listing them stopped every shell evaluation
+          # inside the sandbox (`aj check` case 2, 2026-10-22). The hook
+          # still refuses shell writes to them by name.
+          denyWrite = map (p: "${repoRoot}/${p}") (
+            lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected
+          );
+        };
+        network.allowedDomains = extraAllowedDomains;
       };
-      network.allowedDomains = extraAllowedDomains;
-    };
   };
 in
 if managed then managedBody else repoBody

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#   project-settings-test.sh <settings.json> [fenced] [<repo-root>]
+#   project-settings-test.sh <settings.json> [fenced|unsandboxed] [<repo-root>]
 #
 # The repo's .claude/settings.json as the devenv module writes it: the
 # project layer only. The hard rules (deny list, hooks, credential lists,
@@ -8,9 +8,11 @@
 # checkout, the project's extra domains and, when on, the read fence.
 #
 # `fenced`: the file was generated with `readFence = true`; the read fence
-# checks replace the "no fence" check. `<repo-root>`: the path the file was
-# generated for, where its literal entries point; default /repo, the flake
-# fixtures' root. aj init passes the real repo.
+# checks replace the "no fence" check. `unsandboxed`: generated with
+# `enableSandbox = false` (the ai-jailer checkout): no `sandbox.enabled`
+# key at all, never a false, the other scalars as always. `<repo-root>`:
+# the path the file was generated for, where its literal entries point;
+# default /repo, the flake fixtures' root. aj init passes the real repo.
 #
 # A `center` argument is still ignored, not an error: pkgs/aj/init.sh
 # passes it until item C2 of the 2026-10-27 redesign removes the mode there.
@@ -18,7 +20,7 @@
 set -uo pipefail
 f="${1:?usage: project-settings-test.sh <settings.json> [fenced] [<repo-root>]}"
 mode=""; repo=/repo
-for a in "${@:2}"; do case "$a" in fenced) mode="$a" ;; center) ;; *) repo="$a" ;; esac; done
+for a in "${@:2}"; do case "$a" in fenced|unsandboxed) mode="$a" ;; center) ;; *) repo="$a" ;; esac; done
 pass=0; fail=0
 
 check() { # check <description> <jq filter that must be true; $repo is the repo root>
@@ -35,7 +37,12 @@ check "no co-author trailer"                    '.includeCoAuthoredBy == false'
 # a repo file it is ignored. Never written.
 check "no subprocess scrub key"                 '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB == null'
 check "no managed-only keys in a repo file"     '(has("allowManagedHooksOnly") or has("strictKnownMarketplaces") or has("disableSideloadFlags") or has("pluginConfigs") or has("syncClaudeAiSkills") or has("syncClaudeAiPlugins") or (.sandbox.network // {} | has("strictAllowlist"))) | not'
-check "sandbox on and mandatory"                '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false'
+if [ "$mode" = unsandboxed ]; then
+  # Left to the user scope, so a worker's own file still turns it on.
+  check "sandbox key absent, never false"       '(.sandbox | has("enabled") | not) and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false'
+else
+  check "sandbox on and mandatory"              '.sandbox.enabled == true and .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false'
+fi
 check "no credential list in the repo file"     '.sandbox | has("credentials") | not'
 # Linux honours literal write entries only (lib/settings.nix): the repo's
 # own files by absolute path, no glob.

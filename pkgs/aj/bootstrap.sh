@@ -788,9 +788,23 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     [ ${#gk[@]} -eq 0 ] || record_file keys "$gf" "${gk[@]}"
   fi
 
-  # Claude Code's user settings carry no ai-jailer keys any more (the managed
-  # settings do); only the scrub key an earlier bootstrap wrote is removed.
+  # Claude Code's user settings carry one ai-jailer key, and only for a
+  # worker: sandbox.enabled, which the managed settings leave out so the
+  # owner's sessions run unsandboxed (2026-10-28, roadmap item 13). The
+  # managed hook refuses every tool of a worker without it. Merged into the
+  # file Claude Code itself writes (/model), never a store symlink. The scrub
+  # key an earlier bootstrap wrote is removed.
   local cs="$HOME/.claude/settings.json"
+  if [[ "$me" == "$WORKER_PREFIX"* ]]; then
+    if hm_owned "$cs"; then miss "$cs is a store symlink: a worker's sandbox.enabled cannot be written there"
+    else
+      if ! jq -e '.sandbox.enabled == true' "$cs" >/dev/null 2>&1; then
+        step "sandbox.enabled = true in $cs (the worker's sandbox)"
+        jq_edit "$cs" '.sandbox = ((.sandbox // {}) + {enabled: true})'
+      fi
+      record_file keys "$cs" '["sandbox","enabled"]'
+    fi
+  fi
   # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
   # Code stops auto-allowing sandboxed Bash commands (header).
   if ! hm_owned "$cs" && jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
@@ -1185,7 +1199,11 @@ accounts_report() {
     else miss "$SUDOERS_FILE fails visudo -cf: the owner's sudo rule is broken (sudo visudo -cf $SUDOERS_FILE)"; fi
   fi
   if group_has agents "$me"; then info "standing: worker ($me is in agents): the managed rules bind every session as this user"
+    jq -e '.sandbox.enabled == true' "$HOME/.claude/settings.json" >/dev/null 2>&1 \
+      && ok "sandbox.enabled in ~/.claude/settings.json (the worker's sandbox)" \
+      || miss "sandbox.enabled is not true in ~/.claude/settings.json: the managed hook refuses every tool of this worker (aj bootstrap writes it)"
   else
+    info "sessions as $me run without the sandbox unless a repo file turns it on (the managed settings leave sandbox.enabled to the workers)"
     command -v getent >/dev/null 2>&1 && owned=$(getent group 2>/dev/null | awk -F: -v u="$me" -v p="$WORKER_PREFIX" 'index($1, p) == 1 { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == u) printf "%s ", $1 }')
     if [ -n "$owned" ]; then info "standing: owner ($me is a member of ${owned% }): sessions here reach the workers through ajmux"
     else info "standing: neither worker nor owner ($me is in no agents group and no $WORKER_PREFIX* group)"; fi

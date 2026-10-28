@@ -10,7 +10,10 @@ no push credential or sudo; you drive them from your own account with
 `ajmux <customer>/<repo>`. A repo's `devenv.nix` adds a project layer on
 top (allow rules, extra deny rules, extra network hosts). Agents stage
 and diff; you commit and push. Your own sessions are bound by the managed
-file too: the rules are the host's, not a repo's.
+deny rules and hook too: the rules are the host's, not a repo's. The Bash
+sandbox is the workers' (since 2026-10-28): each worker's user settings turn
+it on and the hook refuses a worker's tools without it, so your sessions,
+the ai-jailer checkout's included, run unsandboxed.
 
 Status, 2026-10-27: this is the shape the code now has. None of it has run
 live yet; the first-run checks are pending (runbook section 5), and the
@@ -114,20 +117,25 @@ CLI `claude` of the worker's profile or of the repo's shell
 Each Claude Code mechanism covers a different surface, so all are used:
 
 1. Managed settings (`/etc/claude-code/managed-settings.json`, root-owned):
-   the full deny set, every hook, the sandbox (with `denyRead` on the
-   user's own Claude credentials, `~/.claude.json`, `~/.azure`,
-   `~/.config/gh`, `~/.git-credentials` and `~/.ssh`, and the credential
-   environment variables stripped), the base network allowlist, the mod
-   policy and `syncClaudeAiSkills`/`syncClaudeAiPlugins = false`. Applies to
-   every session on the host, the owner's included. Nothing in `~/.claude`
-   or a repo can relax it.
+   the full deny set, every hook, the sandbox's lists and scalars (with
+   `denyRead` on the user's own Claude credentials, `~/.claude.json`,
+   `~/.azure`, `~/.config/gh`, `~/.git-credentials` and `~/.ssh`, the
+   credential environment variables stripped, no unsandboxed fallback),
+   the base network allowlist, the mod policy and
+   `syncClaudeAiSkills`/`syncClaudeAiPlugins = false`. Applies to every
+   session on the host, the owner's included. Nothing in `~/.claude` or a
+   repo can relax it. Not `sandbox.enabled` (2026-10-28): a worker's
+   `~/.claude/settings.json` carries it (`aj bootstrap`), and the hook
+   refuses every tool of an `agents` member for whom it does not resolve
+   to true, so a repo or local file cannot turn a worker's sandbox off.
 2. Linux users: one per customer, a 0750 home, no push credential, no
    sudo. The owner is a member of each worker's group and may run any
    command as a worker (`<owner> ALL=(%agents) NOPASSWD: ALL`); no worker
    is in `trusted-users`, so a worker cannot hand the Nix daemon options.
 3. The repo's project layer (`.claude/settings.json`, devenv module,
    read-only store symlink): `extraDeny`, allow rules from
-   `ai-jail.settings`, the sandbox belt scalars (`enabled`,
+   `ai-jail.settings`, the sandbox belt scalars (`enabled`, left out with
+   `ai-jail.sandbox.enable = false` as in this checkout, never written false;
    `allowUnsandboxedCommands = false`, `failIfUnavailable`), the repo's own
    settings, skills, hooks, plugin manifest and `.git` hooks and config as
    literal `denyWrite` paths, `extraAllowedDomains` and, when on, the read
@@ -186,7 +194,7 @@ the terminal decides; a `-p` session treats a prompt as a refusal.
 
 | | Managed host |
 | --- | --- |
-| Enforced | deny rules; the fail-closed hook on every writing tool and settings change; the Bash sandbox with no unsandboxed fallback; bypass mode off; `~/.ssh` and the agent socket hidden; account connectors and account-synced skills and plugins off; the GitHub tokens and Azure secrets stripped from every subprocess (`credentials.envVars`); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; mod policy; a worker cannot read another user's home (0750; untested live) |
+| Enforced | deny rules; the fail-closed hook on every writing tool and settings change; for a worker, the Bash sandbox with no unsandboxed fallback (the owner's sessions run without it since 2026-10-28); bypass mode off; `~/.ssh` and the agent socket hidden; account connectors and account-synced skills and plugins off; the GitHub tokens and Azure secrets stripped from every subprocess (`credentials.envVars`); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; mod policy; a worker cannot read another user's home (0750; untested live) |
 | Prompted | network hosts outside the allowlist; edits outside the working directory |
 | Open | every unix socket (D-Bus, the display, the secret service; `allowAllUnixSockets`, all-or-none on Linux); reads within the worker's own home and of the rest of the machine except the `denyRead` paths (the read fence, off by default, narrows it); dynamic shell constructs the hook's text rules cannot see (runbook section 8); `/add-dir` |
 

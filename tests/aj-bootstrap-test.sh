@@ -138,7 +138,7 @@ aj() {
     AI_JAILER_MANAGED_DIR="$tmp/etc-claude-code" AI_JAILER_SUDOERS="$tmp/etc/sudoers-claude" AI_JAILER_STORE_DIR="$tmp/store" AI_JAILER_HOME_BASE="$tmp/homes" \
     AI_JAILER_OS_RELEASE="$tmp/os-release" AI_JAILER_NIX_CONF="$tmp/etc/nix.conf" AI_JAILER_SYSCTL_DROPIN="$tmp/etc/99-userns.conf" AI_JAILER_APPARMOR_PROFILE="$tmp/etc/apparmor-bwrap" \
     AI_JAILER_NIX_INSTALLER="$tmp/nix/nix-installer" AI_JAILER_CA_BUNDLE="$tmp/ca.pem" AI_JAILER_NIX_PROFILE_D= \
-    AI_JAILER_NIXOS_MARKER=/var/empty/none AI_JAILER_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" \
+    AI_JAILER_NIXOS_MARKER=/var/empty/none AI_JAILER_WSL_MARKER="${WSL_MARKER:-/var/empty/none}" AI_JAILER_SYSTEM_BASHRC=/var/empty/none \
     "$aj" "$cmd" "$@" 2>&1 </dev/null); rc=$?
 }
 ok()   { pass=$((pass+1)); }
@@ -440,6 +440,8 @@ rm -f "$tmp/clone-restricted" "$tmp/etc/99-userns.conf"
 # (the stub sudo runs it with that user's HOME). Order and argv are exact.
 : >"$tmp/groups"; : >"$tmp/users"; rm -rf "$tmp/etc-claude-code" "$tmp/homes" "$tmp/etc/sudoers-claude"; rm -f "$tmp"/linger-*
 rm -rf "$tmp"/home-w-*; mkdir -p "$tmp/homes"
+# beta's Claude Code settings already hold a key of its own (/model wrote it).
+mkdir -p "$tmp/home-w-beta/.claude"; echo '{"model":"opus"}' >"$tmp/home-w-beta/.claude/settings.json"
 h15="$tmp/home15"; mkdir -p "$h15"; receipt15="$h15/.local/state/ai-jailer/receipt.json"
 account_calls() { grep -E "^sudo (/.*nix build|groupadd|useradd|chmod|usermod|loginctl|visudo|install .*sudoers|-u)" "$log" | sed -e "s#$tmp/tmp\\.[A-Za-z0-9]*#TMPFILE#" -e "s#$tmp#T#g"; }
 ROOT_STEPS="" aj "$h15" bootstrap --yes --workers acme,beta
@@ -475,8 +477,14 @@ for w in acme beta; do
   file_has "$w: git email" "$wh/.gitconfig" "^[[:space:]]*email = claude-$w@.+\\.invalid$"
   in_json "$w: git keys in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.gitconfig")) | .keys[]] == [["user","email"],["user","name"]] or [.files[] | select(.path | endswith("/.gitconfig")) | .keys[]] == [["user","name"],["user","email"]]'
   in_json "$w: no root steps of its own" "$wh/.local/state/ai-jailer/receipt.json" '.root.steps == [] and .root.workers == []'
+  # The managed settings leave sandbox.enabled out (2026-10-28): the worker's own file carries it.
+  in_json "$w: sandbox on in its user settings" "$wh/.claude/settings.json" '.sandbox.enabled == true'
+  in_json "$w: sandbox key in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.claude/settings.json")) | .keys[]] == [["sandbox","enabled"]]'
 done
+in_json "beta: its own key kept" "$tmp/home-w-beta/.claude/settings.json" '.model == "opus"'
 absent "the owner's git identity is not touched" "$h15/.gitconfig"
+absent "the owner's Claude settings are not touched" "$h15/.claude/settings.json"
+says "doctor: the owner runs unsandboxed" 'info  sessions as tester run without the sandbox unless a repo file turns it on'
 says "doctor: agents members"      'info  agents group members: w-acme,w-beta'
 says "doctor: linger on"           'ok    linger on for w-acme'
 says "doctor: sudoers checked"     "ok    $tmp/etc/sudoers-claude passes visudo -cf"
@@ -517,7 +525,9 @@ aj "$tmp/home-w-acme" reset --yes --no-root
 exits "worker reset" 0
 if ! grep -q -E '(name|email) = ' "$tmp/home-w-acme/.gitconfig" 2>/dev/null; then ok; else bad "the default git identity was not removed ($(cat "$tmp/home-w-acme/.gitconfig"))"; fi
 absent "worker direnv.toml removed" "$tmp/home-w-acme/.config/direnv/direnv.toml"
+in_json "worker sandbox key removed" "$tmp/home-w-acme/.claude/settings.json" 'has("sandbox") | not'
 aj "$tmp/home-w-beta" reset --yes --no-root
+in_json "beta: sandbox key removed, its own key kept" "$tmp/home-w-beta/.claude/settings.json" '(has("sandbox") | not) and .model == "opus"'
 if grep -q -E 'name = Real Name$' "$tmp/home-w-beta/.gitconfig" && ! grep -q -E 'email = ' "$tmp/home-w-beta/.gitconfig"; then ok; else bad "a git name set since was removed, or the default email stayed ($(cat "$tmp/home-w-beta/.gitconfig"))"; fi
 
 # 21. --owner-sudo: none writes no rule; password drops NOPASSWD; a visudo

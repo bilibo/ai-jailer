@@ -26,6 +26,8 @@ trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 # Substituted by lib/hooks.nix from the ai-jail.* options: 0 or 1.
 ALLOW_LOCAL_COMMITS="@allowLocalCommits@"
 ALLOW_MEMORY_EDITS="@allowMemoryEdits@"
+# The group aj bootstrap puts every worker in; hook-test swaps it for its own.
+WORKER_GROUP="agents"
 
 input=$(cat)
 event=$(jq -r '.hook_event_name // empty' <<<"$input")
@@ -135,6 +137,28 @@ ENV
     exit 0 ;;
 
   PreToolUse)
+    # A worker's sandbox (2026-10-28, roadmap item 13): the managed settings
+    # no longer set `sandbox.enabled`, so the owner's sessions run without
+    # it, and a worker's comes from its ~/.claude/settings.json, which a
+    # project or local file outranks. Every tool of a member of WORKER_GROUP
+    # is refused unless the value Claude Code resolves (managed, then local,
+    # then project, then user) is true. A file that does not parse refuses
+    # too. Not seen: a `claude --settings <file>` launch, which ajmux never
+    # passes and rule 6 refuses inside a session.
+    # No pipeline: under pipefail an early `grep -q` exit could fail it open.
+    my_groups=" $(id -nG 2>/dev/null || true) "
+    if [[ "$my_groups" == *" $WORKER_GROUP "* ]]; then
+      root="${CLAUDE_PROJECT_DIR:-$cwd}" sfiles=()
+      for s in "$HOME/.claude/settings.json" "$root/.claude/settings.json" "$root/.claude/settings.local.json" /etc/claude-code/managed-settings.json; do
+        [ ! -e "$s" ] || sfiles+=("$s")
+      done
+      sb=null
+      if [ ${#sfiles[@]} -gt 0 ]; then
+        sb=$(jq -n '[inputs | try .sandbox.enabled catch null | select(. != null)] | last' "${sfiles[@]}" 2>/dev/null) \
+          || deny "worker without a sandbox: a settings file does not parse (${sfiles[*]})"
+      fi
+      [ "$sb" = true ] || deny "worker without a sandbox: sandbox.enabled resolves to $sb, not true (aj bootstrap writes it into ~/.claude/settings.json; a project or local file must not turn it off)"
+    fi
     tool=$(jq -r '.tool_name // empty' <<<"$input")
     case "$tool" in
       Edit|Write|NotebookEdit|MultiEdit)

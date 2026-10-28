@@ -561,6 +561,132 @@ The gaps, in order:
       test` from the checkout's shell on the NixOS-WSL host, then the
       real run as the gate for V1 to V9.
 
+13. **The jailer runs unsandboxed; the sandbox is the workers'
+    (2026-10-28).** Reopens item 11's "Claude Code's own sandbox stays"
+    as it applied to the owner, and its accepted cost "the owner's
+    sessions lose the unsandboxed center". Found the same day: a session
+    in this checkout ran under the checkout's own project layer
+    (`sandbox.enabled = true`, and no `allowAllUnixSockets`, which only
+    the managed body sets), so no `nix` command reached the daemon and
+    `nix flake check` could not run from a session at all. Decisions, the
+    owner's:
+    - The ai-jailer checkout is not sandboxed, before or after
+      bootstrap. The deny rules, the hook and the mod policy still bind
+      its sessions once the managed file exists.
+    - The managed body no longer sets `sandbox.enabled`; it keeps
+      `allowUnsandboxedCommands = false`, `failIfUnavailable` and every
+      filesystem, credential and network list, which bind whichever
+      scope turns the sandbox on. The owner's sessions run unsandboxed
+      everywhere unless a repo file turns it on.
+    - Each worker's `~/.claude/settings.json` carries `sandbox.enabled =
+      true`, merged by `aj bootstrap` (recorded as a key; `reset` strips
+      it). Managed `denyWrite ~/.claude` and the hook's user-config rule
+      keep an agent from editing it.
+    - A project or local file outranks the user scope, so the managed
+      hook refuses every tool of a member of `agents` unless
+      `sandbox.enabled` resolves to true over user, project, local and
+      managed settings; a file that does not parse refuses too.
+    - The repo layer writes `sandbox.enabled = true` or nothing, never
+      false: `ai-jail.sandbox.enable = false` (default true) leaves the
+      key out, so in a worker's repo the user scope still turns it on.
+      This checkout sets it.
+    - Handoffs from a session go to `proposals/` at the checkout root
+      (gitignored), not the session scratchpad, which the owner cannot
+      reach.
+
+    Staged, not committed: `lib/settings.nix` (`enableSandbox`, managed
+    body without `enabled`), the hook rule with 13 hook-test cases,
+    bootstrap's worker key and doctor lines with 9 bootstrap-test
+    cases, `managed-tree-test`, the `unsandboxed` mode of
+    `project-settings-test` and its flake check. The module option and
+    this checkout's setting are `proposals/2026-10-28-unsandboxed-checkout.patch`
+    (the hook refuses both files). Open:
+    - [ ] V10 a managed sandbox list (`denyRead`, `credentials.envVars`,
+      `allowedDomains`) applies when only the user scope sets
+      `sandbox.enabled`: a worker session's `cat ~/.git-credentials`
+      gets no file and `echo $GH_TOKEN` prints nothing.
+    - [ ] V11 managed `failIfUnavailable = true` with `enabled` unset
+      anywhere starts an owner session normally.
+    - [ ] V12 a worker session in a repo whose committed
+      `.claude/settings.json` says `"enabled": false`: every tool
+      refused with the hook's message.
+    - [ ] Not seen by the hook: `claude --settings <file>` at launch;
+      `ajmux` never passes it, and rule 6 refuses it inside a session.
+    - [ ] `aj check` as the owner: its `sandbox` case and the cases that
+      need a sandbox are judged against a repo file that may now leave
+      the key out.
+
+
+14. **Law and jail: the jailer is bound by the law only; the jail is
+    the prisoner's (2026-10-28).** Reopens item 11's "the owner's
+    sessions are bound too; the rules are the host's, not a repo's" and
+    its accepted costs, and supersedes item 13, which moved only the
+    sandbox. The picture, the owner's: ai-jailer is the factory. `aj
+    bootstrap` sets up the jailer's host: the law under
+    `/etc/claude-code`, the prisoner users and groups, and each
+    prisoner's chains. `aj init <customer>/<repo>` builds a cell, the
+    project layer of one repo. The owner works in a cell through `ajmux`
+    as the prisoner; the AI minion is the escape risk, not the human.
+    The shape comes first, so that what guides the tree away from it is
+    cut; the rules grow on it afterwards. Decisions, the owner's:
+    - The law binds everyone on the host, the jailer's sessions in this
+      checkout included. Its content today: credential reads and `git
+      push`. Credential reads as the hook's `cred_files` rule and
+      `permissions.deny` `Read(...)` entries, since the sandbox lists
+      (`denyRead`) bind only a sandboxed session and the jailer has none.
+      More law is a dated entry here, one rule at a time.
+    - Managed-only keys with no per-user form
+      (`disableBypassPermissionsMode`, `allowManagedHooksOnly`, the mod
+      policy, `syncClaudeAiSkills`/`Plugins = false`) stay in the managed
+      file for now because nothing else can hold them; each is listed so
+      it can be dropped on its own.
+    - The jail is today's full ruleset: the deny rules, the hook's rules,
+      the sandbox on with every filesystem, credential and network list
+      and no unsandboxed fallback. It binds a member of `agents`
+      everywhere, in a cell or outside one, so it lives on the user, not
+      the repo: `aj bootstrap` writes it into each worker's
+      `~/.claude/settings.json` in place of item 13's single key, `aj
+      reset` strips it, and the managed tree carries the reference copy
+      (`/etc/claude-code/jail-settings.json`).
+    - The managed hook, run for everyone, is the gate. For everyone: the
+      law rules. For a member of `agents`: the jail rules too, and before
+      any tool the jail keys of the worker's user settings (under
+      `CLAUDE_CONFIG_DIR` when set) compared to the reference, refusing
+      when they differ, are missing or do not parse. Keys, not a file
+      hash: `/model` rewrites the file. Item 13's resolution check for
+      `sandbox.enabled` stays, since a project or local file outranks
+      the user scope for a scalar. Rule 6 keeps refusing `--settings`,
+      `--setting-sources`, `--bare` and gains `CLAUDE_CONFIG_DIR` on a
+      nested launch.
+    - The cell (`aj init`, the devenv module) carries allow rules, extra
+      deny rules, extra hosts and the repo's own files as `denyWrite`,
+      and never writes `sandbox.enabled`. This checkout keeps a project
+      layer for its tools and gets no jail rule from it.
+    - Cut: `ai-jail.sandbox.enable` and `enableSandbox` with
+      `proposals/2026-10-28-unsandboxed-checkout.patch`; the hook's
+      refusals of this checkout's `devenv.nix`, `devenv/devenv.nix`,
+      `.envrc` and `.claude/` for the jailer, so `proposals/` is for
+      prisoners' handoffs (`docs/sessions.md`), not the jailer's own
+      files; item 11's accepted costs (`gh`, `~/.ssh`, pushes from the
+      jailer's session, the account sync); `aj check` as the owner, it
+      runs as a prisoner; V10 and V11 of item 13 (the lists leave the
+      managed body). V12 stays.
+    - Nothing is live: this host has no `/etc/claude-code`
+      (2026-10-28), so no session here is bound by anything until
+      bootstrap runs.
+
+    Open:
+    - [ ] `host.nix` extra deny rules and domains: law by placement
+      today; decide whether they become jail options instead.
+    - [ ] Whether `permissions.deny` `Read(...)` on the credential files
+      stops the Read tool for an unsandboxed jailer as the reference says.
+    - [ ] The work, in order: `lib/settings.nix` split into `lawBody`
+      and `jailBody`, `lib/managed-tree.nix` shipping the reference
+      copy, bootstrap and reset for the body, the hook's role split and
+      key check, the devenv module without the option, CLAUDE.md and the
+      README's layers and lockdown table, then the tests for each
+      (hook-test, aj-bootstrap-test, managed-tree-test,
+      project-settings-test).
 ## Open questions
 
 - Notification hook: the matcher names (`permission_prompt`, `idle_prompt`,
