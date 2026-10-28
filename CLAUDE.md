@@ -1,18 +1,20 @@
 # ai-jailer
 
-Guard-railed Claude Code for hosts with Nix. This checkout is the ai-jailer
-repo, and a session here runs under the host's managed settings like a
-session in any repo, but unsandboxed (`ai-jail.sandbox.enable = false`,
-roadmap item 13, 2026-10-28): the hook refuses edits to `devenv.nix`,
-`devenv.yaml`, `devenv/devenv.nix`, `.envrc` and `.claude/` here as
-everywhere; propose those as diffs. The root `devenv.yaml` imports
-`./devenv` from the working tree. That is fine because the live hook is
-the one under `/etc/claude-code`, not the tree's `hooks/`: a working-tree
-edit takes effect only when the human rebuilds or runs `aj upgrade`.
-Agents stage and diff; the human commits and pushes. A diff for a file the
-hook refuses goes to `proposals/<date>-<topic>.patch` at the checkout root
-(gitignored), applied with `git apply`; never only the session scratchpad,
-which the human cannot reach.
+Guard-railed Claude Code for hosts with Nix. This checkout is the
+factory: it builds the law (what binds everyone on the host), the jail
+(what binds a worker user) and the cells (a repo's project layer), and a
+session here is the jailer's (roadmap item 14, 2026-10-28). Once the host
+is bootstrapped a session here is bound by the law alone: no credential
+reads, no `git commit`, no `git push`; no sandbox, and the hook's other rules are the
+workers'. It edits `devenv.nix`, `devenv/devenv.nix`, `.envrc` and
+`.claude/` here like any file. The root `devenv.yaml` imports `./devenv`
+from the working tree. That is fine because the live hook is the one
+under `/etc/claude-code`, not the tree's `hooks/`: a working-tree edit
+takes effect only when the human rebuilds or runs `aj upgrade`. Agents
+stage and diff; the human commits and pushes. A worker's handoff goes to
+`proposals/<date>-<topic>.patch` at its checkout root (gitignored),
+applied with `git apply`; never only the session scratchpad, which the
+human cannot reach.
 
 ## Which document owns what
 

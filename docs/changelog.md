@@ -23,13 +23,33 @@ happened and what was learned on the day.
   `AI_JAILER_SYSTEM_BASHRC` pin, which `aj-doctor-test` has), so a run
   by hand on a NixOS host with `programs.direnv` failed where the Nix
   build sandbox, which has no `/etc/bashrc`, passed.
+- Decision (the owner's), roadmap item 14: `git commit` joins the law,
+  so the jailer's sessions are refused it too; the host's
+  `allowLocalCommits` lifts it from law and jail together. hook-test
+  gains the jailer's commit cases, managed-tree-test and
+  `managed-host-eval` the law's `Bash(git commit)`. With the session's
+  sandbox off the full `nix flake check` ran and passes; it caught two
+  tests still asserting the old wording (check-parser's sandbox-off
+  warning, aj-init's CLAUDE.md contract), fixed.
 - Decision (the owner's), roadmap item 14, which reopens item 11 for the
   owner and supersedes item 13: the jailer is bound by the law only
   (credential reads, `git push`, and the managed-only keys until each
   is decided), the jail is the prisoner's and lives on the worker user,
   written by `aj bootstrap` and checked by the managed hook against a
   reference copy; `aj init` builds a cell. Item 13's option and its
-  proposal patch are cut. Nothing built yet; the item lists the work.
+  proposal patch are cut. Built the same day (the item has the list and
+  the decisions made while building): the library's three bodies, the
+  managed tree's `jail-settings.json`, the hook's law and jail rule sets
+  and `jail_check`, bootstrap, doctor and reset for the jail, the docs.
+  By hand: hook-test 439, managed-tree 36, project-settings 17,
+  aj-bootstrap 257 of 280 with the same 23 failing on the committed tree
+  under the session's sandbox; the flake checks not run (no daemon from a
+  session). Learned: the sync keys honour user scope, so they belong in
+  the jail, not the law; the law's credential rule must name `~/.ssh`,
+  the GitHub token files and `~/.azure` by text, since the jailer has no
+  sandbox `denyRead`; a stand-in `aj` for the bootstrap suite needs the
+  store's bash and a tool directory built from `/run/current-system`, not
+  `command -v`, which in this session resolved `grep` to the checkout.
 - Decision (the owner's), roadmap item 13, which reopens item 11 for the
   owner: the ai-jailer checkout runs unsandboxed, and the sandbox moves
   from the managed body to each worker's user settings, with a hook rule

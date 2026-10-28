@@ -50,12 +50,13 @@ where the hard rules live.
    no rule and your own sudo decides. Inside a repo
    under the worker's code root, the project name is optional:
    `ajmux`, `ajmux --worktree`.
-3. Your own session in a repo of your own, or in this checkout, is an
-   ordinary managed session: the same deny rules, hook and sandbox as a
-   worker's, because the managed file is host-wide. Nothing there is
-   unsandboxed any more: `gh`, `~/.ssh` and pushes do not work from a
-   session. Edits to `devenv.nix`, `devenv.yaml`, `.envrc` and `.claude/`
-   come back as diffs for you to apply.
+3. Your own session in a repo of your own, or in this checkout, is the
+   jailer's: bound by the law alone (2026-10-28, roadmap item 14). The hook
+   refuses a credential read (`.env`, `~/.ssh`, the GitHub tokens on disk,
+   your Claude login), `git commit` and `git push`; nothing else, and no
+   sandbox. Commit and push from your own terminal. It edits
+   `devenv.nix`, `.envrc` and `.claude/` like any file. The jail is the
+   workers': a session as `w-<customer>` gets the full rules.
 4. Several objectives at once: one `ajmux` call each. Sessions that edit
    files get `--worktree`; the worktree lives under `.claude/worktrees/<name>`,
    has its own `.devenv/`, and its `.envrc` is auto-allowed only if it is

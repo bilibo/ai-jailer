@@ -3,6 +3,14 @@
 # that open files themselves get past them; the hook and the sandbox exist
 # for that.
 #
+# Two lists (roadmap item 14, 2026-10-28). `law` binds everyone on the host,
+# the jailer's own sessions included: the credential reads, `git commit`
+# (unless the host allows local commits) and `git push`,
+# nothing else; it goes into the managed file. `jail` is the full set for a
+# worker (a member of `agents`); it goes into the worker's user settings,
+# where the managed hook checks it against the managed tree's reference copy.
+# Deny lists merge across scopes, so a worker gets both.
+#
 # Path rules use `**/` or `~/`: in user-scope settings a leading `/` anchors
 # at ~/.claude, not at the project root.
 { lib }:
@@ -23,8 +31,27 @@ let
       "Bash(${c} *)"
     ]) cmds;
 
+  # The law's half: what reads a credential. In-repo secrets, the user's
+  # own Claude login, the GitHub tokens on disk, Azure's token cache, ssh.
+  credentialReads = [
+    "Read(**/.env)"
+    "Read(**/.env.*)"
+    "Read(**/*.tfvars)"
+    "Read(**/*.tfvars.json)"
+    "Read(**/*.tfstate)"
+    "Read(**/*.tfstate.backup)"
+    "Read(**/.terraform/**)"
+    "Read(**/.git/devenv-base/**)"
+    "Read(~/.azure/**)"
+    "Read(~/.ssh/**)"
+    "Read(~/.config/gh/**)"
+    "Read(~/.git-credentials)"
+    "Read(~/.claude/.credentials.json)"
+    "Read(~/.claude.json)"
+  ];
   credentials =
-    bash [
+    credentialReads
+    ++ bash [
       "az login"
       "az logout"
       "az account set"
@@ -34,22 +61,6 @@ let
       "az keyvault secret"
       "az keyvault key"
       "az keyvault certificate"
-    ]
-    ++ [
-      "Read(**/.env)"
-      "Read(**/.env.*)"
-      "Read(**/*.tfvars)"
-      "Read(**/*.tfvars.json)"
-      "Read(**/*.tfstate)"
-      "Read(**/*.tfstate.backup)"
-      "Read(**/.terraform/**)"
-      "Read(**/.git/devenv-base/**)"
-      "Read(~/.azure/**)"
-      "Read(~/.ssh/**)"
-      "Read(~/.config/gh/**)"
-      "Read(~/.git-credentials)"
-      "Read(~/.claude/.credentials.json)"
-      "Read(~/.claude.json)"
     ];
 
   system =
@@ -233,4 +244,8 @@ let
   ];
   projectConfig = map (p: "Edit(**/${p})") projectConfigPaths;
 in
-credentials ++ system ++ plugins ++ userConfig ++ gitHistory ++ cloudWrite ++ projectConfig
+{
+  law =
+    credentialReads ++ bash (lib.optionals (!allowLocalCommits) [ "git commit" ] ++ [ "git push" ]);
+  jail = credentials ++ system ++ plugins ++ userConfig ++ gitHistory ++ cloudWrite ++ projectConfig;
+}

@@ -11,7 +11,7 @@
 #
 # Then `aj check --dry-run` on fake repos, one per sandbox state. Every
 # case is listed in each, none skipped, including sudo-text and home-fence; a
-# repo file with the sandbox off draws one warning and changes nothing else; a
+# repo file that turns the sandbox off draws one warning and changes nothing else; a
 # masked settings file (/dev/null) draws none. Last, which claude the
 # sessions would run (stub direnv), and the exit 69 when there is none.
 set -uo pipefail
@@ -70,12 +70,20 @@ if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: --dr
 all_listed "sandbox on"
 refute "sandbox on: no warning" 'warn  the repo file'
 
-# A repo file with the sandbox off draws one warning and every case still
-# runs: the managed settings keep the sandbox on whatever the repo says.
+# A repo file without the key is the normal cell since 2026-10-28 (the
+# sandbox is the jail's, roadmap item 14): no warning.
+fake_repo cell '{"sandbox":{"failIfUnavailable":true}}'
+dry_run cell
+all_listed "no sandbox key"
+refute "no sandbox key: no warning" 'warn  the repo file'
+
+# A repo file that turns the sandbox off draws one warning and every case
+# still runs: the hook refuses a worker's every tool there, which the cases
+# then show.
 fake_repo off '{"sandbox":{"enabled":false}}'
 dry_run off
 all_listed "sandbox off"
-check "sandbox off: warned" 'warn  the repo file has the sandbox off; a managed host keeps it on regardless'
+check "sandbox off: warned" 'warn  the repo file turns the sandbox off; the managed hook refuses every tool of a worker here'
 
 fake_repo masked @/dev/null
 dry_run masked

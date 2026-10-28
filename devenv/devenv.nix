@@ -6,22 +6,24 @@
 #   imports:
 #     - ai-jailer/devenv
 #
-# It writes the repo's .claude/settings.json, the project layer
+# It writes the repo's .claude/settings.json, the cell, or project layer
 # (`projectSettings` in lib/settings.nix): the allow rules from `settings`,
 # the deny rules from `extraDeny`, the project's domains, the read fence
 # when on, literal `denyWrite` entries for the repo's own settings, hooks
-# and git files under the checkout, and a few scalars repeated as a belt.
-# The deny rules, the hooks and the sandbox with its credential and network
-# lists come from the host's managed settings (`managedSettingsPath`); on a
-# host without that file the repo has none of them, and every shell entry
-# says so.
+# and git files under the checkout, and a few scalars repeated as a belt,
+# never `sandbox.enabled`. The law (credential reads, `git push`, the
+# hooks) comes from the host's managed settings (`managedSettingsPath`),
+# and the jail (the full deny set, the sandbox with its credential and
+# network lists) from the worker user's own settings, written by `aj
+# bootstrap` (roadmap item 14, 2026-10-28); on a host without the managed
+# file the repo has none of them, and every shell entry says so.
 #
 # `ai-jail.enable = false` is the repo owner's off switch: no settings file
 # (devenv's files cleanup removes the link it wrote before), so none of the
 # project layer, and no AI_JAILER_* exports; a notice at every shell entry
-# says so. The packages stay: they are tools, not rules. A session cannot
-# set it where the managed settings are in place: their deny rules and hook
-# refuse its edits to devenv.nix, the same as for every other option here.
+# says so. The packages stay: they are tools, not rules. A worker's session
+# cannot set it: the jail's deny rules and hook rules refuse its edits to
+# devenv.nix, the same as for every other option here.
 #
 # direnv runs `devenv direnv-export` for humans and for every Claude Code
 # Bash command alike, so everything in enterShell happens on both paths.
@@ -136,7 +138,7 @@ in
     managedSettingsPath = lib.mkOption {
       type = lib.types.str;
       default = "/etc/claude-code/managed-settings.json";
-      description = "Where the host keeps the managed settings; every shell entry warns when it is unreadable.";
+      description = "Where the host keeps the law (the managed settings); every shell entry warns when it is unreadable.";
     };
 
   };
@@ -170,7 +172,7 @@ in
       }) cfg.settings;
 
       enterShell = ''
-        [ -r "${cfg.managedSettingsPath}" ] || echo "ai-jail: ${cfg.managedSettingsPath} is missing: no deny rules, hook or sandbox on this host (aj bootstrap from the ai-jailer checkout's devenv shell)" >&2
+        [ -r "${cfg.managedSettingsPath}" ] || echo "ai-jail: ${cfg.managedSettingsPath} is missing: no law, jail or hook on this host (aj bootstrap from the ai-jailer checkout's devenv shell)" >&2
         # Name this project for `ajmux`: <customer>/<repo> relative to the code
         # root, from the main checkout or any worktree under it, else
         # local/<name> with the directory alongside. A bare `ajmux` in this

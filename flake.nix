@@ -56,9 +56,10 @@
           # call, the same devenv the devenv module assumes.
           direnv = direnvPackage;
           inherit (pkgs) devenv;
-          # The managed tree: every rule, for every user on the host. Bootstrap
-          # links `managed-wsl` where it detects WSL (the Windows side hidden
-          # from the sandbox), `managed` elsewhere.
+          # The managed tree: the law (managed-settings.json, every user), the
+          # jail (jail-settings.json, the workers' reference body) and the
+          # hooks. Bootstrap links `managed-wsl` where it detects WSL (the
+          # Windows side hidden from the sandbox), `managed` elsewhere.
           managed = managedTree pkgs hostArgs;
           managed-wsl = managedTree pkgs (hostArgs // { platform = "wsl"; });
           # What the devenv module writes into a repo, with default options;
@@ -74,14 +75,6 @@
               repoRoot = "/repo";
               readFence = true;
               extraAllowRead = [ "~/.cargo" ];
-            }
-          );
-          # The same with `ai-jail.sandbox.enable = false` (the ai-jailer
-          # checkout): no `sandbox.enabled` key, so the user scope decides.
-          project-settings-unsandboxed = (pkgs.formats.json { }).generate "claude-settings-unsandboxed.json" (
-            (jailerLib pkgs).projectSettings {
-              repoRoot = "/repo";
-              enableSandbox = false;
             }
           );
           # The same at a real-looking path: aj init runs the test on the
@@ -230,9 +223,6 @@
           project-settings-fenced-test =
             test "project-settings-fenced-test" ./tests/project-settings-test.sh
               "${p.project-settings-fenced} fenced";
-          project-settings-unsandboxed-test =
-            test "project-settings-unsandboxed-test" ./tests/project-settings-test.sh
-              "${p.project-settings-unsandboxed} unsandboxed";
           project-settings-root-test =
             test "project-settings-root-test" ./tests/project-settings-test.sh
               "${p.project-settings-elsewhere} /home/acme/code/git/acme/demo";
@@ -260,25 +250,34 @@
               "${p.aj}/bin/aj ${./tests/fixtures}";
           # The host.nix options reach the managed tree: a tree with every
           # option set against the default one, and the WSL variant hides the
-          # Windows side.
+          # Windows side. The rule options land in the jail, the managed-only
+          # keys in the law (roadmap item 14).
           managed-host-eval = pkgs.runCommand "managed-host-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
             d=${p.managed}/managed-settings.json
-            w=${p.managed-wsl}/managed-settings.json
+            dj=${p.managed}/jail-settings.json
+            wj=${p.managed-wsl}/jail-settings.json
             h=${hostTree}/managed-settings.json
-            jq -e '.permissions.deny | index("Bash(x)") and index("Bash(git commit)") == null' "$h"
-            jq -e '.permissions.deny | index("Bash(x)") == null and index("Bash(git commit)")' "$d"
-            jq -e '.sandbox.network.allowedDomains | index("example.com")' "$h"
-            jq -e '.sandbox.network.allowedDomains | index("example.com") == null' "$d"
-            jq -e '.disableClaudeAiConnectors == false and (has("allowManagedHooksOnly") | not) and .strictKnownMarketplaces == ["example-market"]' "$h"
-            jq -e '.disableClaudeAiConnectors == true and .allowManagedHooksOnly == true and .strictKnownMarketplaces == []' "$d"
+            hj=${hostTree}/jail-settings.json
+            jq -e '.permissions.deny | index("Bash(x)") and index("Bash(git commit)") == null' "$hj"
+            jq -e '.permissions.deny | index("Bash(x)") == null and index("Bash(git commit)")' "$dj"
+            jq -e '.permissions.deny | index("Bash(x)") == null and index("Bash(git commit)") == null and index("Bash(git push)")' "$h"
+            jq -e '.permissions.deny | index("Bash(git commit)") and index("Bash(git push)")' "$d"
+            jq -e '.sandbox.network.allowedDomains | index("example.com")' "$hj"
+            jq -e '.sandbox.network.allowedDomains | index("example.com") == null' "$dj"
+            jq -e 'has("sandbox") | not' "$h"
+            jq -e '.disableClaudeAiConnectors == false' "$hj"
+            jq -e '.disableClaudeAiConnectors == true' "$dj"
+            jq -e '(has("allowManagedHooksOnly") | not) and .strictKnownMarketplaces == ["example-market"]' "$h"
+            jq -e '.allowManagedHooksOnly == true and .strictKnownMarketplaces == []' "$d"
             grep -q 'ALLOW_MEMORY_EDITS="1"' ${hostTree}/hooks/env-guard.sh
             grep -q 'ALLOW_MEMORY_EDITS="0"' ${p.managed}/hooks/env-guard.sh
-            jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") and index("/run/WSL")' "$w"
-            jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") == null' "$d"
+            jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") and index("/run/WSL")' "$wj"
+            jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") == null' "$dj"
             echo "managed-host-eval: host options and the wsl variant render as expected" | tee $out
           '';
           # The devenv module writes the project layer only: no hooks, no deny
-          # rule but extraDeny, the sandbox scalars, the seven literal
+          # rule but extraDeny, the two sandbox belt scalars and never
+          # `sandbox.enabled` (the jail's), the seven literal
           # denyWrite paths under the checkout (/repo), the project domains,
           # the read fence when on, `settings` merged in. enterShell checks
           # for the managed file and exports AI_JAIL_PROJECT, never
@@ -305,7 +304,7 @@
             protected='["/repo/.git/hooks", "/repo/.git/config", "/repo/.claude/settings.json", "/repo/.claude/settings.local.json", "/repo/.claude/hooks", "/repo/.claude/skills", "/repo/.claude-plugin"]'
             for f in "$on" "$fenced" "$extra"; do
               jq -e "$S"' .files | keys == [".claude/settings.json"]' "$f"
-              jq -e "$S"' s | (has("hooks") | not) and .sandbox.enabled == true' "$f"
+              jq -e "$S"' s | (has("hooks") | not) and (.sandbox | has("enabled") | not) and .sandbox.allowUnsandboxedCommands == false' "$f"
               jq -e --argjson want "$protected" "$S"' s.sandbox.filesystem.denyWrite == $want' "$f"
             done
             jq -e "$S"' s | .permissions.deny == [] and (.permissions | has("allow") | not)' "$on"

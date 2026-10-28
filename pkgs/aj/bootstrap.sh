@@ -788,21 +788,26 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     [ ${#gk[@]} -eq 0 ] || record_file keys "$gf" "${gk[@]}"
   fi
 
-  # Claude Code's user settings carry one ai-jailer key, and only for a
-  # worker: sandbox.enabled, which the managed settings leave out so the
-  # owner's sessions run unsandboxed (2026-10-28, roadmap item 13). The
-  # managed hook refuses every tool of a worker without it. Merged into the
-  # file Claude Code itself writes (/model), never a store symlink. The scrub
-  # key an earlier bootstrap wrote is removed.
-  local cs="$HOME/.claude/settings.json"
+  # The jail (2026-10-28, roadmap item 14): a worker's Claude Code user
+  # settings carry every top-level key of the managed tree's
+  # jail-settings.json (the full deny set, the sandbox on with its lists,
+  # the account sync off), and the managed hook refuses every tool of a
+  # worker whose file differs from that reference. Merged into the file
+  # Claude Code itself writes (/model), never a store symlink; recorded key
+  # by key so reset strips exactly those. The owner's file is not touched:
+  # the owner is bound by the law alone. The scrub key an earlier bootstrap
+  # wrote is removed for everyone.
+  local cs="$HOME/.claude/settings.json" jail="$MANAGED_DIR/jail-settings.json" jk=()
   if [[ "$me" == "$WORKER_PREFIX"* ]]; then
-    if hm_owned "$cs"; then miss "$cs is a store symlink: a worker's sandbox.enabled cannot be written there"
+    if hm_owned "$cs"; then miss "$cs is a store symlink: the jail cannot be written there"
+    elif [ ! -r "$jail" ]; then miss "$jail is missing: the jail cannot be written into $cs (aj bootstrap links the managed tree first; every tool of this worker is refused until then)"
     else
-      if ! jq -e '.sandbox.enabled == true' "$cs" >/dev/null 2>&1; then
-        step "sandbox.enabled = true in $cs (the worker's sandbox)"
-        jq_edit "$cs" '.sandbox = ((.sandbox // {}) + {enabled: true})'
+      if ! jq -e --slurpfile r "$jail" '. as $u | all($r[0] | keys[]; $r[0][.] == $u[.])' "$cs" >/dev/null 2>&1; then
+        step "write the jail from $jail into $cs (the worker's rules and sandbox)"
+        jq_edit "$cs" --slurpfile r "$jail" '. + $r[0]'
       fi
-      record_file keys "$cs" '["sandbox","enabled"]'
+      mapfile -t jk < <(jq -c 'keys[] | [.]' "$jail")
+      record_file keys "$cs" "${jk[@]}"
     fi
   fi
   # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
@@ -1198,12 +1203,15 @@ accounts_report() {
     elif grep -q -i 'password' <<<"$out"; then warn "$SUDOERS_FILE not checked: sudo wants a password (run sudo visudo -cf $SUDOERS_FILE)"
     else miss "$SUDOERS_FILE fails visudo -cf: the owner's sudo rule is broken (sudo visudo -cf $SUDOERS_FILE)"; fi
   fi
-  if group_has agents "$me"; then info "standing: worker ($me is in agents): the managed rules bind every session as this user"
-    jq -e '.sandbox.enabled == true' "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-      && ok "sandbox.enabled in ~/.claude/settings.json (the worker's sandbox)" \
-      || miss "sandbox.enabled is not true in ~/.claude/settings.json: the managed hook refuses every tool of this worker (aj bootstrap writes it)"
+  local jail="$MANAGED_DIR/jail-settings.json" cs="$HOME/.claude/settings.json" diff
+  if group_has agents "$me"; then info "standing: worker ($me is in agents): the law and the jail bind every session as this user"
+    if [ ! -r "$jail" ]; then miss "$jail is missing: no jail to check $cs against (aj bootstrap links the managed tree)"
+    elif diff=$(jq -r -n --slurpfile r "$jail" --slurpfile u "$cs" '[$r[0] | keys[] | select($r[0][.] != $u[0][.])] | join(",")' 2>/dev/null); then
+      if [ -z "$diff" ]; then ok "the jail in ~/.claude/settings.json matches $jail"
+      else miss "the jail in ~/.claude/settings.json differs from $jail at $diff: the managed hook refuses every tool of this worker (aj bootstrap rewrites it)"; fi
+    else miss "~/.claude/settings.json is missing or does not parse: the managed hook refuses every tool of this worker (aj bootstrap writes the jail into it)"; fi
   else
-    info "sessions as $me run without the sandbox unless a repo file turns it on (the managed settings leave sandbox.enabled to the workers)"
+    info "sessions as $me are bound by the law alone (credential reads, git commit, git push): no sandbox, no jail; the jail is the workers'"
     command -v getent >/dev/null 2>&1 && owned=$(getent group 2>/dev/null | awk -F: -v u="$me" -v p="$WORKER_PREFIX" 'index($1, p) == 1 { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == u) printf "%s ", $1 }')
     if [ -n "$owned" ]; then info "standing: owner ($me is a member of ${owned% }): sessions here reach the workers through ajmux"
     else info "standing: neither worker nor owner ($me is in no agents group and no $WORKER_PREFIX* group)"; fi

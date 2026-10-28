@@ -1,7 +1,10 @@
-# One store path, linked at /etc/claude-code on the host: the managed
-# settings and the hooks they call. No plugin or marketplace directory: the
-# ai-jailer ships no mods (2026-10-24, docs/sessions.md section 5), and the
-# managed settings refuse every mod (lib/settings.nix).
+# One store path, linked at /etc/claude-code on the host: the law
+# (managed-settings.json, read by Claude Code for every user), the jail
+# (jail-settings.json, the reference copy of a worker's rules that `aj
+# bootstrap` writes into each worker's user settings and the hook checks
+# them against) and the hooks the law calls. No plugin or marketplace
+# directory: the ai-jailer ships no mods (2026-10-24, docs/sessions.md
+# section 5), and the law refuses every mod (lib/settings.nix).
 {
   pkgs,
   lib,
@@ -30,8 +33,21 @@ let
       ;
   };
 
-  settings = jailerLib.settings {
-    managed = true;
+  law = jailerLib.settings {
+    body = "law";
+    inherit
+      platform
+      allowLocalCommits
+      allowMemoryEdits
+      allowManagedHooksOnly
+      extraKnownMarketplaces
+      ;
+    hookDir = "${managedDir}/hooks";
+  };
+  # The host's extra deny rules and domains are the workers' (roadmap item
+  # 14): the law's content is fixed, one dated entry per rule.
+  jail = jailerLib.settings {
+    body = "jail";
     inherit
       platform
       allowLocalCommits
@@ -39,16 +55,15 @@ let
       allowConnectors
       extraDeny
       extraAllowedDomains
-      allowManagedHooksOnly
-      extraKnownMarketplaces
       ;
-    hookDir = "${managedDir}/hooks";
     syncClaudeAi = false;
   };
-  settingsJson = (pkgs.formats.json { }).generate "managed-settings.json" settings;
+  lawJson = (pkgs.formats.json { }).generate "managed-settings.json" law;
+  jailJson = (pkgs.formats.json { }).generate "jail-settings.json" jail;
 in
 pkgs.runCommand "ai-jailer-managed" { } ''
   mkdir -p $out
-  cp ${settingsJson} $out/managed-settings.json
+  cp ${lawJson} $out/managed-settings.json
+  cp ${jailJson} $out/jail-settings.json
   cp -r ${hooks} $out/hooks
 ''

@@ -160,8 +160,8 @@ lacks "template: no role line"             "$tmp/code/acme/plain/devenv.nix" 'ro
 lacks "template: no allowMemoryEdits"      "$tmp/code/acme/plain/devenv.nix" 'allowMemoryEdits'
 lacks "template: no allowLocalCommits"     "$tmp/code/acme/plain/devenv.nix" 'allowLocalCommits'
 has   "template: extraAllowedDomains note" "$tmp/code/acme/plain/devenv.nix" 'project hosts for the sandbox; live check V2 \(2026-10-27\) pending on whether a managed sandbox honours them'
-has   "CLAUDE.md: managed rules"           "$tmp/code/acme/plain/CLAUDE.md" "project's allow rules and the repo's write protections; the deny rules, the"
-has   "CLAUDE.md: managed hook and sandbox" "$tmp/code/acme/plain/CLAUDE.md" "hook and the Bash sandbox come from the host's managed settings"
+has   "CLAUDE.md: the jail's rules"        "$tmp/code/acme/plain/CLAUDE.md" "the Bash sandbox come from the worker user's own settings \\(the jail\\)"
+has   "CLAUDE.md: the law's hook"          "$tmp/code/acme/plain/CLAUDE.md" "hook from the host's managed settings \\(the law\\)"
 
 # The template's .envrc fails the load while devenv.local.nix or
 # devenv.local.yaml exists (roadmap 2.7), before `use devenv`, with an error

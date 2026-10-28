@@ -35,10 +35,13 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 log="$tmp/calls"
 mark='# --- ai-jailer (scripts/bootstrap-fedora.sh) ---'
 mkdir -p "$tmp/bin" "$tmp/etc" "$tmp/nix" "$tmp/store/managed/hooks" "$tmp/homes"; touch "$tmp/ca.pem" "$tmp/groups" "$tmp/users"
-# The fake managed tree `nix build .#managed` links: settings naming one hook,
-# which accepts every event.
+# The fake managed tree `nix build .#managed` links: the law naming one hook,
+# which accepts every event, and a two-key jail bootstrap writes into each
+# worker's user settings.
 printf '#!/bin/sh\nexit 0\n' >"$tmp/store/managed/hooks/env-guard.sh"; chmod +x "$tmp/store/managed/hooks/env-guard.sh"
 printf '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"%s/etc-claude-code/hooks/env-guard.sh"}]}]}}\n' "$tmp" >"$tmp/store/managed/managed-settings.json"
+jail_json='{"permissions":{"deny":["Bash(git push)"]},"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true}}'
+printf '%s\n' "$jail_json" >"$tmp/store/managed/jail-settings.json"
 # The nix-installer's uninstaller, where scripts/install.sh leaves it.
 printf '#!/bin/sh\n' >"$tmp/nix/nix-installer"; chmod +x "$tmp/nix/nix-installer"
 
@@ -477,14 +480,14 @@ for w in acme beta; do
   file_has "$w: git email" "$wh/.gitconfig" "^[[:space:]]*email = claude-$w@.+\\.invalid$"
   in_json "$w: git keys in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.gitconfig")) | .keys[]] == [["user","email"],["user","name"]] or [.files[] | select(.path | endswith("/.gitconfig")) | .keys[]] == [["user","name"],["user","email"]]'
   in_json "$w: no root steps of its own" "$wh/.local/state/ai-jailer/receipt.json" '.root.steps == [] and .root.workers == []'
-  # The managed settings leave sandbox.enabled out (2026-10-28): the worker's own file carries it.
-  in_json "$w: sandbox on in its user settings" "$wh/.claude/settings.json" '.sandbox.enabled == true'
-  in_json "$w: sandbox key in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.claude/settings.json")) | .keys[]] == [["sandbox","enabled"]]'
+  # The jail (roadmap item 14): every top-level key of the tree's jail-settings.json, in the worker's own file.
+  in_json "$w: the jail in its user settings" "$wh/.claude/settings.json" '.permissions == ('"$jail_json"' | .permissions) and .sandbox == ('"$jail_json"' | .sandbox)'
+  in_json "$w: jail keys in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.claude/settings.json")) | .keys[]] | sort == [["permissions"],["sandbox"]]'
 done
 in_json "beta: its own key kept" "$tmp/home-w-beta/.claude/settings.json" '.model == "opus"'
 absent "the owner's git identity is not touched" "$h15/.gitconfig"
 absent "the owner's Claude settings are not touched" "$h15/.claude/settings.json"
-says "doctor: the owner runs unsandboxed" 'info  sessions as tester run without the sandbox unless a repo file turns it on'
+says "doctor: the owner is bound by the law alone" 'info  sessions as tester are bound by the law alone'
 says "doctor: agents members"      'info  agents group members: w-acme,w-beta'
 says "doctor: linger on"           'ok    linger on for w-acme'
 says "doctor: sudoers checked"     "ok    $tmp/etc/sudoers-claude passes visudo -cf"
@@ -525,9 +528,9 @@ aj "$tmp/home-w-acme" reset --yes --no-root
 exits "worker reset" 0
 if ! grep -q -E '(name|email) = ' "$tmp/home-w-acme/.gitconfig" 2>/dev/null; then ok; else bad "the default git identity was not removed ($(cat "$tmp/home-w-acme/.gitconfig"))"; fi
 absent "worker direnv.toml removed" "$tmp/home-w-acme/.config/direnv/direnv.toml"
-in_json "worker sandbox key removed" "$tmp/home-w-acme/.claude/settings.json" 'has("sandbox") | not'
+in_json "worker jail removed" "$tmp/home-w-acme/.claude/settings.json" '(has("sandbox") or has("permissions")) | not'
 aj "$tmp/home-w-beta" reset --yes --no-root
-in_json "beta: sandbox key removed, its own key kept" "$tmp/home-w-beta/.claude/settings.json" '(has("sandbox") | not) and .model == "opus"'
+in_json "beta: jail removed, its own key kept" "$tmp/home-w-beta/.claude/settings.json" '((has("sandbox") or has("permissions")) | not) and .model == "opus"'
 if grep -q -E 'name = Real Name$' "$tmp/home-w-beta/.gitconfig" && ! grep -q -E 'email = ' "$tmp/home-w-beta/.gitconfig"; then ok; else bad "a git name set since was removed, or the default email stayed ($(cat "$tmp/home-w-beta/.gitconfig"))"; fi
 
 # 21. --owner-sudo: none writes no rule; password drops NOPASSWD; a visudo

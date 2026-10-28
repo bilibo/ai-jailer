@@ -1,11 +1,11 @@
-# This repo is its own jail and the control point for the host:
-# the human runs `aj bootstrap` from this shell (never a session), with
-# this checkout as the ai-jailer ref, so the managed rules at /etc/claude-code,
-# the CLI and the workers come from one revision, and a host.nix here reaches
-# the rules. Claude Code and tmux come from this shell too. Every option a
+# This repo is the factory and the control point for the host: the human
+# runs `aj bootstrap` from this shell (never a session), with this checkout
+# as the ai-jailer ref, so the law and the jail at /etc/claude-code, the CLI
+# and the workers come from one revision, and a host.nix here reaches the
+# rules. Claude Code and tmux come from this shell too. Every option a
 # project devenv.nix can set is listed below, the unused ones commented out;
-# devenv/devenv.nix has the descriptions. The hook refuses this file from a
-# session: edit it by hand.
+# devenv/devenv.nix has the descriptions. A session here is the jailer's,
+# bound by the law alone (roadmap item 14), so it edits this file.
 { config, pkgs, ... }:
 {
   name = "ai-jailer";

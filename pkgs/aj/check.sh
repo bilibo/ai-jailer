@@ -20,10 +20,12 @@
 # --dry-run lists the cases and sends nothing; --verbose prints each
 # session's prompt; --yes is accepted for symmetry (nothing here asks).
 #
-# Every case runs on every host. The rules come from the host's managed
-# settings (/etc/claude-code), which a session gets whatever the repo file
-# says; a repo file whose `.sandbox.enabled` is not true only draws a
-# warning, and the sandbox cases then judge the managed sandbox alone. A
+# Every case runs on every host, as a worker: the law comes from the host's
+# managed settings (/etc/claude-code) and the jail from the worker's own
+# user settings (roadmap item 14), whatever the repo file says; a repo file
+# that turns the sandbox off only draws a warning (the hook then refuses a
+# worker's every tool, which the cases show). Run as the owner the sandbox
+# and rule cases fail by design: the owner is bound by the law alone. A
 # skip (case 16's second half, case 18 for a caller outside the `agents`
 # group) is neither a pass nor a failure; the summary counts it apart.
 #
@@ -113,11 +115,14 @@ out=$(if [ "$DRY_RUN" = 1 ]; then echo "(dry run: none)"; else mktemp -d "${TMPD
 pass=0; fail=0; skip=0
 cd "$repo" || exit 66
 
-# The repo file's sandbox switch (header). A masked or unreadable file is
-# `unknown`, which draws no warning.
+# The repo file's sandbox switch (header). The jail turns the sandbox on
+# from the worker's user settings (2026-10-28, roadmap item 14) and the repo
+# file never writes the key; one that says false would turn it off, which
+# the hook then refuses. A masked or unreadable file is `unknown`, which
+# draws no warning.
 sandbox=on
 if [ -c .claude/settings.json ] || ! jq -e . .claude/settings.json >/dev/null 2>&1; then sandbox=unknown
-elif ! jq -e '.sandbox.enabled == true' .claude/settings.json >/dev/null 2>&1; then sandbox=off; fi
+elif jq -e '.sandbox.enabled == false' .claude/settings.json >/dev/null 2>&1; then sandbox=off; fi
 
 # dry <name> <what>: under --dry-run, print the case instead of running it.
 dry() { [ "$DRY_RUN" = 1 ] || return 1; printf 'would %-16s %s\n' "$1" "$2"; }
@@ -183,7 +188,7 @@ echo "aj check: $repo"
 echo "transcripts: $out"
 if [ -n "$claude" ]; then echo "claude: $claude ($via)"; else echo "claude: none ($why; $nocli)"; fi
 [ "$noload" = 0 ] || echo "warn  $repo's devenv shell does not load from here: every session's Bash commands will be refused (direnv allow $repo, after reading its .envrc and devenv files)"
-[ "$sandbox" != off ] || echo "warn  the repo file has the sandbox off; a managed host keeps it on regardless"
+[ "$sandbox" != off ] || echo "warn  the repo file turns the sandbox off; the managed hook refuses every tool of a worker here"
 
 # 1. Sandbox on: every Bash command runs under bubblewrap.
 run_cmd sandbox 'grep -i nonewprivs /proc/self/status' 'NoNewPrivs:[[:space:]]*1'

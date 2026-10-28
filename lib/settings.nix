@@ -1,20 +1,31 @@
-# One function, two destinations.
+# One function, three destinations (roadmap item 14, 2026-10-28).
 #
-# `managed = true` is the root-owned /etc/claude-code/managed-settings.json.
+# `body = "law"` is the root-owned /etc/claude-code/managed-settings.json.
 # It is host-wide (there is no per-user or per-group managed file) and binds
-# every user, the owner and each worker alike: every deny rule, every hook,
-# the sandbox's credential, filesystem and network lists, and the mod policy.
-# Nothing in ~/.claude or in a repo overrides a key set there. Not
-# `sandbox.enabled` (2026-10-28): a worker's user settings carry it, and the
-# hook refuses a worker's tools without it.
+# every user, the jailer and each worker alike, so it carries only the law:
+# the credential reads, `git commit` (unless `allowLocalCommits`) and `git
+# push` as deny rules, every hook (the hook
+# itself tells a worker from the jailer by group), and the managed-only keys
+# that have nowhere else to live (bypass mode off, managed hooks only, the
+# mod policy). No sandbox: an unsandboxed jailer session has none, and a
+# worker's comes from the jail.
 #
-# `managed = false` is the repo's .claude/settings.json the devenv module
-# writes: the project layer. Allow rules come from `ai-jail.settings`
+# `body = "jail"` is /etc/claude-code/jail-settings.json, the reference copy
+# of a worker's rules: the full deny set, the sandbox on with every
+# credential, filesystem and network list and no unsandboxed fallback, the
+# account sync off. `aj bootstrap` writes every top-level key of it into the
+# worker's own ~/.claude/settings.json, and the managed hook refuses a
+# worker's tools while that file differs from the reference. It binds a
+# worker everywhere, in a cell or outside one, because it lives on the user.
+#
+# `body = "repo"` is the repo's .claude/settings.json the devenv module
+# writes: the cell, or project layer. Allow rules come from `ai-jail.settings`
 # (merged by the devenv module), deny rules from `extraDeny`, plus literal
 # `denyWrite` paths under the checkout, the project's extra domains, the
-# read fence when on, and a few scalars repeated as a belt. It carries no
-# hooks, no base deny list and no credential lists: without the managed
-# file a repo enforces only what it adds.
+# read fence when on, and a few scalars repeated as a belt. Never
+# `sandbox.enabled`: that is the jail's. It carries no hooks, no base deny
+# list and no credential lists: without the law and the jail a repo
+# enforces only what it adds.
 #
 # Scopes, checked 2026-10-27 against the settings reference: `permissions`
 # deny rules, `sandbox.enabled`, `allowUnsandboxedCommands`,
@@ -25,26 +36,28 @@
 # Re-check after upgrades.
 { lib }:
 {
-  managed ? true,
+  # "law", "jail" or "repo".
+  body ? "law",
   # "linux" or "wsl"
   platform,
-  # Managed only, required there: where the hooks live
-  # (/etc/claude-code/hooks).
+  # Law only, required there: where the hooks live (/etc/claude-code/hooks).
   hookDir ? null,
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
   # Let the claude.ai account's connectors (Gmail, Drive, Notion, ...) load.
   # They are MCP servers that run outside the Bash sandbox, so a session with
   # them can move data out of the repo without any command the hook sees.
+  # Jail and repo; the law leaves the jailer's account alone.
   allowConnectors ? false,
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
+  # Law only.
   allowManagedHooksOnly ? true,
-  # Managed only. false writes `syncClaudeAiSkills` and `syncClaudeAiPlugins`
-  # as false, so no skill or plugin synced from the claude.ai account loads
-  # for any user on the host.
+  # Jail only. false writes `syncClaudeAiSkills` and `syncClaudeAiPlugins`
+  # as false, so no skill or plugin synced from the worker's claude.ai
+  # account loads. Honoured from user scope, so it binds from the jail.
   syncClaudeAi ? false,
-  # Managed only. The whole of `strictKnownMarketplaces` (a list of sources
+  # Law only. The whole of `strictKnownMarketplaces` (a list of sources
   # the user may add); not the settings key of the same name, which
   # registers marketplaces and is never written. Empty, the default: no
   # marketplace can be added at all.
@@ -63,19 +76,22 @@
   # Further `allowRead` entries for a fenced repo: a `path:` devenv input,
   # `~/.cargo` for a Rust project, ...
   extraAllowRead ? [ ],
-  # Repo only. false leaves `sandbox.enabled` out of the repo file (never
-  # writes false), so the scope below decides: a worker's user settings turn
-  # it on, the owner's do not. The ai-jailer checkout sets it false.
-  enableSandbox ? true,
 }:
+assert lib.assertMsg (lib.elem body [
+  "law"
+  "jail"
+  "repo"
+]) "lib/settings.nix: body is law, jail or repo";
 assert lib.assertMsg (
-  !managed || hookDir != null
-) "lib/settings.nix: hookDir is required when managed";
+  body != "law" || hookDir != null
+) "lib/settings.nix: hookDir is required for the law";
 assert lib.assertMsg (
-  managed || repoRoot != null
+  body != "repo" || repoRoot != null
 ) "lib/settings.nix: repoRoot is required for the repo settings";
 let
-  denyRules = import ./deny-rules.nix { inherit lib; };
+  denyRules = import ./deny-rules.nix { inherit lib; } {
+    inherit allowLocalCommits allowMemoryEdits;
+  };
   sshSandbox = import ./ssh-sandbox.nix;
   envGuard = "${hookDir}/env-guard.sh";
   tmuxNotify = "${hookDir}/tmux-notify.sh";
@@ -120,21 +136,23 @@ let
     ".claude-plugin"
   ];
 
-  # Both bodies carry these; the repo copy repeats them as a belt.
-  common = {
+  schema = {
     "$schema" = "https://json.schemastore.org/claude-code-settings.json";
+  };
+  # The jail and the repo carry these; the repo copy repeats them as a belt.
+  common = schema // {
     worktree.baseRef = "head";
     # Honoured from any scope, the repo file included; a `true` in user or
     # managed settings cannot be undone here.
     disableClaudeAiConnectors = !allowConnectors;
     includeCoAuthoredBy = false;
   };
-  # `enabled` is not among them in the managed body (2026-10-28, roadmap
-  # item 13): managed settings are host-wide, and the owner's sessions run
-  # unsandboxed. Each worker's ~/.claude/settings.json turns it on (aj
-  # bootstrap), and the managed hook refuses every tool call of a worker
-  # whose effective `sandbox.enabled` is not true. The rest binds whichever
-  # scope enables it.
+  # The sandbox's scalars. `enabled` is the jail's alone: the law has no
+  # sandbox, and the repo never writes it, so a worker's sandbox comes from
+  # its user settings and the jailer runs without one. The hook refuses a
+  # worker's tools unless all three resolve as written here over user,
+  # project, local and managed scope (a project or local file outranks the
+  # user scope for a scalar).
   sandboxScalars = {
     # In managed settings a false holds against a repo's true (2.1.285+).
     allowUnsandboxedCommands = false;
@@ -151,14 +169,15 @@ let
     }
     // extra;
 
-  managedBody =
-    common
+  lawBody =
+    schema
     // {
       permissions = {
-        defaultMode = "default";
         # Honoured from any scope; a repo can disable bypass mode, never enable it.
+        # Managed only in effect (a user file cannot hold it against a flag),
+        # so it stays in the law until decided on its own (roadmap item 14).
         disableBypassPermissionsMode = "disable";
-        deny = denyRules { inherit allowLocalCommits allowMemoryEdits; } ++ extraDeny;
+        deny = denyRules.law;
       };
 
       # No `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` anywhere (2026-10-22): a repo
@@ -167,8 +186,10 @@ let
       # sandboxed Bash commands, so every command with a variable, every read
       # outside the working directory and every write under ~/.claude prompts,
       # which a -p session cannot answer (changelog). What strips secrets from
-      # the shell is the explicit `credentials.envVars` deny list below.
+      # the shell is the explicit `credentials.envVars` deny list in the jail.
 
+      # Registered once, for everyone; the hook applies the law to all and
+      # the jail's rules to a member of `agents` only.
       hooks = {
         # One env hook only: all matching hooks run in parallel and would race on
         # CLAUDE_ENV_FILE.
@@ -181,8 +202,8 @@ let
           }
         ];
         # local_settings outranks the repo file for scalar keys and settings
-        # hot-reload, so the hook blocks it. policy_settings changes cannot be
-        # blocked; the hook still runs.
+        # hot-reload, so the hook blocks it for a worker. policy_settings
+        # changes cannot be blocked; the hook still runs.
         ConfigChange = [
           {
             matcher = "user_settings|policy_settings|local_settings";
@@ -229,7 +250,35 @@ let
         ];
       };
 
-      sandbox = sandboxScalars // {
+      # The mod policy, managed only. ai-jailer ships no mods (2026-10-24,
+      # docs/sessions.md section 5), so nothing registers a marketplace or
+      # enables a plugin (no `extraKnownMarketplaces` key, no
+      # `enabledPlugins`, no `prependPlugins`) and every mod is refused. The
+      # built-in guard only loads when managed settings exist and reads
+      # `allowManagedModsOnly` from here only; with no organisation mod it
+      # refuses them all. Binds the jailer too; each key is a candidate for
+      # dropping on its own (roadmap item 14).
+      pluginConfigs."cc-plugin-sec-default@builtin".options.allowManagedModsOnly = true;
+      disableSideloadFlags = true;
+      # Which marketplaces a user may add; an empty list adds none.
+      strictKnownMarketplaces = extraKnownMarketplaces;
+    }
+    // lib.optionalAttrs allowManagedHooksOnly { inherit allowManagedHooksOnly; };
+
+  jailBody =
+    common
+    // {
+      permissions = {
+        defaultMode = "default";
+        disableBypassPermissionsMode = "disable";
+        deny = denyRules.jail ++ extraDeny;
+      };
+
+      sandbox = {
+        enabled = true;
+      }
+      // sandboxScalars
+      // {
         # The GitHub tokens: no push or `gh` write credential inside the
         # sandbox, the layer the hook's text rules lean on.
         credentials.envVars =
@@ -321,45 +370,35 @@ let
           ++ extraAllowedDomains;
         };
       };
-
-      # The mod policy. ai-jailer ships no mods (2026-10-24, docs/sessions.md
-      # section 5), so nothing registers a marketplace or enables a plugin
-      # (no `extraKnownMarketplaces` key, no `enabledPlugins`, no
-      # `prependPlugins`) and every mod is refused. The built-in guard only
-      # loads when managed settings exist and reads `allowManagedModsOnly` from
-      # here only; with no organisation mod it refuses them all.
-      pluginConfigs."cc-plugin-sec-default@builtin".options.allowManagedModsOnly = true;
-      disableSideloadFlags = true;
-      # Which marketplaces a user may add; an empty list adds none.
-      strictKnownMarketplaces = extraKnownMarketplaces;
     }
     // lib.optionalAttrs (!syncClaudeAi) {
       syncClaudeAiSkills = false;
       syncClaudeAiPlugins = false;
-    }
-    // lib.optionalAttrs allowManagedHooksOnly { inherit allowManagedHooksOnly; };
+    };
 
   repoBody = common // {
     permissions = {
       disableBypassPermissionsMode = "disable";
       deny = extraDeny;
     };
-    sandbox =
-      sandboxScalars
-      // lib.optionalAttrs enableSandbox { enabled = true; }
-      // {
-        filesystem = withFence {
-          # Not devenv.local.*: a literal entry is masked as an unreadable device
-          # node whether or not the file exists, and devenv reads both files
-          # when they exist, so listing them stopped every shell evaluation
-          # inside the sandbox (`aj check` case 2, 2026-10-22). The hook
-          # still refuses shell writes to them by name.
-          denyWrite = map (p: "${repoRoot}/${p}") (
-            lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected
-          );
-        };
-        network.allowedDomains = extraAllowedDomains;
+    sandbox = sandboxScalars // {
+      filesystem = withFence {
+        # Not devenv.local.*: a literal entry is masked as an unreadable device
+        # node whether or not the file exists, and devenv reads both files
+        # when they exist, so listing them stopped every shell evaluation
+        # inside the sandbox (`aj check` case 2, 2026-10-22). The hook
+        # still refuses shell writes to them by name.
+        denyWrite = map (p: "${repoRoot}/${p}") (
+          lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected
+        );
       };
+      network.allowedDomains = extraAllowedDomains;
+    };
   };
 in
-if managed then managedBody else repoBody
+{
+  law = lawBody;
+  jail = jailBody;
+  repo = repoBody;
+}
+.${body}

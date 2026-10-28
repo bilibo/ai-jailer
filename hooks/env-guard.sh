@@ -6,6 +6,15 @@
 # directory: per-customer isolation comes from the Linux users (decided
 # 2026-10-27), not from this hook.
 #
+# Two rule sets (roadmap item 14, 2026-10-28). The law binds every user,
+# the jailer included: a credential read, `git commit` (unless the host
+# allows local commits) and `git push`. The jail binds a
+# worker, a member of WORKER_GROUP: every other rule below, and before any
+# tool, that the worker's user settings carry the jail body the managed
+# tree ships (jail-settings.json) and that the sandbox resolves on. A
+# session as anyone else gets the law and the environment preamble, nothing
+# more.
+#
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
 # ConfigChange (together with onFailure = "block" in the hook registration).
 # The trap needs set -E to fire inside functions, where the checks run.
@@ -26,8 +35,10 @@ trap 'echo "env-guard: internal error, denying" >&2; exit 2' ERR
 # Substituted by lib/hooks.nix from the ai-jail.* options: 0 or 1.
 ALLOW_LOCAL_COMMITS="@allowLocalCommits@"
 ALLOW_MEMORY_EDITS="@allowMemoryEdits@"
-# The group aj bootstrap puts every worker in; hook-test swaps it for its own.
+# The group aj bootstrap puts every worker in, and the managed tree the law,
+# the jail and this hook are linked from; hook-test swaps both for its own.
 WORKER_GROUP="agents"
+MANAGED_DIR="/etc/claude-code"
 
 input=$(cat)
 event=$(jq -r '.hook_event_name // empty' <<<"$input")
@@ -35,6 +46,39 @@ event=$(jq -r '.hook_event_name // empty' <<<"$input")
 cwd=$(jq -r '.cwd // empty' <<<"$input")
 
 deny() { printf 'env-guard: %s\n' "$1" >&2; exit 2; }
+
+# Worker or not, once. No pipeline: under pipefail an early exit could fail
+# it open.
+my_groups=" $(id -nG 2>/dev/null || true) "
+jail=0; [[ "$my_groups" != *" $WORKER_GROUP "* ]] || jail=1
+
+# jail_check: a worker's tools are refused unless (1) its user settings
+# (CLAUDE_CONFIG_DIR, else ~/.claude) agree with the managed tree's
+# jail-settings.json on every top-level key of that file (Claude Code
+# rewrites the file for /model and the like, so the keys are compared, not
+# the file), and (2) the sandbox resolves as the jail writes it, since a
+# project or local file outranks the user scope for a scalar: enabled true,
+# allowUnsandboxedCommands false, failIfUnavailable true over user, project,
+# local and managed settings. A file that does not parse refuses too. Not
+# seen: a `claude --settings <file>` launch, which ajmux never passes and
+# rule 6 refuses inside a session.
+jail_check() {
+  local ref="$MANAGED_DIR/jail-settings.json" us="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" root diff s sfiles res
+  [ -r "$ref" ] || deny "worker without a jail: $ref is missing or unreadable (aj bootstrap links the managed tree)"
+  [ -r "$us" ] || deny "worker without a jail: $us is missing (aj bootstrap writes the jail into it)"
+  diff=$(jq -r -n --slurpfile r "$ref" --slurpfile u "$us" '[$r[0] | keys[] | select($r[0][.] != $u[0][.])] | join(",")' 2>/dev/null) \
+    || deny "worker without a jail: $us or $ref does not parse"
+  [ -z "$diff" ] || deny "worker without a jail: $us differs from $ref at $diff (aj bootstrap rewrites it; a session must not edit it)"
+  root="${CLAUDE_PROJECT_DIR:-$cwd}" sfiles=()
+  for s in "$us" "$root/.claude/settings.json" "$root/.claude/settings.local.json" "$MANAGED_DIR/managed-settings.json"; do
+    [ ! -e "$s" ] || sfiles+=("$s")
+  done
+  res=$(jq -r -n '[inputs | (try .sandbox catch null) | if type == "object" then . else {} end]
+    | [ ([.[].enabled | select(. != null)] | last), ([.[].allowUnsandboxedCommands | select(. != null)] | last), ([.[].failIfUnavailable | select(. != null)] | last) ]
+    | map(tostring) | join(" ")' "${sfiles[@]}" 2>/dev/null) \
+    || deny "worker without a sandbox: a settings file does not parse (${sfiles[*]})"
+  [ "$res" = "true false true" ] || deny "worker without a sandbox: enabled, allowUnsandboxedCommands and failIfUnavailable resolve to ($res), not (true false true); the jail in ~/.claude/settings.json sets them and a project or local file must not change them"
+}
 
 # check_env <cwd>: refuse the command unless direnv can load the .envrc
 # nearest to <cwd>; a directory without one passes. `direnv status` (3 ms)
@@ -128,6 +172,9 @@ ENV
     exit 0 ;;
 
   ConfigChange)
+    # Jail only: the jailer changes its own settings (/model writes
+    # ~/.claude/settings.json).
+    [ "$jail" = 1 ] || exit 0
     src=$(jq -r '.source // empty' <<<"$input")
     case "$src" in
       # .claude/settings.local.json outranks the repo's settings.json for
@@ -137,31 +184,13 @@ ENV
     exit 0 ;;
 
   PreToolUse)
-    # A worker's sandbox (2026-10-28, roadmap item 13): the managed settings
-    # no longer set `sandbox.enabled`, so the owner's sessions run without
-    # it, and a worker's comes from its ~/.claude/settings.json, which a
-    # project or local file outranks. Every tool of a member of WORKER_GROUP
-    # is refused unless the value Claude Code resolves (managed, then local,
-    # then project, then user) is true. A file that does not parse refuses
-    # too. Not seen: a `claude --settings <file>` launch, which ajmux never
-    # passes and rule 6 refuses inside a session.
-    # No pipeline: under pipefail an early `grep -q` exit could fail it open.
-    my_groups=" $(id -nG 2>/dev/null || true) "
-    if [[ "$my_groups" == *" $WORKER_GROUP "* ]]; then
-      root="${CLAUDE_PROJECT_DIR:-$cwd}" sfiles=()
-      for s in "$HOME/.claude/settings.json" "$root/.claude/settings.json" "$root/.claude/settings.local.json" /etc/claude-code/managed-settings.json; do
-        [ ! -e "$s" ] || sfiles+=("$s")
-      done
-      sb=null
-      if [ ${#sfiles[@]} -gt 0 ]; then
-        sb=$(jq -n '[inputs | try .sandbox.enabled catch null | select(. != null)] | last' "${sfiles[@]}" 2>/dev/null) \
-          || deny "worker without a sandbox: a settings file does not parse (${sfiles[*]})"
-      fi
-      [ "$sb" = true ] || deny "worker without a sandbox: sandbox.enabled resolves to $sb, not true (aj bootstrap writes it into ~/.claude/settings.json; a project or local file must not turn it off)"
-    fi
+    [ "$jail" = 0 ] || jail_check
     tool=$(jq -r '.tool_name // empty' <<<"$input")
     case "$tool" in
       Edit|Write|NotebookEdit|MultiEdit)
+        # Jail only. The law's credential reads are deny rules (a Read deny
+        # also blocks Edit and Write, 2.1.228+), not a path check here.
+        [ "$jail" = 1 ] || exit 0
         f=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"$input")
         # The patterns below are literal: make the path absolute and fold `.`
         # and `..` first. Both the path as named (`-s`, so a home-manager
@@ -223,6 +252,39 @@ ENV
         b='(^|[ ;&|(])'       # start of a (sub)command
         e='( |$)'             # end of a word
 
+        # --- the law: everyone, the jailer included ------------------------
+        # L1. `git commit` (unless the host allows local commits) and `git
+        # push`: `/usr/bin/git`, `git -C . push`, `git --git-dir=.git push`.
+        law_git='push'; [ "$ALLOW_LOCAL_COMMITS" = 1 ] || law_git='commit|push'
+        re="(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +($law_git)$e"
+        [[ "$n" =~ $re ]] && deny "git commit/push blocked: the human commits and pushes"
+        # L2. credential reads. cred_files: in-repo secrets, the user's own
+        # Claude credentials, and the home-directory credential stores the
+        # law's Read rules name (ssh, the GitHub tokens on disk, Azure's
+        # token cache), which an unsandboxed jailer session has no sandbox
+        # to hide. A path matching cred_files anywhere blocks, unless the
+        # whole command is one simple command whose verb cannot show
+        # content: one line (the normaliser folds newlines, so the raw
+        # command is checked), no pipe, no `$(`, backtick or `>(`
+        # substitution, no input redirection, and none of the options that
+        # read file names from a file, whose errors echo each line (`file
+        # -f`, `--files0-from`, `--pathspec-from-file`). A reader list
+        # cannot be completed (dd, tr, perl, `git show <ref>:.env`, a bare
+        # `< .env`).
+        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json|\.ssh/|\.git-credentials|\.config/gh/|\.azure/)'
+        # `ssh -i ~/.ssh/<key> host` uses a key without showing it (scp and
+        # rsync would copy it, so they are not here).
+        harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch|ssh)( [^;&|<$`(]*)?$'
+        list_opts='--files0-from|--files-from|--pathspec-from-file|(^| )file( +-[a-z]+)* +-[a-z]*f'
+        if [[ "$n" =~ $cred_files ]]; then
+          safe=0
+          [[ "$cmd" != *$'\n'* ]] && [[ "$n" =~ $harmless ]] && ! [[ "$n" =~ $list_opts ]] && safe=1
+          [ "$safe" = 1 ] || deny "credential file access blocked"
+        fi
+        # The jailer: the law, then the environment check (rule 8).
+        if [ "$jail" = 0 ]; then check_env "$cwd"; exit 0; fi
+
+        # --- the jail: a worker ----------------------------------------------
         # 1. git history and index writes
         git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|branch +(-f|--force)|tag +-d|tag +(-f|--force)|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|checkout +(-f|--force|\.[^ ]*)|switch +(-f|--force|--discard-changes)|worktree +remove( +[^ ;&|]+)* +(-f|--force)|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
         [ "$ALLOW_LOCAL_COMMITS" = 1 ] || git_ops="commit|$git_ops"
@@ -250,29 +312,9 @@ ENV
         re='(^|[^a-z])(func +azure +functionapp +publish|pulumi +(up|destroy)|bicep +publish)'
         [[ "$n" =~ $re ]] && deny "deploy blocked"
 
-        # 3. credentials
+        # 3. credential operations (the credential files are the law's, L2)
         re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +sp +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
         [[ "$n" =~ $re ]] && deny "credential operation blocked"
-        # cred_files: in-repo secrets and the session user's own Claude
-        # credentials. The owner's credential directories (~/.ssh, ~/.aws,
-        # ...) are not listed: a session runs as a worker user, which cannot
-        # read the owner's home (Linux-user design, decided 2026-10-27).
-        # A path matching cred_files anywhere blocks, unless the whole command is one simple
-        # command whose verb cannot show content: one line (the normaliser
-        # folds newlines, so the raw command is checked), no pipe, no `$(`,
-        # backtick or `>(` substitution, no input redirection, and none of
-        # the options that read file names from a file, whose errors echo
-        # each line (`file -f`, `--files0-from`, `--pathspec-from-file`). A
-        # reader list cannot be completed (dd, tr, perl, `git show
-        # <ref>:.env`, a bare `< .env`).
-        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json)'
-        harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch)( [^;&|<$`(]*)?$'
-        list_opts='--files0-from|--files-from|--pathspec-from-file|(^| )file( +-[a-z]+)* +-[a-z]*f'
-        if [[ "$n" =~ $cred_files ]]; then
-          safe=0
-          [[ "$cmd" != *$'\n'* ]] && [[ "$n" =~ $harmless ]] && ! [[ "$n" =~ $list_opts ]] && safe=1
-          [ "$safe" = 1 ] || deny "credential file access blocked"
-        fi
 
         # 4. system and config
         re="(^|[^a-z])(sudo|doas|pkexec|su|run0)$e"
@@ -307,6 +349,10 @@ ENV
         [[ "$n" =~ $re ]] && deny "plugin install blocked"
         re='--plugin-(dir|url)|claude_code_plugin_dirs=|--mcp-config|--agents( |=)'
         [[ "$n" =~ $re ]] && deny "plugin sideload blocked"
+        # The jail lives in ~/.claude/settings.json; a child session pointed
+        # elsewhere would start without it (jail_check reads the same variable).
+        re='claude_config_dir='
+        [[ "$n" =~ $re ]] && deny "CLAUDE_CONFIG_DIR blocked: the jail is in ~/.claude/settings.json"
 
         # 6. nested sessions that would skip the rules. These flags replace
         # or bypass settings for the child session (`--bare` skips every

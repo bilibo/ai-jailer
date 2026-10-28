@@ -675,18 +675,84 @@ The gaps, in order:
       (2026-10-28), so no session here is bound by anything until
       bootstrap runs.
 
+    Built the same day, by a session in this checkout, not committed:
+    `lib/deny-rules.nix` returns `{ law; jail; }`; `lib/settings.nix`
+    takes `body = "law" | "jail" | "repo"` (the `managed` flag,
+    `enableSandbox` and the repo's `sandbox.enabled` are gone);
+    `lib/managed-tree.nix` ships `managed-settings.json` (the law) and
+    `jail-settings.json` (the jail) beside the hooks; the hook tells a
+    worker from the jailer once by group, runs `jail_check` before a
+    worker's every tool (the user file's keys against the reference, then
+    `enabled`/`allowUnsandboxedCommands`/`failIfUnavailable` resolved over
+    user, project, local and managed), applies the law to everyone (L1
+    `git push`, L2 the credential files) and the rest to a worker only,
+    with Edit and ConfigChange jail-only; `aj bootstrap` writes every
+    top-level key of the jail into a worker's `~/.claude/settings.json`
+    and records them, `aj reset` strips them, `aj doctor` compares the
+    file to the reference; `aj check` warns on a repo file that says
+    `enabled: false`; the devenv module, this checkout's `devenv.nix`,
+    `aj init`'s contract, CLAUDE.md, the README's intro, layers and
+    lockdown table, `docs/sessions.md` and the runbook say the new shape.
+    The proposal patch is deleted. Decided while building, within the
+    item's shape:
+    - `host.nix`'s `extraDeny` and `extraAllowedDomains` go into the jail,
+      `allowConnectors` too; `syncClaudeAiSkills`/`Plugins = false` move
+      from the law to the jail (user scope honours a false), so the
+      jailer's account syncs again. The law keeps only the managed-only
+      keys: `disableBypassPermissionsMode`, `allowManagedHooksOnly`, the
+      mod policy.
+    - The law's credential rule names `~/.ssh/`, `~/.git-credentials`,
+      `~/.config/gh/` and `~/.azure/` by text as well as the in-repo
+      files: an unsandboxed jailer session has no `denyRead` to hide
+      them. `ssh -i ~/.ssh/<key> host` passes (a use, not a read); `scp`
+      of a key and `ssh host < key` are refused. `~/.aws` stays out.
+    - The environment check (hook rule 8) runs for everyone: it is the
+      devenv shell loading, not a restriction.
+    - The jail check compares the reference's keys to the user file's
+      values, not file hashes (`/model` rewrites the file), and reads the
+      file under `CLAUDE_CONFIG_DIR` when set; rule 6 refuses
+      `CLAUDE_CONFIG_DIR=` on a nested launch for a worker.
+    Run by hand from this session against stand-ins for the store paths:
+    hook-test 439 (every rule as a worker, the law section as the
+    jailer), managed-tree 36, project-settings 17, aj-bootstrap 257 of
+    280 with the same 23 failing on the committed tree under this
+    session's sandbox (user namespaces read as missing, the home-manager
+    cases need the stand-in in the store). Not run: the flake checks
+    (`devenv-module-eval`, `managed-host-eval`, the rest; the daemon
+    socket is refused in this session), statix, deadnix; nixfmt clean,
+    shellcheck clean on bootstrap.
+
     Open:
-    - [ ] `host.nix` extra deny rules and domains: law by placement
-      today; decide whether they become jail options instead.
     - [ ] Whether `permissions.deny` `Read(...)` on the credential files
-      stops the Read tool for an unsandboxed jailer as the reference says.
-    - [ ] The work, in order: `lib/settings.nix` split into `lawBody`
-      and `jailBody`, `lib/managed-tree.nix` shipping the reference
-      copy, bootstrap and reset for the body, the hook's role split and
-      key check, the devenv module without the option, CLAUDE.md and the
-      README's layers and lockdown table, then the tests for each
-      (hook-test, aj-bootstrap-test, managed-tree-test,
-      project-settings-test).
+      stops the Read tool for an unsandboxed jailer as the reference says
+      (the hook covers Bash; Edit and Write of those files rely on the
+      Read deny, 2.1.228+).
+    - [x] `nix flake check` on a copy of the regular files, 2026-10-28,
+      from a session whose Bash sandbox had been turned off: every check
+      passes (hook-test 443, hook-test-worktree 462, aj-bootstrap 280,
+      aj-doctor 71, aj-init 82, check-parser 115, managed-tree 37,
+      `managed-host-eval`, `devenv-module-eval`); statix and deadnix clean
+      on the changed Nix files. The by-hand run's 23 bootstrap failures were
+      that session's sandbox. Left: the human's review and commit.
+    - [ ] The first live run (item 12's gate), with V12 of item 13 and:
+      V13 a worker session with the jail written starts and `aj check`
+      passes as that worker; V14 a worker whose `~/.claude/settings.json`
+      was edited (a deny rule removed) has every tool refused with the
+      hook's `differs from` message, and `aj bootstrap` as that worker
+      repairs it; V15 a jailer session in this checkout runs `nix flake
+      check`, `git add` and `sudo -v` (prompted), and is refused `git
+      commit`, `git push` and `cat ~/.ssh/id_ed25519`.
+    - [ ] Each managed-only key in the law, decided on its own: bypass
+      mode off, `allowManagedHooksOnly`, the mod policy. All three bind
+      the jailer today.
+
+    Added to the law the same day (the owner's): `git commit`, for
+    everyone, the jailer included. The host's `allowLocalCommits`
+    (`host.nix`) lifts it from the law and the jail together, as it
+    lifted the jail's alone before. The hook's L1 rule matches `commit`
+    and `push` as git subcommands (`git commitlint` passes; `git
+    commit-tree` stays a jail rule).
+
 ## Open questions
 
 - Notification hook: the matcher names (`permission_prompt`, `idle_prompt`,
