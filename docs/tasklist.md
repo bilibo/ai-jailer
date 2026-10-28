@@ -91,6 +91,17 @@ boxes, tick what passes.
 
 ## 5. Release itself (decide first thing)
 
+- [ ] Rename `customer` → `org` everywhere (decided 2026-10-28 evening:
+      no consulting speak; `project` is out because it already names the
+      pair, `AI_JAIL_PROJECT=acme/infra`). 98 occurrences in 17 files:
+      roadmap 18, ajmux.nix 11, bootstrap.sh 11, README 9, sessions 8,
+      runbook 7, tests. Placeholders `<customer>/<repo>` → `<org>/<repo>`,
+      `w-<customer>` → `w-<org>`, `<c>` stays. Worker user names, the
+      receipt's `root.workers` and the env var don't change. Define
+      "org" once in the README: whoever the work is for (a client, a
+      team, an open-source org, yourself); one Linux user per org is
+      the boundary. Then reread README and runbook for sentences that
+      lean on the client framing. Before the release, not after.
 - [ ] Say what "release" means: a tag on `main` plus README "current
       state" true, or also the nixos-wsl side installable from scratch
       by `install-wsl.ps1` (untested end to end since the rename).
@@ -102,6 +113,93 @@ boxes, tick what passes.
       (`docs/suggestion.md` 3); moving anything into home-manager (no:
       decided 2026-10-28); automating the lock bump (no: `verify.sh`
       says when it matters).
+
+## 6. Token and context cost in cells and the factory (checked 2026-10-29, late)
+
+Six ideas from the evening of 2026-10-29, each checked against the code
+before it was written here. Order is by value over cost. None of them
+gates the release; 6.1 to 6.5 are an hour together, do them after
+section 5 or when touching the file anyway.
+
+- [ ] 6.1 CLAUDE.md "Checks" (factory): drop the tar copy and `-L` as
+      the default. Verified live tonight: this jailer session (law only,
+      no sandbox) built `nix build .#checks.x86_64-linux.managed-tree-test
+      --no-link` straight on the checkout, 4 s, three lines of output.
+      Write: an unsandboxed session runs `nix flake check` and
+      `nix build .#checks...` on the checkout; `-L` or `nix log` only
+      after a failure; keep the `git ls-files | tar` copy as the fallback
+      for a sandboxed worker session. One full `nix flake check` on the
+      checkout still to be run once before the fallback paragraph shrinks.
+- [ ] 6.2 `hooks/env-guard.sh`: refusals that say what to do instead.
+      Models answer a bare `blocked` by trying flag variants for 2-3
+      turns. Keep the prefix text (`pkgs/aj/check.sh` 185 matches only
+      `env-guard:`; `tests/hook-test.sh` 36 discards stderr), append one
+      clause. Rule 1, all three `git history/index write blocked` sites:
+      `: stage with git add, branch with git switch -c; revert a file
+      with git show HEAD:<path> > <path>`. Rule 2: `terraform write
+      blocked: plan/validate only; propose apply/state commands to the
+      human`, `az write blocked: read/list/show only; propose write
+      commands to the human`. L1 is fine as is (the model stops).
+- [ ] 6.3 `pkgs/aj/init.sh` 217-234, the cell CLAUDE.md contract:
+      rewrite for action, not plumbing. The first paragraph explains
+      where the three layers come from, which a worker never needs;
+      missing are the rules that save discovery turns. Keep the heading
+      `## Environment contract (ai-jailer)` (line 236 detects it with
+      `grep -F 'ai-jailer'`); update `tests/aj-init-test.sh` 163-164,
+      which assert two phrases of the old text. New bullets:
+      tools and non-secret identifiers (`ARM_TENANT_ID`, ...) come from
+      `devenv.nix`, read it first instead of `which`/`--version` probes
+      or looking for the dotenv file; never read the dotenv files,
+      tfvars, tfstate, `.devenv/`, `.direnv/`; never edit `devenv.nix`,
+      `devenv.yaml`, `devenv.lock`, `.envrc`, `.claude/`, a change goes
+      as a unified diff to `proposals/<YYYY-MM-DD>-<topic>.patch` or into
+      the reply; stage with `git add` only, commit/push/restore/
+      checkout --/reset are blocked, revert with `git show HEAD:<f> > <f>`;
+      cloud and IaC read/plan only, `az` scoped with `--query` or
+      `-o table`/`-o tsv`, never unfiltered JSON; a refusal (`env-guard:`,
+      a deny rule, a sandbox error) is expected: stop and propose, no
+      workarounds. Keep "credential paths are hidden; clone over HTTPS".
+- [ ] 6.4 `pkgs/aj/init.sh` 212: add `proposals/` to the .gitignore
+      lines (the factory's own .gitignore has it, the cell template does
+      not, yet CLAUDE.md promises the path is gitignored) and
+      `ensure_lines .ignore 'devenv.lock'` so ripgrep-backed Grep skips
+      the tracked lockfile (gitignore does not cover tracked files).
+      Test: a "plans .ignore" dry-run check next to `tests/aj-init-test.sh`
+      line 44.
+- [ ] 6.5 `lib/deny-rules.nix`: add `"Read(**/.devenv/**)"` and
+      `"Read(**/.direnv/**)"` to the credentials/`jail` side, not the
+      law (`tests/managed-tree-test.sh` 34 asserts the law's shape; it
+      would still pass, but the rule is the workers'). Not in
+      `sandbox.filesystem.denyRead` (`lib/settings.nix`): Bash must still
+      run binaries under `.devenv/profile/bin`. A Read deny also blocks
+      Edit/Write (deny-rules.nix ~100), intended. No test asserts the
+      sibling `.terraform/**` rule today; add one for all three or none.
+- [ ] 6.6 Measure first, then maybe: quiet Terraform and az in cells via
+      `env` in `devenv/devenv.nix` (`lib.mkIf cfg.enable`, `lib.mkDefault`
+      per key: `TF_CLI_ARGS_plan = "-no-color -compact-warnings"`,
+      `TF_CLI_ARGS_{validate,init,show} = "-no-color"`,
+      `AZURE_CORE_ONLY_SHOW_ERRORS = "true"`, `AZURE_CORE_NO_COLOR =
+      "true"`; never a global `TF_CLI_ARGS`, `-compact-warnings` breaks
+      init/workspace; Terraform ignores NO_COLOR). The plumbing is right:
+      the hook's `$CLAUDE_ENV_FILE` preamble runs `direnv export` before
+      every Bash call. But the Bash tool has no TTY (checked tonight:
+      `[ -t 1 ]` false), and both tools drop colour without one, so the
+      ANSI half of the claim is moot; what is left is `-compact-warnings`
+      and the az preview/survey banners. Do it only after the first
+      `terraform plan` or `az` run in a cell shows the noise in a
+      transcript (`aj check` writes them under its `transcripts:` dir).
+- [ ] 6.7 Parked: splitting `pkgs/aj/bootstrap.sh` (1,335 lines) into
+      common/bootstrap/doctor/reset. It helps only factory sessions that
+      edit doctor or reset, and the cut is not clean: `report()` (line
+      1068) is called by both `doctor` and `bootstrap|upgrade` (line
+      1320), so doctor's part would be in bootstrap's build too, or
+      `report` moves to common. Constraints if ever done: `usage()`
+      (169) reads its own file's header up to the first `# shellcheck`
+      line, so the per-command header must come first in the merged
+      text; `CMD` from `AI_JAILER_CMD` (`pkgs/aj.nix` 122) and the
+      dispatch stay; `tests/aj-bootstrap-test.sh` and
+      `tests/aj-doctor-test.sh` pass unchanged. Revisit after the
+      release, only if the file keeps growing.
 
 ## Routines that stand after today
 
