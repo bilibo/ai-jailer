@@ -616,7 +616,6 @@ The gaps, in order:
       need a sandbox are judged against a repo file that may now leave
       the key out.
 
-
 14. **Law and jail: the jailer is bound by the law only; the jail is
     the prisoner's (2026-10-28).** Reopens item 11's "the owner's
     sessions are bound too; the rules are the host's, not a repo's" and
