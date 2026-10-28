@@ -561,11 +561,14 @@ worker_user_steps() {
       wref="path:$sp"
     fi
   fi
+  # The worker runs this command, not always bootstrap: a plain bootstrap
+  # leaves profile packages where they are, so `upgrade --workers` left every
+  # worker's aj at the snapshot of its first bootstrap (2026-10-28).
   for c in "${WORKERS[@]}"; do
     w="$WORKER_PREFIX$c"
-    step "bootstrap the user side of $w"
-    run sudo -u "$w" -i nix run "$wref#aj" -- bootstrap "${flags[@]}" --jailer "$wref" \
-      || warn "the user steps for $w failed: run sudo -u $w -i nix run $wref#aj -- bootstrap --no-root --yes --jailer $wref"
+    step "$CMD the user side of $w"
+    run sudo -u "$w" -i nix run "$wref#aj" -- "$CMD" "${flags[@]}" --jailer "$wref" \
+      || warn "the user steps for $w failed: run sudo -u $w -i nix run $wref#aj -- $CMD --no-root --yes --jailer $wref"
   done
 }
 

@@ -33,6 +33,14 @@ happened and what was learned on the day.
   the owner's, so 0750 passes). The host's side, nixos-wsl: `homeMode =
   "700"` written out (the default; activation chmods the home to it
   every time) and `verify.sh` no longer accepts 755.
+- `aj upgrade --workers` ran plain `bootstrap` as each worker, which
+  never moves profile packages: after the first upgrade on this host
+  both workers' `aj` was still the snapshot of their first bootstrap
+  while the owner's was current. The worker now runs the same command
+  as the owner. Seen because the upgrade printed the new skip lines for
+  the workers (from `nix run <new snapshot>#aj`) while
+  `~/.nix-profile/bin/aj` in each worker's home still pointed at the
+  old build.
 - Checked after the rename, from a session in this checkout: every
   suite that runs without a Nix build passes, run by hand against
   stand-ins for the store paths (hook-test 373, install 81, host-config

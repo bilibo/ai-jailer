@@ -560,6 +560,12 @@ if [ -z "$got" ]; then ok; else bad "the re-run ran root commands:
 $got"; fi
 count_is "still one group line per worker" "$tmp/groups" 'w-acme tester' 1
 in_json "receipt: workers kept once" "$receipt15" '.root.workers == ["acme","beta"]'
+# upgrade runs upgrade as each worker too: a bootstrap there would leave the
+# worker's profile packages at the snapshot of its first bootstrap.
+ROOT_STEPS="" aj "$h15" upgrade --yes --workers acme,beta
+exits "workers upgrade" 0
+for w in acme beta; do called "$w upgraded as itself" "^sudo -u w-$w -i nix run $ref#aj -- upgrade --no-root --yes --jailer $ref$"; done
+uncalled "no bootstrap as a worker on upgrade" '^sudo -u w-[a-z]+ -i nix run .* -- bootstrap '
 
 # reset: the sudoers file, the link, linger; the users are only named.
 aj "$h15" reset --yes
