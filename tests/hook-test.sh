@@ -16,10 +16,14 @@
 # a regex change is the point of this file.
 set -uo pipefail
 law_hook="${1:?usage: hook-test.sh <env-guard.sh>}"
-IN="${HOOK_TEST_IN:-$HOME/code/git/acme/infra}"
 pass=0; fail=0
-
 wk=$(mktemp -d); wg=$(id -gn)
+# The cases' cwd: a directory that never exists, so the hook's direnv check
+# stays out of the cases that are not about it. It was the runbook's example
+# repo path under HOME; run by `aj init acme/infra` as the worker, that was
+# the real jail, and with HOME swapped for the scratch home direnv found no
+# allow record and every command was refused (2026-10-28, 106 failures).
+IN="${HOOK_TEST_IN:-$wk/acme/infra}"
 sed -e "s/^WORKER_GROUP=.*/WORKER_GROUP=\"$wg\"/" -e "s#^MANAGED_DIR=.*#MANAGED_DIR=\"$wk/etc\"#" "$law_hook" >"$wk/env-guard.sh"; chmod +x "$wk/env-guard.sh"
 hook="$wk/env-guard.sh"
 jail_json='{"permissions":{"deny":["Bash(git push)"]},"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true}}'

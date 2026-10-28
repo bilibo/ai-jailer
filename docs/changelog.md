@@ -41,6 +41,15 @@ happened and what was learned on the day.
   the workers (from `nix run <new snapshot>#aj`) while
   `~/.nix-profile/bin/aj` in each worker's home still pointed at the
   old build.
+- The first live `aj init acme/infra` as a worker failed its last step,
+  hook-test, with 106 "want 0, got 2": every allow refused. The hook was
+  fine (run by hand in the jail it allowed `ls`); the harness's default
+  cwd was `$HOME/code/git/acme/infra`, the runbook's example, which for
+  the worker was the jail just created, and with HOME swapped for the
+  scratch home direnv found no allow record for its `.envrc`. As the
+  jailer the path never existed and the direnv check was skipped, which
+  is why every earlier run passed. The default is now a path under the
+  scratch directory that is never created; 443 pass as the worker.
 - Checked after the rename, from a session in this checkout: every
   suite that runs without a Nix build passes, run by hand against
   stand-ins for the store paths (hook-test 373, install 81, host-config
