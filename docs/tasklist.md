@@ -87,8 +87,9 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
       too (`NoNewPrivs: 1` in a bare directory). Roadmap item 11 has the
       lines.
 - [x] **Found during V4, 2026-10-29 16:55** (fixed the same evening,
-      option (a), five checks pass; live apply `aj upgrade --no-profile
-      --workers acme,globex` from the checkout shell is Raul's): the interactive claude in the
+      option (a), five checks pass; applied live by Raul with `aj upgrade
+      --no-profile --workers acme,globex`, 0 missing; `aj check` as
+      `w-acme` after it: 18 passed, 0 failed, 1 skipped): the interactive claude in the
       `ajmux` session wrote `permissions.defaultMode: "auto"` (plus
       `theme`, `tui`) into `w-acme`'s `~/.claude/settings.json`. The jail
       pins `defaultMode: "default"`, so the hook's `permissions`
@@ -105,7 +106,7 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
       that a worker must not switch modes. Deny rules, the hook and the
       sandbox bind in every mode; `disableBypassPermissionsMode` stays
       compared either way.
-- [ ] The three managed-only keys (roadmap item 14, last box): bypass
+- [x] The three managed-only keys (roadmap item 14, last box): bypass
       mode off, `allowManagedHooksOnly`, the mod policy; each a yes/no
       from you, then a dated roadmap line. Bypass mode: kept, verified
       2026-10-29 evening (`docs/verified.md`). The other two, with the
@@ -117,12 +118,12 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
       `host.nix` to allow them (the official one is
       `{ source = "github"; repo = "anthropics/claude-plugins-official"; }`,
       and a machine that once ran under `[]` registers it again only
-      through an `extraKnownMarketplaces` entry). Yes/no from Raul on
-      each, then the `host.nix` list.
-- [ ] New, 2026-10-29 evening: MCP and LSP servers run outside the
+      through an `extraKnownMarketplaces` entry). Decided 2026-10-29 late
+      evening: all three stay; plugins per host later (roadmap item 14).
+- [x] New, 2026-10-29 evening: MCP and LSP servers run outside the
       sandbox and nothing in the law restricts them; `.mcp.json` is not
-      a protected path (roadmap item 14, last box). A decision before
-      the tag, or a dated line saying it is accepted for now.
+      a protected path (roadmap item 14, last box). Accepted as is the
+      same evening: setting up an MCP server is a valid use of a cell.
 - [x] The `.terraform` Read rule: dropped 2026-10-29 evening (roadmap
       item 14 has the line; `managed-tree-test` asserts the absence).
 - [x] Review the diff, commit, push (`c1e9b69`, 2026-10-29 13:06).

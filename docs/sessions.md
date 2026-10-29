@@ -143,7 +143,7 @@ What stays is the policy that refuses mods:
   plugin flags on a nested `claude`; `aj init` refuses a repo with a
   plugin manifest under `.claude`.
 - Since 2026-10-27 the managed settings carry `syncClaudeAiSkills` and
-  `syncClaudeAiPlugins = false` (check V9 pending), so the claude.ai
+  `syncClaudeAiPlugins = false` (V9, 2026-10-29: honoured as far as the log shows), so the claude.ai
   account's plugins and skills do not load; bootstrap's user-scope write
   and `--account-sync` are gone.
 

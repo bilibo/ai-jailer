@@ -864,7 +864,7 @@ The gaps, in order:
       `Read(**/*.tfstate)`, the hook's rule 2 blocks state writes, and the
       providers are not secret. `tests/managed-tree-test.sh` asserts the
       rule's absence from the law.
-    - [ ] Each managed-only key in the law, decided on its own: bypass
+    - [x] Each managed-only key in the law, decided on its own: bypass
       mode off, `allowManagedHooksOnly`, the mod policy. All three bind
       the jailer today. Bypass mode off: kept and verified 2026-10-29
       evening (`docs/verified.md`): as `w-acme`,
@@ -888,8 +888,15 @@ The gaps, in order:
       `--plugin-dir`, `--plugin-url`, `--agents` and `--mcp-config`.
       Owner's wish: plugins yes, JavaScript no. Proposed: keep
       `allowManagedModsOnly` and `disableSideloadFlags`, list the
-      marketplaces in `host.nix` (`extraKnownMarketplaces`).
-    - [ ] Found in the same reading, 2026-10-29: MCP servers (stdio),
+      marketplaces in `host.nix` (`extraKnownMarketplaces`). Decided
+      2026-10-29 late evening (the owner's): all three keys stay in the
+      law as they are. Plugins come later per host through
+      `extraKnownMarketplaces` in `host.nix`; when that happens the law
+      must also register the marketplace with Claude Code's own
+      `extraKnownMarketplaces` key, since a machine that ran under `[]`
+      never re-registers the official one by itself (parked, not for
+      the release).
+    - [x] Found in the same reading, 2026-10-29: MCP servers (stdio),
       LSP servers, monitors and hooks run outside the sandbox, and
       "permission rules and sandbox cover the tool calls Claude makes,
       not the code a plugin runs by itself". The law has no
@@ -900,7 +907,14 @@ The gaps, in order:
       in the law (empty, or the owner's remote servers) with
       `allowManagedMcpServersOnly`, and `.mcp.json` into
       `projectConfigPaths`; the owner's sessions are bound by the same
-      law.
+      law. Accepted as is, 2026-10-29 late evening (the owner's): no
+      MCP restriction in the law; setting up an MCP server is a valid
+      use of a cell and functionality is not limited for a risk nobody
+      has hit. What stands between a model and an unsandboxed server
+      today is Claude Code's own approval of a project `.mcp.json`
+      (interactive prompt; a `-p` run needs prior approval), which the
+      worker's human answers. Reopen with a dated line if a cell ever
+      shows an unapproved server starting.
 
     Added to the law the same day (the owner's): `git commit`, for
     everyone, the jailer included. The host's `allowLocalCommits`

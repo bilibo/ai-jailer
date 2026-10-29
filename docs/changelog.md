@@ -19,6 +19,14 @@ happened and what was learned on the day.
 - Bypass mode verified off for a worker (debug log `bypassPermissions
   mode is disabled by settings`, the command still sandboxed); kept in
   the law.
+- The three managed-only keys decided (the owner's, late evening): bypass
+  mode off, `allowManagedHooksOnly` (hooks run outside the sandbox and
+  deny rules do not cover them, so this is the wall against an extra
+  hook) and the mod policy (`allowManagedModsOnly` is "no JavaScript";
+  plugins come later per host through `extraKnownMarketplaces`) all
+  stay. MCP and LSP servers run outside the sandbox and the law does
+  not restrict them: accepted as is, a cell may need one; Claude Code's
+  approval of a project `.mcp.json` is the human's gate.
 - New `docs/verified.md`: one row per live check, with date, how and
   result, so README and runbook claims can point at evidence. Today's
   rows are in; the runbook's V1 to V9 table points there.
@@ -28,8 +36,9 @@ happened and what was learned on the day.
   `defaultMode`; the hook, bootstrap and doctor leave that key out of
   the comparison and bootstrap keeps the worker's value. Two hook-test
   cases. The cell template's `extraAllowedDomains` comment no longer
-  calls V2 pending. Live: `aj upgrade --no-profile --workers acme,globex`
-  still to run.
+  calls V2 pending. Applied live the same evening (`aj upgrade
+  --no-profile --workers acme,globex`, 0 missing everywhere); `aj check`
+  as `w-acme` afterwards: `18 passed, 0 failed, 1 skipped`.
 - Roadmap 2.7 closed: this checkout's `.envrc` has the template's lines
   (the load fails while `devenv.local.nix` or `devenv.local.yaml`
   exists; `direnv allow` once after pulling, since the file changed), and
