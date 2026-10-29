@@ -95,6 +95,12 @@ let
   sshSandbox = import ./ssh-sandbox.nix;
   envGuard = "${hookDir}/env-guard.sh";
   tmuxNotify = "${hookDir}/tmux-notify.sh";
+  tmuxWaiting = {
+    type = "command";
+    command = tmuxNotify;
+    args = [ "waiting" ];
+    timeout = 5;
+  };
   # What a sandboxed command reads under $HOME when the fence is on, from an
   # strace of `direnv export` in the test repo (2026-10-21): the Nix profile
   # and its state, the direnv config and allow database, the Nix and devenv
@@ -223,19 +229,16 @@ let
             ];
           }
         ];
+        # The orange window: Stop fires when a turn ends and the session
+        # waits for the human; Notification covers a permission prompt or
+        # dialog mid-turn and the idle reminder. UserPromptSubmit clears.
         Notification = [
           {
             matcher = "permission_prompt|idle_prompt|elicitation_dialog";
-            hooks = [
-              {
-                type = "command";
-                command = tmuxNotify;
-                args = [ "waiting" ];
-                timeout = 5;
-              }
-            ];
+            hooks = [ tmuxWaiting ];
           }
         ];
+        Stop = [ { hooks = [ tmuxWaiting ]; } ];
         UserPromptSubmit = [
           {
             hooks = [

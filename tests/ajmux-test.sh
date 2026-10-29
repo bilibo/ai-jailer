@@ -153,7 +153,9 @@ PATH="$tmp/ubin" check 69 "^ajmux: no claude on PATH, and no direnv on PATH to l
 
 # --- Live: real windows, on private tmux servers --------------------------
 # A stub claude records its window's name, directory, user and arguments,
-# then closes its window. The tmux is the one ajmux runs; TMUX_TMPDIR and
+# then closes its window, both by its own pane: the window is opened with
+# -d, and a bare display-message or kill-window acts on the session's
+# current window. The tmux is the one ajmux runs; TMUX_TMPDIR and
 # the unset TMUX keep it off the user's server (the sudo stub gives each
 # worker its own TMUX_TMPDIR, as its own UID would), and stdin from
 # /dev/null makes the final attach fail instead of taking a terminal. HOME
@@ -167,8 +169,8 @@ live_env=(HOME="$tmp" XDG_CONFIG_HOME="$tmp/.config" PATH="$tmp/ubin:$tmp/bin:$t
 trap 'env "${live_env[@]}" tmux kill-server 2>/dev/null; env "${live_env[@]}" TMUX_TMPDIR="$tmp/home/w-acme/tmux" tmux kill-server 2>/dev/null; rm -rf "$tmp"' EXIT
 cat >"$tmp/bin/claude" <<EOF
 #!$BASH
-printf 'window=%s pwd=%s user=%s args=%s\n' "\$(tmux display-message -p '#{window_name}')" "\$(pwd -P)" "\${STUB_USER:-tester}" "\$*" >>"$tmp/ran"
-tmux kill-window
+printf 'window=%s pwd=%s user=%s args=%s\n' "\$(tmux display-message -p -t "\$TMUX_PANE" '#{window_name}')" "\$(pwd -P)" "\${STUB_USER:-tester}" "\$*" >>"$tmp/ran"
+tmux kill-window -t "\$TMUX_PANE"
 EOF
 chmod +x "$tmp/bin/claude"; : >"$tmp/ran" ; : >"$tmp/sudo.args"
 # live <want-regex> <cwd> [VAR=value...] <ajmux> [args...]
@@ -187,12 +189,28 @@ live "^window=claude pwd=$root/acme/app user=tester args=--worktree$" "$tmp/else
 # A session that already exists gets a new window.
 env "${live_env[@]}" tmux new-session -d -s acme-infra -c "$tmp" 'sleep 60'
 live "^window=claude pwd=$root/acme/infra user=tester args=-p hi$" "$tmp/elsewhere" "$ajmux" acme/infra -p hi
+# A session another terminal shows (a control-mode client stands in for it)
+# gets its window, and this terminal a grouped view of its own,
+# <session>-<pid>, so the two never follow each other. The attach fails
+# here (no terminal), so the view stays and is looked for, then killed; a
+# real attach sets destroy-unattached on it.
+sleep 30 | env "${live_env[@]}" tmux -C attach-session -t acme-infra >/dev/null 2>&1 &
+ctl=$!; sleep 0.5
+live "^window=claude pwd=$root/acme/infra user=tester args=-p view$" "$tmp/elsewhere" "$ajmux" acme/infra -p view
+views=$(env "${live_env[@]}" tmux list-sessions -F '#{session_name} #{session_group}' 2>/dev/null | grep -E '^acme-infra-[0-9]+ acme-infra$' || true)
+if [ "$(wc -l <<<"$views")" = 1 ] && [ -n "$views" ]; then pass=$((pass+1)); else
+  fail=$((fail+1)); echo "FAIL: want one grouped view acme-infra-<pid> in group acme-infra, got: $(env "${live_env[@]}" tmux list-sessions -F '#{session_name} #{session_group}' | tr '\n' ';')"; fi
+env "${live_env[@]}" tmux kill-session -t "=${views%% *}" 2>/dev/null; kill "$ctl" 2>/dev/null
+# No client on the session: no view is made, the attach targets the session.
+live "^window=claude pwd=$root/acme/infra user=tester args=-p plain$" "$tmp/elsewhere" "$ajmux" acme/infra -p plain
+if env "${live_env[@]}" tmux list-sessions -F '#{session_name}' | grep -q -E '^acme-infra-[0-9]+$'; then
+  fail=$((fail+1)); echo "FAIL: a view was made with no client on acme-infra"; else pass=$((pass+1)); fi
 # No claude where ajmux runs: the window runs the repo shell's, through the
 # stub direnv.
 cat >"$root/acme/cli/.shell/bin/claude" <<EOF
 #!$BASH
-printf 'shell-claude window=%s\n' "\$(tmux display-message -p '#{window_name}')" >>"$tmp/ran"
-tmux kill-window
+printf 'shell-claude window=%s\n' "\$(tmux display-message -p -t "\$TMUX_PANE" '#{window_name}')" >>"$tmp/ran"
+tmux kill-window -t "\$TMUX_PANE"
 EOF
 live '^shell-claude window=claude$' "$tmp/elsewhere" PATH="$tmp/ubin:$tmp/dbin:$tmux_path" "$ajmux" acme/cli
 # The handover end to end: sudo gets exactly the name and the claude args,

@@ -31,9 +31,15 @@ where the hard rules live.
    worker's tmux server creates or attaches the session
    `<org>-<repo>` and opens one window named `claude` per call. A
    worker naming another org's repo is refused. `ajmux -n ...` prints
-   the resolution, or the handover line, and starts nothing. From inside
-   the worker's tmux it switches to the session; from your terminal it
-   attaches. Prefix + `d` detaches and leaves the session running.
+   the resolution, or the handover line, and starts nothing. Each
+   terminal gets its own view of the project's windows (a tmux session
+   group, since 2026-10-29): the first terminal the session itself, each
+   later one a view `<org>-<repo>-<pid>` over the same windows with its
+   own current window, gone when it detaches. So one VS Code tab per
+   Claude session works, and the tabs do not follow each other. From
+   inside the worker's tmux, `ajmux` moves that terminal to the new
+   window. Prefix + `d` detaches and leaves the session running; `exit`
+   in a window closes it for every terminal.
    `ajmux` takes `claude` from the PATH, else from the repo's devenv shell
    (`direnv exec <repo> claude`), else stops with a message naming
    `ai-jail.claudeCode.enable`. It exports `XDG_RUNTIME_DIR=/run/user/<uid>`
@@ -61,10 +67,13 @@ where the hard rules live.
    files get `--worktree`; the worktree lives under `.claude/worktrees/<name>`,
    has its own `.devenv/`, and its `.envrc` is auto-allowed only if it is
    byte-identical to the main checkout's (the env hook checks).
-5. When a session waits for you, its tmux window turns orange; the colour
-   is per user, so the worker's server colours its own windows. It clears
-   on your next prompt. If you do not see it, the Notification hook is not
-   firing; see troubleshooting.
+5. When a session waits for you, its tmux window turns orange: at the
+   end of its turn (`Stop`), at a permission prompt or dialog, and after
+   a minute idle (`Notification`); the colour is per user, so the
+   worker's server colours its own windows. It clears on your next
+   prompt. If you do not see it: a managed tree built before 2026-10-29
+   coloured only a window other than the current one (`aj upgrade`
+   fixes it); otherwise the hook is not firing, see troubleshooting.
 6. You commit and push. Agents stage (`git add`), diff and branch; the
    commit is yours (`allowLocalCommits` flips that per host). Read a
    worker's staged diff from your account through the group (0750 home):

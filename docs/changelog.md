@@ -5,6 +5,40 @@ happened and what was learned on the day.
 
 ## 2026-10-29
 
+- `ajmux` gives each terminal its own view: two VS Code tabs attached to
+  one project followed each other, since a tmux session has one current
+  window for all its clients. Now a terminal attaching a session another
+  terminal shows gets a grouped session `<session>-<pid>` over the same
+  windows, destroyed on detach, and the new window is opened with `-d`
+  and selected for that terminal only; from inside tmux the calling
+  terminal moves to the new window, or switches to the project's session
+  or a fresh view. Learned on a private server: `destroy-unattached on`
+  set on a session with no client destroys it at once, so it is set only
+  after the attach or switch; option commands reject the `=name` target
+  that `switch-client` takes; a bare `display-message` or `kill-window`
+  acts on the session's current window, not the caller's (the test stubs
+  now name their pane). Two `ajmux-test` cases cover the view; the
+  inside-tmux paths were probed by hand (verified).
+- The orange window showed nothing on the window being looked at: tmux
+  draws the current window's tab with `window-status-current-style`
+  alone whenever that option is not `default` (its `status-format[0]`),
+  and on nixos-wsl it is `underscore`, so the colour the hook put in
+  `window-status-style` appeared only after switching to another window.
+  `tmux-notify.sh` now sets and unsets both styles; the rendered status
+  line was checked on the live server (verified). Learned on the way: a
+  by-hand call needs the word `waiting` (not `wait`) and a shell inside
+  tmux, since the client finds the server through `TMUX`. The hook
+  also runs on `Stop` now: the hooks reference puts `idle_prompt` about
+  60 s after a turn ends and `permission_prompt` about 6 s into a prompt,
+  so a session that had merely finished its turn coloured nothing; `Stop`
+  does not fire on an interrupt, where `idle_prompt` still covers. Live
+  after `aj upgrade`. The hook firing from a live session is observed
+  the same evening: one `claude -p` with the pane's `TMUX` and
+  `TMUX_PANE` left window 0 of `local-ai-jailer` with both styles set
+  (verified); `aj check` case 20 (`tmux-notify`) does that run from the
+  check's own window from now on, so the orange window is a line in
+  the check, not a thing to watch for by hand. The debug log names no
+  command hook, so the case reads the window options back.
 - `v0.1.0` tagged on `main` at `ec2307d` and pushed, evening: the first
   release, a tag with the README true (the release definition decided
   the same day). The sprint's `docs/tasklist.md` is folded into the

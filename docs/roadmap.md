@@ -161,10 +161,13 @@ The gaps, in order:
    laptop, 2026-10-22).
    Left: an `ajmux` session in the test repo, the trust dialog accepted
    once, hooks seen firing and the tmux window turning orange (`ajmux` on
-   the checkout runs on the Ubuntu laptop since 2026-10-22; the hook
-   firing and the orange window are still unobserved). The
-   Notification matcher names are verified against the hooks reference;
-   whether the event fires in tmux is not.
+   the checkout runs on the Ubuntu laptop since 2026-10-22; the orange
+   window is observed on 2026-10-29 from a `claude -p` inside tmux, once
+   the current window's tab got `window-status-current-style` too and
+   `Stop` called the hook, and `aj check` case 20 runs that from now on;
+   left is seeing it once from the `ajmux` TUI itself). The Notification
+   matcher names are verified against the hooks reference; whether
+   those events fire in tmux is not.
 2. **Sandbox hardening**, the rest of the 2026-10-20 audit (runbook
    section 8, "Sandbox limits"); the strict allowlist, the literal
    `denyWrite` paths and the environment scrub are done. Each item is a

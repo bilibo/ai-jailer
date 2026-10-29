@@ -11,10 +11,11 @@
 # after a Claude Code upgrade is the point of this file. --parse prints what
 # the verdicts see in a saved transcript (tests/check-parser-test.sh).
 #
-# Costs API calls (one login pre-flight, then eighteen short sessions, nineteen for a worker, where
-# case 18 runs, two more in a fenced repo, two more when case 2 fails; one
-# fewer outside tmux, where the second half of case 16 is skipped, and one
-# fewer in a repo that keeps its own .envrc, where case 19 is skipped). Run it
+# Costs API calls (one login pre-flight, then nineteen short sessions, twenty for a worker, where
+# case 18 runs, two more in a fenced repo, two more when case 2 fails; two
+# fewer outside tmux, where the second half of case 16 and case 20 are
+# skipped, and one fewer in a repo that keeps its own .envrc, where case 19
+# is skipped). Run it
 # from your own terminal, never from inside a session: the nested-session
 # rule would deny some of the commands it runs. Transcripts stay in a temp
 # directory, printed at the end, so the exact refusal text can be read.
@@ -410,6 +411,34 @@ else
   : >"$local_file"; trap 'rm -f "$local_file"' EXIT
   run_cmd devenv-local 'echo live-check-ran' 'devenv.local.yaml is refused in a jail' '^live-check-ran'
   rm -f "$local_file"; trap - EXIT
+fi
+
+# 20. The orange window: when a session's turn ends, the managed Stop hook
+# runs tmux-notify.sh, which sets both window-status styles of the window
+# the session runs in (the current window's tab is drawn from
+# window-status-current-style alone when that is not `default`,
+# 2026-10-29). The session inherits this script's TMUX and TMUX_PANE, so
+# the window judged is the one the check runs in; both options are read
+# back as set on that window, which is independent of the status format,
+# then put back as they were. The clear half (UserPromptSubmit) cannot be
+# seen from the end state, since Stop recolours after it; it is verified by
+# hand (docs/verified.md, 2026-10-29). Outside tmux there is no window:
+# skipped with the reason.
+if dry tmux-notify "claude -p 'Reply with the single word ok.' in this pane; window-status styles read back"; then :
+elif [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
+  skip=$((skip+1)); printf 'skip  %-16s not inside tmux ($TMUX unset): no window to colour\n' tmux-notify
+else
+  want="bg=colour214,fg=black"
+  ws_before=$(tmux show-window-options -t "$TMUX_PANE" 2>/dev/null | grep -E '^window-status(-current)?-style ' || true)
+  tmux set-window-option -t "$TMUX_PANE" -u window-status-style 2>/dev/null
+  tmux set-window-option -t "$TMUX_PANE" -u window-status-current-style 2>/dev/null
+  transcript tmux-notify 'Reply with the single word ok.' >/dev/null
+  ws_got=$(tmux show-window-options -t "$TMUX_PANE" 2>/dev/null | grep -E '^window-status(-current)?-style ' | tr '\n' ' ')
+  if [ "$ws_got" = "window-status-current-style $want window-status-style $want " ]; then verdict tmux-notify 0 "Stop coloured window $(tmux display-message -p -t "$TMUX_PANE" '#S:#I' 2>/dev/null): $ws_got"
+  else verdict tmux-notify 1 "window styles after the session: '${ws_got:-none}', want both $want (transcript: $out/tmux-notify.jsonl)"; fi
+  tmux set-window-option -t "$TMUX_PANE" -u window-status-style 2>/dev/null
+  tmux set-window-option -t "$TMUX_PANE" -u window-status-current-style 2>/dev/null
+  while read -r opt val; do [ -n "$opt" ] && tmux set-window-option -t "$TMUX_PANE" "$opt" "$val" 2>/dev/null; done <<<"$ws_before"
 fi
 
 [ "$DRY_RUN" = 0 ] || { echo "aj check: dry run, no session started, $skip skipped"; exit 0; }

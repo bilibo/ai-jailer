@@ -141,14 +141,48 @@ pkgs.writeShellApplication {
     # Keep the window open after claude exits so the pane can be inspected.
     window="$command; exec \"\$SHELL\""
     if tmux has-session -t "=$session" 2>/dev/null; then
-      tmux new-window -t "=$session" -n claude -c "$repo" "$window"
+      wid=$(tmux new-window -d -P -F '#{window_id}' -t "=$session" -n claude -c "$repo" "$window")
     else
-      tmux new-session -d -s "$session" -n claude -c "$repo" "$window"
+      wid=$(tmux new-session -d -P -F '#{window_id}' -s "$session" -n claude -c "$repo" "$window")
     fi
+
+    # Which terminal shows the new window. A terminal is one tmux client,
+    # and a session has one current window for all its clients, so two
+    # terminals attached to the same session always show the same window
+    # (seen 2026-10-29: two VS Code tabs following each other). So each
+    # terminal gets a session of its own over the project's windows, a
+    # session group: the first terminal the project's session itself,
+    # each later one a view named <session>-<pid> that is destroyed when
+    # it detaches (destroy-unattached, set only once the client is on the
+    # view: set on a session with no client it destroys it at once, and
+    # option commands do not take the `=name` target, 2026-10-29). The new
+    # window is made with -d and selected for this client alone, so the
+    # other terminals keep their window. The window colour from
+    # tmux-notify.sh is the window's, so it shows in every view's status
+    # line. From inside tmux a client already on the project's session or
+    # one of its views just moves to the new window; one on another
+    # project's session switches to the project's session, or to a fresh
+    # view when that session is shown elsewhere.
+    showing() { [ -n "$(tmux list-clients -t "=$session" 2>/dev/null)" ]; }
+    view="$session-$$"
     if [ -n "''${TMUX:-}" ]; then
-      exec tmux switch-client -t "=$session"
+      group=$(tmux display-message -p -t "=$session" '#{session_group}')
+      if [ "$(tmux display-message -p '#{session_name}')" = "$session" ] \
+        || { [ -n "$group" ] && [ "$(tmux display-message -p '#{session_group}')" = "$group" ]; }; then
+        exec tmux select-window -t "$wid"
+      elif showing; then
+        tmux new-session -d -t "$session" -s "$view"
+        tmux switch-client -t "=$view:$wid"
+        exec tmux set-option -t "$view" destroy-unattached on
+      else
+        exec tmux switch-client -t "=$session:$wid"
+      fi
+    elif showing; then
+      tmux new-session -d -t "$session" -s "$view"
+      tmux select-window -t "=$view:$wid"
+      exec tmux attach-session -t "=$view" \; set-option destroy-unattached on
     else
-      exec tmux attach-session -t "=$session"
+      exec tmux attach-session -t "=$session" \; select-window -t "$wid"
     fi
   '';
 }

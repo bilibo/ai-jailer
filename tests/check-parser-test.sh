@@ -47,7 +47,7 @@ if [ "$rc" = 66 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: a m
 # from the repo's shell; the dry run lists the cases regardless.
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 tmp=$(cd "$tmp" && pwd -P)
-all_cases="sandbox devenv-env git-commit cred-read config-write edit-envrc nested-flags ssh-agent home-write hooks-registered repo-write env-deny cred-sandbox git-hookspath tmux-socket tmux-display sudo-text home-fence devenv-local"
+all_cases="sandbox devenv-env git-commit cred-read config-write edit-envrc nested-flags ssh-agent home-write hooks-registered repo-write env-deny cred-sandbox git-hookspath tmux-socket tmux-display sudo-text home-fence devenv-local tmux-notify"
 fake_repo() { # fake_repo <name> <settings JSON | @symlink target>
   mkdir -p "$tmp/$1/.claude"; : >"$tmp/$1/.envrc"
   case "$2" in @*) ln -s "${2#@}" "$tmp/$1/.claude/settings.json" ;; *) printf '%s\n' "$2" >"$tmp/$1/.claude/settings.json" ;; esac
