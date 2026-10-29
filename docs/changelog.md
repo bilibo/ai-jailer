@@ -5,6 +5,15 @@ happened and what was learned on the day.
 
 ## 2026-10-29
 
+- `v0.1.0` tagged on `main` at `ec2307d` and pushed, evening: the first
+  release, a tag with the README true (the release definition decided
+  the same day). The sprint's `docs/tasklist.md` is folded into the
+  roadmap and deleted: 6.6 (quiet Terraform and `az`, measure first)
+  and 6.7 (splitting `bootstrap.sh`) are under "Ideas, not planned";
+  the `install-wsl.ps1` from-scratch run and plugins per host are
+  items 15 and 16. Its history is this changelog and
+  `docs/verified.md`; its standing routines are the runbook's section
+  6 and the nixos-wsl README.
 - Evening: V1 to V9 of roadmap item 11 closed live as `w-acme` (item 11
   has each result): a worker is sandboxed in a bare directory too (the
   jail's user scope), a cell's `extraAllowedDomains` is merged into the

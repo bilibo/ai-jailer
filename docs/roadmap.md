@@ -820,7 +820,8 @@ The gaps, in order:
       auth login` as `w-acme` (done the same day; `claude /login` on a
       first launch prompts twice), then `aj check` again. V14: not run; the
       session's permission classifier refuses editing a worker's
-      settings, so the human runs it (commands in the tasklist).
+      settings, so the human runs it (the commands are in the V14 row
+      of `docs/verified.md`).
       V13 second run, logged in: 9 passed, 8 failed, all eight
       `bwrap: execvp /bin/bash: No such file or directory`: the day's
       `Read(**/.devenv/**)` jail rule, merged by Claude Code into the
@@ -923,6 +924,36 @@ The gaps, in order:
     and `push` as git subcommands (`git commitlint` passes; `git
     commit-tree` stays a jail rule).
 
+15. **The nixos-wsl `install-wsl.ps1` run from scratch (2026-10-29).**
+    Left out of the release on purpose: `v0.1.0` (2026-10-29) is a tag
+    on `main` with the README true, and `bilibo/nixos-wsl` has not been
+    installed end to end by `install-wsl.ps1` since the rename
+    (2026-10-28) and the one-route bootstrap (item 12). The human's, on
+    a Windows machine without the distro: the script as the nixos-wsl
+    README says, then from this checkout's shell `aj bootstrap
+    --workers <a,b>`, `verify.sh`, `aj doctor` as the owner and as a
+    worker, `aj init` and `aj check` as a worker. Each step that fails
+    is a changelog line and a fix in whichever repo owns it; the result
+    is a row in `docs/verified.md` behind the README's NixOS-WSL
+    host-table line.
+
+16. **Plugins per host (2026-10-29).** Decided 2026-10-29 late evening
+    (item 14): plugins yes, JavaScript no, nothing for the release. The
+    law keeps `allowManagedModsOnly`, `disableSideloadFlags` and
+    `strictKnownMarketplaces`, which `host.nix`'s
+    `extraKnownMarketplaces` fills and which is `[]` by default, the
+    list that blocks every plugin today, the official marketplace
+    included. When a host wants one, two halves, never one: the
+    marketplaces listed in `host.nix` (the official one is `{ source =
+    "github"; repo = "anthropics/claude-plugins-official"; }`), and the
+    law registering each one with Claude Code's own
+    `extraKnownMarketplaces` key, which the law does not write today
+    (`managed-tree-test` asserts its absence), because a machine that
+    once ran under `[]` never re-registers the official marketplace by
+    itself. The test turns around then: the two keys carry the same
+    list. Starts when the first cell needs a plugin; until then the
+    empty list stands.
+
 ## Open questions
 
 - Notification hook: the matcher names (`permission_prompt`, `idle_prompt`,
@@ -1023,3 +1054,27 @@ The gaps, in order:
   with `recursiveUpdate`, either replaces ai-jailer's own list, and
   only `aj init`'s settings test notices, once. Today
   `docs/project-devenv.md` warns against it.
+- Quiet Terraform and `az` in cells (2026-10-29; measure first): `env`
+  in `devenv/devenv.nix` (`lib.mkIf cfg.enable`, `lib.mkDefault` per
+  key: `TF_CLI_ARGS_plan = "-no-color -compact-warnings"`,
+  `TF_CLI_ARGS_{validate,init,show} = "-no-color"`,
+  `AZURE_CORE_ONLY_SHOW_ERRORS = "true"`, `AZURE_CORE_NO_COLOR =
+  "true"`; never a global `TF_CLI_ARGS`, `-compact-warnings` breaks
+  `init` and `workspace`; Terraform ignores `NO_COLOR`). The plumbing
+  is there: the hook's `$CLAUDE_ENV_FILE` preamble runs `direnv export`
+  before every Bash call. But the Bash tool has no TTY (`[ -t 1 ]` is
+  false, checked 2026-10-29) and both tools drop colour without one, so
+  the colour half is moot; what is left is `-compact-warnings` and the
+  az preview and survey banners. Only after the first `terraform plan`
+  or `az` run in a cell shows the noise in a transcript (`aj check`
+  keeps them under the `transcripts:` directory it prints).
+- Splitting `pkgs/aj/bootstrap.sh` (1,356 lines on 2026-10-29) into
+  common, bootstrap, doctor and reset. It helps only factory sessions
+  that edit doctor or reset, and the cut is not clean: `report()` is
+  called by `doctor` and by `bootstrap|upgrade`, so it moves to common
+  or doctor's part is in bootstrap's build too. If ever done: `usage()`
+  reads its own file's header up to the first `# shellcheck` line, so
+  the per-command header comes first in the merged text; `CMD` from
+  `AI_JAILER_CMD` (`pkgs/aj.nix`) and the dispatch stay;
+  `tests/aj-bootstrap-test.sh` and `tests/aj-doctor-test.sh` pass
+  unchanged. Only if the file keeps growing.
