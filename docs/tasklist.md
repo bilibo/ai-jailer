@@ -107,7 +107,24 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
       compared either way.
 - [ ] The three managed-only keys (roadmap item 14, last box): bypass
       mode off, `allowManagedHooksOnly`, the mod policy; each a yes/no
-      from you, then a dated roadmap line.
+      from you, then a dated roadmap line. Bypass mode: kept, verified
+      2026-10-29 evening (`docs/verified.md`). The other two, with the
+      docs read (roadmap item 14 has the detail): hooks run outside the
+      sandbox and deny rules do not cover them, so `allowManagedHooksOnly`
+      is the jail's wall against an extra hook, keep; `allowManagedModsOnly`
+      is exactly "no JavaScript", keep; plugins are blocked by
+      `strictKnownMarketplaces = []`, so list the marketplaces in
+      `host.nix` to allow them (the official one is
+      `{ source = "github"; repo = "anthropics/claude-plugins-official"; }`,
+      and a machine that once ran under `[]` registers it again only
+      through an `extraKnownMarketplaces` entry). Yes/no from Raul on
+      each, then the `host.nix` list.
+- [ ] New, 2026-10-29 evening: MCP and LSP servers run outside the
+      sandbox and nothing in the law restricts them; `.mcp.json` is not
+      a protected path (roadmap item 14, last box). A decision before
+      the tag, or a dated line saying it is accepted for now.
+- [x] The `.terraform` Read rule: dropped 2026-10-29 evening (roadmap
+      item 14 has the line; `managed-tree-test` asserts the absence).
 - [x] Review the diff, commit, push (`c1e9b69`, 2026-10-29 13:06).
 - [x] In `/etc/nixos`: `nix flake update ai-jailer && nh os switch`
       done 2026-10-29 evening; `verify.sh` 37 ok, 0 failed. The README

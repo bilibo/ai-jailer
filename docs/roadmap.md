@@ -852,17 +852,55 @@ The gaps, in order:
       hook-test cases: a mode of the worker's own passes, an added
       `permissions.allow` is still refused. `disableBypassPermissionsMode`
       stays compared.
-    - [ ] `Read(**/.terraform/**)` in the jail: the same merge masks every
+    - [x] `Read(**/.terraform/**)` in the jail: the same merge masks every
       match with a tmpfs, so a cell with `.terraform/providers` would lose
       them inside the sandbox and `terraform plan` could not load providers
       (found 2026-10-29, not yet seen in a cell: `acme/infra` has no
       `.terraform`). Decide: drop the rule (the hook's L2 blocks state
       writes already; a `denyWrite` on `.terraform` would keep the files
       safe without hiding them), or keep it until the first terraform cell
-      shows the failure.
+      shows the failure. Dropped, 2026-10-29 evening (the owner's): the
+      state file inside that directory is still covered by
+      `Read(**/*.tfstate)`, the hook's rule 2 blocks state writes, and the
+      providers are not secret. `tests/managed-tree-test.sh` asserts the
+      rule's absence from the law.
     - [ ] Each managed-only key in the law, decided on its own: bypass
       mode off, `allowManagedHooksOnly`, the mod policy. All three bind
-      the jailer today.
+      the jailer today. Bypass mode off: kept and verified 2026-10-29
+      evening (`docs/verified.md`): as `w-acme`,
+      `--dangerously-skip-permissions` and `--permission-mode
+      bypassPermissions` are downgraded silently under `-p`, the debug
+      log says `bypassPermissions mode is disabled by settings`, the
+      command ran sandboxed. The other two, from the docs the same
+      evening (settings reference, hooks, plugins/security,
+      plugins/org, plugins/mods/admin): `allowManagedHooksOnly` is
+      binary; with it off, hooks from every scope and plugin merge and
+      managed hooks still cannot be removed by a lower scope, so the key
+      buys only "no extra hooks". That is the security half: hook
+      commands run outside the sandbox with the user's full permissions
+      and `permissions.deny` does not cover them, so an extra hook is an
+      unsandboxed shell for whoever can write a settings file. Keep.
+      The mod policy is three keys: `allowManagedModsOnly` restricts
+      mods only (the JavaScript a plugin runs inside Claude Code), not
+      skills, commands, agents, `hooks.json`, MCP or LSP servers;
+      `strictKnownMarketplaces = []` is what blocks every plugin,
+      the official marketplace included; `disableSideloadFlags` rejects
+      `--plugin-dir`, `--plugin-url`, `--agents` and `--mcp-config`.
+      Owner's wish: plugins yes, JavaScript no. Proposed: keep
+      `allowManagedModsOnly` and `disableSideloadFlags`, list the
+      marketplaces in `host.nix` (`extraKnownMarketplaces`).
+    - [ ] Found in the same reading, 2026-10-29: MCP servers (stdio),
+      LSP servers, monitors and hooks run outside the sandbox, and
+      "permission rules and sandbox cover the tool calls Claude makes,
+      not the code a plugin runs by itself". The law has no
+      `allowedMcpServers`, `allowManagedMcpServersOnly` or
+      `deniedMcpServers`, and a cell's `.mcp.json` is not in the
+      protected paths, so a plugin's or a repo's MCP server is a way
+      out of the sandbox for a worker today. Decide: `allowedMcpServers`
+      in the law (empty, or the owner's remote servers) with
+      `allowManagedMcpServersOnly`, and `.mcp.json` into
+      `projectConfigPaths`; the owner's sessions are bound by the same
+      law.
 
     Added to the law the same day (the owner's): `git commit`, for
     everyone, the jailer included. The host's `allowLocalCommits`

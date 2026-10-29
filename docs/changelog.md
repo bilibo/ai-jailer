@@ -12,6 +12,16 @@ happened and what was learned on the day.
   `sudo -u w-acme -i tmux attach` (the socket dir is 0700, nothing
   shared), the pane carries `XDG_RUNTIME_DIR`, other homes are denied,
   no skill sync in the debug log.
+- `Read(**/.terraform/**)` dropped from the deny rules (the owner's,
+  evening): it would mask a cell's providers inside the sandbox, the
+  state file in that directory is covered by `**/*.tfstate`, and the hook
+  blocks state writes. `managed-tree-test` asserts the absence.
+- Bypass mode verified off for a worker (debug log `bypassPermissions
+  mode is disabled by settings`, the command still sandboxed); kept in
+  the law.
+- New `docs/verified.md`: one row per live check, with date, how and
+  result, so README and runbook claims can point at evidence. Today's
+  rows are in; the runbook's V1 to V9 table points there.
 - Found during V4: a mode switch in the TUI writes
   `permissions.defaultMode` into the worker's user file; the jail pinned
   it and the hook locked the worker out (V14's message). The jail drops

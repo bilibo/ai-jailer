@@ -22,6 +22,9 @@ human cannot reach.
   what exists.
 - `docs/roadmap.md`: what is next, in order.
 - `docs/changelog.md`: dated history, newest first, with what was learned.
+- `docs/verified.md`: one row per live check (date, claim, how, result);
+  the evidence a README or runbook claim points at. Rows come from runs
+  on a host, never from reading the code.
 - `docs/sessions.md`: how sessions coordinate (tiers, proposals).
 - `docs/runbook.md`: what the operator types; written for the human.
 - `docs/project-devenv.md`: a project's `devenv.nix`, for a human who

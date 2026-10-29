@@ -258,8 +258,8 @@ once as the owner in this checkout as well.
 repo shell's (`ai-jail.claudeCode.enable`), else the host's. The
 `claude:` line of its header, `--dry-run` included, says which.
 
-First run on a host, pending 2026-10-27 (the owner runs these; none has an
-answer yet; the answers go in `docs/changelog.md`):
+First run on a host (the owner runs these; all nine answered 2026-10-29,
+the results are rows in `docs/verified.md`):
 
 | # | Check |
 | --- | --- |

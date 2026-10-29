@@ -40,7 +40,6 @@ let
     "Read(**/*.tfvars.json)"
     "Read(**/*.tfstate)"
     "Read(**/*.tfstate.backup)"
-    "Read(**/.terraform/**)"
     "Read(**/.git/devenv-base/**)"
     "Read(~/.azure/**)"
     "Read(~/.ssh/**)"
@@ -55,8 +54,10 @@ let
   # directories, so `.devenv/profile` and `.devenv/bash-bash` put a tmpfs
   # over the devenv profile and the bash package in the store, and every
   # sandboxed command died with `bwrap: execvp /bin/bash: No such file`.
-  # `.terraform/**` above does the same to a cell's providers once it has
-  # them (roadmap item 14).
+  # `Read(**/.terraform/**)` went the same way (dropped 2026-10-29, roadmap
+  # item 14): it would mask a cell's providers, and the state file inside
+  # that directory is covered by `**/*.tfstate` above; the hook's rule 2
+  # blocks state writes.
 
   credentials =
     credentialReads
