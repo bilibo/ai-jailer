@@ -50,20 +50,38 @@ happened and what was learned on the day.
   (promised, not done) and writes `.ignore` with `devenv.lock`, so a
   ripgrep-backed Grep skips the tracked lockfile; the factory has the
   same `.ignore`, since `scripts/install.sh` runs `aj init` here.
-- Workers can no longer Read or Edit `.devenv/` and `.direnv/` (the
-  evaluated profile and env dumps: large, nothing a model needs). A jail
-  `Read` deny, not a sandbox `denyRead`, so Bash still runs
-  `.devenv/profile/bin`; `lib/deny-rules.nix` has a `workerReads` list
-  for rules that are the workers' and not the law's. The tests now pin
-  the `.terraform` rule too.
+- Tried and reverted the same day: `Read(**/.devenv/**)` and
+  `Read(**/.direnv/**)` for the workers, to keep a model out of the
+  evaluated profile and env dumps. Claude Code merges `Read(...)` deny
+  rules into the sandbox's `denyRead` (its settings reference says so)
+  and expands the glob through symlinked directories, so
+  `.devenv/profile` and `.devenv/bash-bash` put an empty tmpfs over the
+  devenv profile and the bash package in the store, and every sandboxed
+  command died with `bwrap: execvp /bin/bash: No such file or directory`
+  (V13's second run: 9 passed, 8 failed, the eight all this). Found
+  with `strace -f -e trace=execve` around the worker's `claude -p`,
+  which shows the bwrap mounts; `--debug-file` logs nothing of the
+  sandbox, and `--settings` cannot swap `sandbox.bwrapPath` under the
+  managed tree. The test now pins that the jail has no such rule and
+  still pins `.terraform`. Open: `Read(**/.terraform/**)` will do the
+  same to a cell's `.terraform/providers` once one exists (roadmap item
+  14).
 - CLAUDE.md's Checks: an unsandboxed session runs `nix flake check` on
   the checkout (25 s, exit 0 today); the tar copy is the sandboxed
   worker's fallback, `-L` only after a failure.
 - Live, from the jailer session: V15 of the release gate passes; the
   `Read(...)` deny binds the unsandboxed jailer's Read and Write inside
   the project directory, and `**/` patterns stop at that directory (the
-  roadmap has the detail). V13 waits on the worker's first `claude
-  /login`; V14 on the human.
+  roadmap has the detail). V13 waited on the worker's first login (`claude
+  auth login`; `claude /login` on a first launch prompts twice, the
+  onboarding sign-in and then the command) and on the `.devenv` revert
+  above; its third run is `17 passed, 0 failed, 1 skipped`. V14, run by
+  the human: a worker whose `~/.claude/settings.json` lost a deny rule
+  had every tool refused (`worker without a jail: ... differs from
+  /etc/claude-code/jail-settings.json at permissions`), doctor said the
+  same, and `aj bootstrap --no-root --yes` as that worker rewrote the
+  jail. Item 14's live-run box is closed; V12 (item 13) and the three
+  managed-only keys stay open.
 
 ## 2026-10-28
 

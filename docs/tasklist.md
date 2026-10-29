@@ -42,12 +42,15 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
 
 ### Human steps left on the live gate (the session cannot do these)
 
-- [ ] V13: `sudo -u w-acme -i claude /login` (a TTY; the worker has never
-      logged in), then `sudo -u w-acme -i aj check /home/w-acme/code/git/acme/infra`.
+- [x] V13: passes, 2026-10-29 afternoon: `aj check: 17 passed, 0 failed,
+      1 skipped` as `w-acme` (the skip is tmux-display outside tmux). The
+      login form that prompts once is `claude auth login`; `claude /login`
+      on a first launch prompts twice (onboarding, then the command).
       Expect: no `FAIL  login`, and the cases pass (the `sandbox`,
       `cred-read`, `sudo-text`, `home-fence` lines are the ones that
       prove the jail). Paste the summary line into roadmap item 14.
-- [ ] V14, as `w-acme` (the session's classifier refuses this edit):
+- [x] V14 passes, 2026-10-29 afternoon (roadmap item 14 has the transcript).
+      As run, as `w-acme`:
       `sudo -u w-acme -i sh -c 'cp ~/.claude/settings.json /tmp/s.bak && jq "del(.permissions.deny[0])" /tmp/s.bak > ~/.claude/settings.json'`,
       then `sudo -u w-acme -i sh -c 'cd ~/code/git/acme/infra && claude -p "run pwd" 2>&1 | tail -3'`.
       Expect `env-guard: worker without a jail: ... differs from ... (aj bootstrap rewrites it ...)`.
@@ -113,9 +116,9 @@ V15, plus V1 to V9 of item 11 and V10, V11 of item 13 as narrowed. Run
 them in `acme/infra` as `w-acme`, paste results into the roadmap's
 boxes, tick what passes.
 
-- [ ] V13: a worker session starts, `aj check` passes as `w-acme`
+- [x] V13: a worker session starts, `aj check` passes as `w-acme`
       (API calls; the first live `aj check` transcript is V8).
-- [ ] V14: edit `~/.claude/settings.json` as the worker (drop a deny
+- [x] V14: edit `~/.claude/settings.json` as the worker (drop a deny
       rule): every tool refused with the hook's `differs from` message;
       `aj bootstrap` as that worker repairs it.
 - [x] V15: a jailer session in this checkout runs `nix flake check`,
@@ -206,7 +209,9 @@ section 5 or when touching the file anyway.
       the tracked lockfile (gitignore does not cover tracked files).
       Test: a "plans .ignore" dry-run check next to `tests/aj-init-test.sh`
       line 44.
-- [x] 6.5 `lib/deny-rules.nix`: add `"Read(**/.devenv/**)"` and
+- [x] 6.5 (done, then reverted the same day: a `Read(...)` deny glob feeds
+      the sandbox's denyRead and masked the store through `.devenv/`'s
+      symlinks; changelog 2026-10-29) `lib/deny-rules.nix`: add `"Read(**/.devenv/**)"` and
       `"Read(**/.direnv/**)"` to the credentials/`jail` side, not the
       law (`tests/managed-tree-test.sh` 34 asserts the law's shape; it
       would still pass, but the rule is the workers'). Not in

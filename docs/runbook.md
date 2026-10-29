@@ -102,9 +102,10 @@ sudo -u w-acme -i aj init acme/infra      # a new directory under the worker's c
 sudo -u w-acme -i aj init <path>          # an existing repo
 ```
 
-The worker's first `claude` needs a login once: `sudo -u w-acme -i claude`,
-then sign in with the Claude account for that org's work (each worker
-has its own login in its own `~/.claude`; untested live). Clone over
+A worker needs a login once: `sudo -u w-acme -i claude auth login`, with
+the Claude account for that org's work (each worker has its own login in
+its own `~/.claude`; done live 2026-10-29). `claude /login` on a first
+launch prompts twice, the onboarding sign-in and then the command. Clone over
 HTTPS; the worker holds no SSH key.
 
 `aj init` does steps 1 to 5 and 7, then runs section 5's unit tests on

@@ -49,19 +49,17 @@ let
     "Read(~/.claude/.credentials.json)"
     "Read(~/.claude.json)"
   ];
-  # The workers' half of the Reads, not the law's. `.devenv/` and `.direnv/`
-  # hold the evaluated profile and env dumps, which a model does not need to
-  # read and which are large. Bash must still run binaries under
-  # `.devenv/profile/bin`, which is why this is a Read deny and not
-  # `sandbox.filesystem.denyRead` in lib/settings.nix.
-  workerReads = [
-    "Read(**/.devenv/**)"
-    "Read(**/.direnv/**)"
-  ];
+  # No `Read(**/.devenv/**)` or `Read(**/.direnv/**)` for the workers (tried
+  # and reverted 2026-10-29): Claude Code merges Read(...) deny rules into
+  # the sandbox's denyRead and expands the glob through symlinked
+  # directories, so `.devenv/profile` and `.devenv/bash-bash` put a tmpfs
+  # over the devenv profile and the bash package in the store, and every
+  # sandboxed command died with `bwrap: execvp /bin/bash: No such file`.
+  # `.terraform/**` above does the same to a cell's providers once it has
+  # them (roadmap item 14).
 
   credentials =
     credentialReads
-    ++ workerReads
     ++ bash [
       "az login"
       "az logout"

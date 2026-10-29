@@ -199,7 +199,7 @@ if [ "$DRY_RUN" = 0 ]; then
   apierr=$(jq -r 'select(.type? == "result" and .is_error? == true and .terminal_reason? == "api_error") | .result' "$out/login.jsonl" 2>/dev/null | head -1)
   if [ -n "$apierr" ]; then
     case "$apierr" in
-      *"Not logged in"*) verdict login 1 "claude is not logged in as $(id -un): run \`claude /login\` as this user (or set an API key), then rerun" ;;
+      *"Not logged in"*) verdict login 1 "claude is not logged in as $(id -un): run \`claude auth login\` as this user (or set an API key), then rerun" ;;
       *) verdict login 1 "claude's API call failed (api error: $apierr); fix that, then rerun" ;;
     esac
     echo "aj check: $pass passed, $fail failed, $skip skipped, remaining cases not run (transcripts in $out)"; exit 1

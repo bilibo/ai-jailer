@@ -739,7 +739,7 @@ The gaps, in order:
       `managed-host-eval`, `devenv-module-eval`); statix and deadnix clean
       on the changed Nix files. The by-hand run's 23 bootstrap failures were
       that session's sandbox. Left: the human's review and commit.
-    - [ ] The first live run (item 12's gate), with V12 of item 13 and:
+    - [x] The first live run (item 12's gate), with V12 of item 13 and:
       V13 a worker session with the jail written starts and `aj check`
       passes as that worker; V14 a worker whose `~/.claude/settings.json`
       was edited (a deny rule removed) has every tool refused with the
@@ -756,9 +756,34 @@ The gaps, in order:
       never logged in, so `aj check` ended `1 passed, 16 failed`, every
       one a `Not logged in · Please run /login` result; `aj check` now
       says that once (login pre-flight). Left for the human: `claude
-      /login` as `w-acme`, then `aj check` again. V14: not run; the
+      auth login` as `w-acme` (done the same day; `claude /login` on a
+      first launch prompts twice), then `aj check` again. V14: not run; the
       session's permission classifier refuses editing a worker's
       settings, so the human runs it (commands in the tasklist).
+      V13 second run, logged in: 9 passed, 8 failed, all eight
+      `bwrap: execvp /bin/bash: No such file or directory`: the day's
+      `Read(**/.devenv/**)` jail rule, merged by Claude Code into the
+      sandbox's `denyRead` and expanded through `.devenv/profile` and
+      `.devenv/bash-bash`, had put a tmpfs over the bash package `/bin/bash`
+      points to on NixOS. Reverted; third run the same day: `aj check:
+      17 passed, 0 failed, 1 skipped` (tmux-display, outside tmux). V13
+      passes. V14, 2026-10-29 afternoon, the human's edit (`del
+      (.permissions.deny[0])` as `w-acme`): the session answered that it
+      cannot edit the file and named `aj bootstrap`; the hook on a plain
+      `pwd` said `worker without a jail: ~/.claude/settings.json differs
+      from /etc/claude-code/jail-settings.json at permissions (aj bootstrap
+      rewrites it; a session must not edit it)`, exit 2; `aj doctor` as the
+      worker: MISSING, same words. `aj bootstrap --no-root --yes` as the
+      worker rewrote the jail; hook exit 0, doctor 0 missing, a session
+      ran `pwd` again. V12 is item 13's, still open.
+    - [ ] `Read(**/.terraform/**)` in the jail: the same merge masks every
+      match with a tmpfs, so a cell with `.terraform/providers` would lose
+      them inside the sandbox and `terraform plan` could not load providers
+      (found 2026-10-29, not yet seen in a cell: `acme/infra` has no
+      `.terraform`). Decide: drop the rule (the hook's L2 blocks state
+      writes already; a `denyWrite` on `.terraform` would keep the files
+      safe without hiding them), or keep it until the first terraform cell
+      shows the failure.
     - [ ] Each managed-only key in the law, decided on its own: bypass
       mode off, `allowManagedHooksOnly`, the mod policy. All three bind
       the jailer today.
