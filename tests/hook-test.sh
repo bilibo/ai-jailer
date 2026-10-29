@@ -574,6 +574,8 @@ on="$jail_json" off='{"sandbox":{"enabled":false}}'
 wrun 2 "no user settings at all"         -     -    -
 wrun 0 "user carries the jail"           "$on" -    -
 wrun 0 "the jail plus the user's own keys" "$(jq -c '. + {model: "opus"}' <<<"$on")" - -
+wrun 0 "user picks a permission mode"    "$(jq -c '.permissions.defaultMode = "auto"' <<<"$on")" - -
+wrun 2 "user adds an allow rule"         "$(jq -c '.permissions.allow = ["Bash(x)"]' <<<"$on")" - -
 wrun 2 "user lacks a jail key"           "$(jq -c 'del(.permissions)' <<<"$on")" - -
 wrun 2 "user deny list differs"          "$(jq -c '.permissions.deny = []' <<<"$on")" - -
 wrun 2 "user deny list has an extra rule" "$(jq -c '.permissions.deny += ["Bash(x)"]' <<<"$on")" - -

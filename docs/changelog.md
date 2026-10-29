@@ -5,6 +5,21 @@ happened and what was learned on the day.
 
 ## 2026-10-29
 
+- Evening: V1 to V9 of roadmap item 11 closed live as `w-acme` (item 11
+  has each result): a worker is sandboxed in a bare directory too (the
+  jail's user scope), a cell's `extraAllowedDomains` is merged into the
+  sandbox proxy's allowlist and `"*"` opens it, the owner attaches with
+  `sudo -u w-acme -i tmux attach` (the socket dir is 0700, nothing
+  shared), the pane carries `XDG_RUNTIME_DIR`, other homes are denied,
+  no skill sync in the debug log.
+- Found during V4: a mode switch in the TUI writes
+  `permissions.defaultMode` into the worker's user file; the jail pinned
+  it and the hook locked the worker out (V14's message). The jail drops
+  `defaultMode`; the hook, bootstrap and doctor leave that key out of
+  the comparison and bootstrap keeps the worker's value. Two hook-test
+  cases. The cell template's `extraAllowedDomains` comment no longer
+  calls V2 pending. Live: `aj upgrade --no-profile --workers acme,globex`
+  still to run.
 - Roadmap 2.7 closed: this checkout's `.envrc` has the template's lines
   (the load fails while `devenv.local.nix` or `devenv.local.yaml`
   exists; `direnv allow` once after pulling, since the file changed), and

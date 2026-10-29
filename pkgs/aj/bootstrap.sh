@@ -833,9 +833,11 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     if hm_owned "$cs"; then miss "$cs is a store symlink: the jail cannot be written there"
     elif [ ! -r "$jail" ]; then miss "$jail is missing: the jail cannot be written into $cs (aj bootstrap links the managed tree first; every tool of this worker is refused until then)"
     else
-      if ! jq -e --slurpfile r "$jail" '. as $u | all($r[0] | keys[]; $r[0][.] == $u[.])' "$cs" >/dev/null 2>&1; then
+      # permissions.defaultMode is the worker's (the TUI writes it): left out
+      # of the comparison and kept across the write.
+      if ! jq -e --slurpfile r "$jail" 'del(.permissions.defaultMode) as $u | ($r[0] | del(.permissions.defaultMode)) as $rr | all($rr | keys[]; $rr[.] == $u[.])' "$cs" >/dev/null 2>&1; then
         step "write the jail from $jail into $cs (the worker's rules and sandbox)"
-        jq_edit "$cs" --slurpfile r "$jail" '. + $r[0]'
+        jq_edit "$cs" --slurpfile r "$jail" '.permissions.defaultMode as $m | . + $r[0] | if $m == null then . else .permissions.defaultMode = $m end'
       fi
       mapfile -t jk < <(jq -c 'keys[] | [.]' "$jail")
       record_file keys "$cs" "${jk[@]}"
@@ -1248,7 +1250,7 @@ accounts_report() {
   local jail="$MANAGED_DIR/jail-settings.json" cs="$HOME/.claude/settings.json" diff
   if group_has agents "$me"; then info "standing: worker ($me is in agents): the law and the jail bind every session as this user"
     if [ ! -r "$jail" ]; then miss "$jail is missing: no jail to check $cs against (aj bootstrap links the managed tree)"
-    elif diff=$(jq -r -n --slurpfile r "$jail" --slurpfile u "$cs" '[$r[0] | keys[] | select($r[0][.] != $u[0][.])] | join(",")' 2>/dev/null); then
+    elif diff=$(jq -r -n --slurpfile r "$jail" --slurpfile u "$cs" '($r[0] | del(.permissions.defaultMode)) as $rr | ($u[0] | del(.permissions.defaultMode)) as $uu | [$rr | keys[] | select($rr[.] != $uu[.])] | join(",")' 2>/dev/null); then
       if [ -z "$diff" ]; then ok "the jail in ~/.claude/settings.json matches $jail"
       else miss "the jail in ~/.claude/settings.json differs from $jail at $diff: the managed hook refuses every tool of this worker (aj bootstrap rewrites it)"; fi
     else miss "~/.claude/settings.json is missing or does not parse: the managed hook refuses every tool of this worker (aj bootstrap writes the jail into it)"; fi

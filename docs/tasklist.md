@@ -58,16 +58,63 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
       owner's `aj upgrade --workers` runs per worker); rerun the `claude -p`,
       expect a normal answer. `aj doctor` as the worker says
       `the jail in ~/.claude/settings.json differs from` while broken.
-- [ ] V4: from your own terminal, `sudo -u w-acme -i tmux attach` while
-      an `ajmux` session of `w-acme` is open (needs a TTY).
+- [x] V4 passes, 2026-10-29 evening: `ajmux acme/infra` in one tab,
+      `sudo -u w-acme -i tmux attach -t acme-infra` in a second tab as
+      `nixos`, both show the same pane. The fallback is closed too: the
+      socket dir `/tmp/tmux-1001` is 0700 `w-acme`, `ls` and
+      `tmux -S /tmp/tmux-1001/default ls` are denied to the owner. The
+      owner attaches by becoming the worker, nothing is shared.
+- [x] V5 passes, same evening: the pane's environment (`/proc/<pane_pid>/environ`)
+      carries `XDG_RUNTIME_DIR=/run/user/1001` and `TMUX=`, no
+      `DIRENV_*`; `/run/user/1001` exists with linger. The tmux session
+      environment does not list it (`show-environment` says unknown
+      variable), which is expected: only `update-environment` names live
+      there.
+- [x] V7 passes, same evening: `ls /home/nixos` and `ls /home/w-globex`
+      as `w-acme` are denied; the owner lists the worker's repo.
+- [x] V9, same evening: `claude -p "say ok" --debug-file` as `w-acme`
+      logs skills loaded from `managed=/etc/claude-code/.claude/skills,
+      user=~/.claude/skills, project=[]`, no sync line, and
+      `~/.claude/skills` does not exist. As far as the log shows, the
+      key is honoured.
+- [x] V2 baseline, same evening: with the cell's `extraAllowedDomains`
+      unset, `claude -p` running `curl -sI https://dev.azure.com` got
+      `HTTP/1.1 403 user denied` from the sandbox proxy, no prompt, and
+      the session proposed a `devenv.nix` diff. V2 and V3 done from a
+      session the same evening, the cell's `devenv.nix` edited and
+      restored as the worker: `dev.azure.com` listed is tunnelled while
+      `example.org` is denied; `"*"` tunnels `example.org`. V1 passed
+      too (`NoNewPrivs: 1` in a bare directory). Roadmap item 11 has the
+      lines.
+- [x] **Found during V4, 2026-10-29 16:55** (fixed the same evening,
+      option (a), five checks pass; live apply `aj upgrade --no-profile
+      --workers acme,globex` from the checkout shell is Raul's): the interactive claude in the
+      `ajmux` session wrote `permissions.defaultMode: "auto"` (plus
+      `theme`, `tui`) into `w-acme`'s `~/.claude/settings.json`. The jail
+      pins `defaultMode: "default"`, so the hook's `permissions`
+      comparison failed and every Bash call of the worker was refused
+      (V14's message) until `aj bootstrap --no-root --yes` as the worker
+      rewrote it (done from a session at 17:10; doctor 0 missing). A
+      mode switch in the TUI is a normal action, so this will recur.
+      Decide: (a) let Claude Code own `permissions.defaultMode`: drop it
+      from `jailBody` in `lib/settings.nix`, compare `permissions` with
+      `defaultMode` removed on both sides in the hook's `jail_check`,
+      bootstrap's write check (`pkgs/aj/bootstrap.sh` ~836) and doctor
+      (~1252), two hook-test cases (defaultMode differs: 0; an added
+      `permissions.allow`: still 2); or (b) keep the pin and document
+      that a worker must not switch modes. Deny rules, the hook and the
+      sandbox bind in every mode; `disableBypassPermissionsMode` stays
+      compared either way.
 - [ ] The three managed-only keys (roadmap item 14, last box): bypass
       mode off, `allowManagedHooksOnly`, the mod policy; each a yes/no
       from you, then a dated roadmap line.
 - [x] Review the diff, commit, push (`c1e9b69`, 2026-10-29 13:06).
-- [ ] In `/etc/nixos`: `nix flake update ai-jailer && nh os switch`;
-      `verify.sh` says the lock lags (36 ok, 1 failed, 2026-10-29
-      afternoon). Also staged there, uncommitted: the README verify-table
-      line.
+- [x] In `/etc/nixos`: `nix flake update ai-jailer && nh os switch`
+      done 2026-10-29 evening; `verify.sh` 37 ok, 0 failed. The README
+      verify-table line is in `8ccdce0`; the lock commit `4fd920b` is
+      pushed (origin main level, 2026-10-29 evening).
+- [x] Roadmap item 11's V1 to V9: all nine closed 2026-10-29 evening,
+      each box carries its result.
 
 ## 1. Close today's loop (15 min)
 
@@ -128,7 +175,8 @@ boxes, tick what passes.
       `sudo -n` fine; the refusals were not tried on purpose.)
 - [x] V12 passes, 2026-10-29 afternoon (roadmap item 13 has the hook
       line). V10 and V11 were cut by item 14 on 2026-10-28.
-- [ ] V4: owner watching a worker, `sudo -u w-acme -i tmux attach`.
+- [x] V4: owner watching a worker, `sudo -u w-acme -i tmux attach`.
+      Passes 2026-10-29 evening (section 0).
 - [x] Whether `permissions.deny Read(...)` stops the Read tool for the
       unsandboxed jailer (roadmap, item 14).
 - [ ] The three managed-only keys in the law, each decided on its own.
@@ -174,6 +222,8 @@ section 5 or when touching the file anyway.
       after a failure; keep the `git ls-files | tar` copy as the fallback
       for a sandboxed worker session. One full `nix flake check` on the
       checkout still to be run once before the fallback paragraph shrinks.
+      Ran 2026-10-29 evening from an unsandboxed session: all checks
+      passed, about two minutes.
 - [x] 6.2 `hooks/env-guard.sh`: refusals that say what to do instead.
       Models answer a bare `blocked` by trying flag variants for 2-3
       turns. Keep the prefix text (`pkgs/aj/check.sh` 185 matches only

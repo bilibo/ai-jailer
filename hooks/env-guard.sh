@@ -56,7 +56,8 @@ jail=0; [[ "$my_groups" != *" $WORKER_GROUP "* ]] || jail=1
 # (CLAUDE_CONFIG_DIR, else ~/.claude) agree with the managed tree's
 # jail-settings.json on every top-level key of that file (Claude Code
 # rewrites the file for /model and the like, so the keys are compared, not
-# the file), and (2) the sandbox resolves as the jail writes it, since a
+# the file; permissions.defaultMode, which the TUI's mode switch writes, is
+# left out on both sides), and (2) the sandbox resolves as the jail writes it, since a
 # project or local file outranks the user scope for a scalar: enabled true,
 # allowUnsandboxedCommands false, failIfUnavailable true over user, project,
 # local and managed settings. A file that does not parse refuses too. Not
@@ -66,7 +67,7 @@ jail_check() {
   local ref="$MANAGED_DIR/jail-settings.json" us="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" root diff s sfiles res
   [ -r "$ref" ] || deny "worker without a jail: $ref is missing or unreadable (aj bootstrap links the managed tree)"
   [ -r "$us" ] || deny "worker without a jail: $us is missing (aj bootstrap writes the jail into it)"
-  diff=$(jq -r -n --slurpfile r "$ref" --slurpfile u "$us" '[$r[0] | keys[] | select($r[0][.] != $u[0][.])] | join(",")' 2>/dev/null) \
+  diff=$(jq -r -n --slurpfile r "$ref" --slurpfile u "$us" '($r[0] | del(.permissions.defaultMode)) as $rr | ($u[0] | del(.permissions.defaultMode)) as $uu | [$rr | keys[] | select($rr[.] != $uu[.])] | join(",")' 2>/dev/null) \
     || deny "worker without a jail: $us or $ref does not parse"
   [ -z "$diff" ] || deny "worker without a jail: $us differs from $ref at $diff (aj bootstrap rewrites it; a session must not edit it)"
   root="${CLAUDE_PROJECT_DIR:-$cwd}" sfiles=()

@@ -162,7 +162,7 @@ if grep -A1 -x -F '  ai-jail = {' "$tmp/code/acme/plain/devenv.nix" | grep -q -E
 lacks "template: no role line"             "$tmp/code/acme/plain/devenv.nix" 'role'
 lacks "template: no allowMemoryEdits"      "$tmp/code/acme/plain/devenv.nix" 'allowMemoryEdits'
 lacks "template: no allowLocalCommits"     "$tmp/code/acme/plain/devenv.nix" 'allowLocalCommits'
-has   "template: extraAllowedDomains note" "$tmp/code/acme/plain/devenv.nix" 'project hosts for the sandbox; live check V2 \(2026-10-27\) pending on whether a managed sandbox honours them'
+has   "template: extraAllowedDomains note" "$tmp/code/acme/plain/devenv.nix" 'project hosts, merged into the sandbox allowlist \(live check V2, 2026-10-29\); \[ \"\*\" \] opens the network'
 has   "CLAUDE.md: the contract heading"    "$tmp/code/acme/plain/CLAUDE.md" '^## Environment contract \(ai-jailer\)$'
 has   "CLAUDE.md: devenv.nix read first"   "$tmp/code/acme/plain/CLAUDE.md" 'devenv\.nix.: read it first'
 has   "CLAUDE.md: the proposals path"      "$tmp/code/acme/plain/CLAUDE.md" 'proposals/<YYYY-MM-DD>-<topic>\.patch'

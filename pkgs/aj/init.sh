@@ -183,7 +183,7 @@ put devenv.nix "# Project tools and ai-jail options. Allow rules for this projec
 $platform_line
 $claude_line
     # extraDeny = [ \"Bash(az devops *)\" ];
-    # extraAllowedDomains = [ \"dev.azure.com\" ];              # project hosts for the sandbox; live check V2 (2026-10-27) pending on whether a managed sandbox honours them
+    # extraAllowedDomains = [ \"dev.azure.com\" ];              # project hosts, merged into the sandbox allowlist (live check V2, 2026-10-29); [ \"*\" ] opens the network
     # settings.permissions.allow = [ \"Bash(terraform plan *)\" ];
   };
 }"

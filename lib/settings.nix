@@ -269,7 +269,11 @@ let
     common
     // {
       permissions = {
-        defaultMode = "default";
+        # No defaultMode: the TUI's mode switch (shift+tab) writes
+        # permissions.defaultMode into the user file, and pinning it locked
+        # a worker out (2026-10-29). The hook, bootstrap and doctor leave
+        # that key out of the comparison; what a worker does inside the
+        # cell is its own, the rules below bind in every mode.
         disableBypassPermissionsMode = "disable";
         deny = denyRules.jail ++ extraDeny;
       };

@@ -473,23 +473,45 @@ The gaps, in order:
     ajmux handover, `aj init`, `check` (18 cases) and `bootstrap`
     with the root steps, and the tests (changelog 2026-10-27 has the
     list and the results). Open:
-    - [ ] V1 managed sandbox in a worker session with no repo file:
+    - [x] V1 managed sandbox in a worker session with no repo file:
       `claude -p 'grep -i nonewprivs /proc/self/status'` from a bare
       directory shows `NoNewPrivs: 1`, and `--debug-file` names the
       managed hook. Decides whether the 2026-10-27 failure is moot.
-    - [ ] V2 project-scope `allowedDomains` under a managed sandbox:
+      Passed 2026-10-29 evening: as `w-acme` in a `mktemp -d`,
+      `NoNewPrivs: 1`. The sandbox comes from the jail in the user scope
+      (item 13 took `enabled` out of the managed body), so a worker is
+      sandboxed everywhere. Moot.
+    - [x] V2 project-scope `allowedDomains` under a managed sandbox:
       merged, ignored or prompting. Decides whether
       `ai-jail.extraAllowedDomains` stays in the devenv module or
-      becomes host-wide only.
-    - [ ] V3 `allowedDomains = ["*"]`: open network or a literal host.
-      Decides whether a no-prompt network setting exists.
-    - [ ] V4 owner watching a worker: `sudo -u w-x -i tmux attach`
+      becomes host-wide only. Merged, 2026-10-29 evening: with
+      `extraAllowedDomains = [ "dev.azure.com" ]` in `acme/infra`'s
+      `devenv.nix`, the generated repo settings carried it and the
+      sandbox proxy tunnelled `dev.azure.com` (`200 Connection
+      Established`) while `example.org` got `deny network-outbound
+      example.org:443 (user denied)`, no prompt under `-p`.
+      `ai-jail.extraAllowedDomains` stays in the devenv module.
+    - [x] V3 `allowedDomains = ["*"]`: open network or a literal host.
+      Decides whether a no-prompt network setting exists. Open network,
+      2026-10-29 evening: `extraAllowedDomains = [ "*" ]` tunnelled
+      `example.org` with no prompt. It exists, and it is the cell's own
+      choice in `devenv.nix`.
+    - [x] V4 owner watching a worker: `sudo -u w-x -i tmux attach`
       against tmux `server-access` on a group-readable `-S` socket.
-      Decides how the owner attaches.
-    - [ ] V5 `XDG_RUNTIME_DIR` under `sudo -u w-x -i` with linger:
+      Decides how the owner attaches. By becoming the worker, 2026-10-29
+      evening: `sudo -u w-acme -i tmux attach -t acme-infra` from the
+      owner's shell shows the pane `ajmux acme/infra` opened;
+      `/tmp/tmux-1001` is 0700 `w-acme`, so no shared `-S` socket and no
+      `server-access`.
+    - [x] V5 `XDG_RUNTIME_DIR` under `sudo -u w-x -i` with linger:
       devenv, direnv and `tmux-notify.sh` work when ajmux exports
       `/run/user/$(id -u)`. Decides whether that export is enough.
-    - [ ] V6 Home Manager seed: `~/.claude/settings.json` is a plain
+      Enough, 2026-10-29 evening: the pane's `/proc/<pid>/environ`
+      carries `XDG_RUNTIME_DIR=/run/user/1001`, the directory exists
+      with linger, no `DIRENV_*` in the pane. The tmux session
+      environment does not list it (not an `update-environment` name),
+      which is fine.
+    - [x] V6 Home Manager seed: `~/.claude/settings.json` is a plain
       0600 file after activation, `/model` rewrites it, a second
       activation leaves it; also whether Claude Code needs the file when
       absent, whether `harnessSeedClaudeSettings` after `linkGeneration`
@@ -497,11 +519,21 @@ The gaps, in order:
       verified), and whether `home.stateVersion` accepts "26.05". The
       git identity form is settled (2026-10-27, later that day): the
       module's worker branch uses `programs.git.settings.user`, the form
-      the host's home-manager (nix-community at 6d9655f) takes.
-    - [ ] V7 group reads: the owner reads `/home/w-x/code/...`; `w-x`
-      cannot list `/home/<owner>` or another worker's home.
-    - [ ] V8 a baseline `aj check` transcript in a worker repo.
-    - [ ] V9 managed `syncClaudeAiSkills = false` honoured.
+      the host's home-manager (nix-community at 6d9655f) takes. Moot,
+      2026-10-29: no home-manager ownership of these files (decided
+      2026-10-28); `aj bootstrap` writes the jail into the worker's plain
+      0600 file, and Claude Code rewrites that file for `/model` and the
+      mode switch (item 14, 2026-10-29 evening).
+    - [x] V7 group reads: the owner reads `/home/w-x/code/...`; `w-x`
+      cannot list `/home/<owner>` or another worker's home. Passed
+      2026-10-29 evening: the owner lists `acme/infra`; `w-acme` gets
+      permission denied on `/home/nixos` and `/home/w-globex`.
+    - [x] V8 a baseline `aj check` transcript in a worker repo. Item
+      14's V13 run, 2026-10-29: `17 passed, 0 failed, 1 skipped`.
+    - [x] V9 managed `syncClaudeAiSkills = false` honoured. As far as
+      observable, 2026-10-29 evening: `--debug-file` logs skills loaded
+      from the managed, user and project paths only, no sync line, and
+      no `~/.claude/skills`.
     - [ ] Human steps: apply the two patches `c1-devenv-module.patch`
       and `f1-claude-md.patch` from the session scratchpad (the hook
       refuses those files; until the first is applied this checkout's
@@ -565,9 +597,10 @@ The gaps, in order:
       tmux rules from this flake: no module, no CLI, no users.
 
     Open:
-    - [ ] V1 to V9 of item 11 stay as written, V6 narrowed to whether
+    - [x] V1 to V9 of item 11 stay as written, V6 narrowed to whether
       Claude Code needs `~/.claude/settings.json` at all (the seed that
-      wrote it went with the home module).
+      wrote it went with the home module). All nine closed 2026-10-29
+      evening; the results are in item 11's boxes.
     - [ ] A worker's `aj init` writes the receipt's ref into the
       repo's `devenv.yaml`; after the prefetch that is a store path
       with no GC root (init warns). Options: a world-readable checkout
@@ -805,6 +838,20 @@ The gaps, in order:
       worker rewrote the jail; hook exit 0, doctor 0 missing, a session
       ran `pwd` again. V12 is item 13's, still open (passed 2026-10-29,
       item 13).
+    - Found 2026-10-29 evening, during V4: the interactive claude in the
+      `ajmux` session wrote `permissions.defaultMode: "auto"` (with
+      `theme` and `tui`) into `w-acme`'s user file one minute in; the
+      jail pinned `defaultMode: "default"`, the hook's `permissions`
+      comparison failed, and every tool of the worker was refused with
+      V14's message until `aj bootstrap --no-root --yes` as the worker.
+      Decided the same evening (the owner's: what happens inside a cell
+      is the worker's, as long as nothing gets out): the jail no longer
+      carries `defaultMode`; the hook, bootstrap's write check and
+      doctor compare `permissions` with that key removed on both sides,
+      and bootstrap keeps the worker's value across the write. Two
+      hook-test cases: a mode of the worker's own passes, an added
+      `permissions.allow` is still refused. `disableBypassPermissionsMode`
+      stays compared.
     - [ ] `Read(**/.terraform/**)` in the jail: the same merge masks every
       match with a tmpfs, so a cell with `.terraform/providers` would lose
       them inside the sandbox and `terraform plan` could not load providers
