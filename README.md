@@ -5,17 +5,22 @@ Linux host with Nix. A factory for jails (roadmap item 14, 2026-10-28).
 The law is what binds everyone on the host, you included: the credential
 reads, `git commit` and `git push`, in the root-owned managed settings under
 `/etc/claude-code`, with the fail-closed hook and the mod policy. The
-jail is what binds a worker: each customer's agents run as their own
-Linux user (`w-<customer>`) with a private home, their own Claude login
+jail is what binds a worker: each org's agents run as their own
+Linux user (`w-<org>`) with a private home, their own Claude login
 and no push credential or sudo, and that user's settings carry the full
 deny set and the Bash sandbox, written by `aj bootstrap` from the managed
 tree's reference copy; the hook refuses a worker's tools while they
 differ. A cell is a repo: its `devenv.nix` adds the project layer (allow
 rules, extra deny rules, extra network hosts), `aj init` writes it. You
-drive the workers from your own account with `ajmux <customer>/<repo>`.
+drive the workers from your own account with `ajmux <org>/<repo>`.
 Agents stage and diff; you commit and push. Your own sessions, the
 ai-jailer checkout's included, get the law and nothing else: no sandbox,
 no deny rule beyond it.
+
+An org is whoever the work is for: a client, a team, an open-source
+org, or yourself. Its repos sit under `<org>/<repo>` in the code root, and
+one Linux user per org is the boundary: two orgs' agents do not share a
+home, a Claude login or a clone.
 
 Status, 2026-10-27: this is the shape the code now has. None of it has run
 live yet; the first-run checks are pending (runbook section 5), and the
@@ -23,7 +28,7 @@ live yet; the first-run checks are pending (runbook section 5), and the
 
 | Host | Route | Tested |
 | --- | --- | --- |
-| Any Linux: Fedora 44 or newer, Ubuntu, NixOS, NixOS-WSL, other | One route, run from this checkout's devenv shell ("Usage" below): `aj bootstrap --workers <a,b> [--owner <login>]` links `/etc/claude-code`, creates the worker users, groups and linger, the sudo rule (not on NixOS: the owner's own sudo serves), and sets each worker up as that user. `scripts/install.sh` runs the same after putting Nix on a host that lacks it. NixOS differs in what bootstrap may write: `nix.conf` and the user-namespace sysctl are the system configuration's and are printed as options; the users come from `useradd` (`users.mutableUsers`, the default) | The previous shape (repo file only, one user) ran end to end on Fedora 44 and Ubuntu 26.10 laptops (2026-10-22). The worker route and the NixOS route are covered by the stubbed-host tests only; `nix build --out-link /etc/claude-code` as root is untested |
+| Any Linux: Fedora 44 or newer, Ubuntu, NixOS, NixOS-WSL, other | One route, run from this checkout's devenv shell ("Usage" below): `aj bootstrap --workers <a,b> [--owner <login>]` links `/etc/claude-code`, creates the worker users, groups and linger, the sudo rule (not on NixOS: the owner's own sudo serves), and sets each worker up as that user. `scripts/install.sh` runs the same after putting Nix on a host that lacks it. NixOS differs in what bootstrap may write: `nix.conf` and the user-namespace sysctl are the system configuration's and are printed as options; the users come from `useradd` (`users.mutableUsers`, the default) | The previous shape (repo file only, one user) ran end to end on Fedora 44 and Ubuntu 26.10 laptops (2026-10-22). The worker and NixOS routes ran live on NixOS-WSL (2026-10-28, two workers; roadmap item 14); on Fedora and Ubuntu the worker shape and `nix build --out-link /etc/claude-code` as root are covered by the stubbed-host tests only |
 | macOS (nix-darwin) | managed settings under `/Library/Application Support/ClaudeCode/` | not started |
 
 A host without the managed file enforces nothing: a repo that imports the
@@ -89,7 +94,7 @@ login, and prints the `userdel -r` lines for you to run.
 Another project that imports `ai-jailer/devenv` gets the same shell contents
 with `ai-jail.claudeCode.enable = true` in its devenv.nix (default false)
 and `allow_unfree: true` in its devenv.yaml; `aj init
-<customer>/<repo>` writes one and does its first shell entry. On a host
+<org>/<repo>` writes one and does its first shell entry. On a host
 with no `claude` of its own init writes both lines uncommented, so the
 repo's shell brings the CLI, tmux and jq for `ajmux` sessions; with a host
 `claude` it leaves both commented out.
@@ -138,7 +143,7 @@ Each Claude Code mechanism covers a different surface, so all are used:
    member whose file differs, or for whom `sandbox.enabled` does not
    resolve to true over user, project, local and managed scope, so a repo
    or local file cannot turn a worker's sandbox off.
-2. Linux users: one per customer, a 0750 home, no push credential, no
+2. Linux users: one per org, a 0750 home, no push credential, no
    sudo. The owner is a member of each worker's group and may run any
    command as a worker (`<owner> ALL=(%agents) NOPASSWD: ALL`); no worker
    is in `trusted-users`, so a worker cannot hand the Nix daemon options.
@@ -172,7 +177,7 @@ Each Claude Code mechanism covers a different surface, so all are used:
    2026-10-24) and the built-in guard refuses every other; no marketplace
    can be added beyond `extraKnownMarketplaces` (none by default); sideload
    flags rejected; `allowManagedHooksOnly` by default.
-8. Azure RBAC: a Reader-only identity per customer (outside this repo).
+8. Azure RBAC: a Reader-only identity per org (outside this repo).
 
 ### What the repo file is for
 
@@ -208,7 +213,7 @@ the terminal decides; a `-p` session treats a prompt as a refusal.
 
 | | Managed host |
 | --- | --- |
-| Enforced | for everyone: the law (credential reads, `git commit`, `git push`, bypass mode off, mod policy) and the fail-closed hook; for a worker: the full deny set and the hook's other rules, its settings checked against the jail before every tool, the Bash sandbox with no unsandboxed fallback; `~/.ssh` and the agent socket hidden; account connectors and account-synced skills and plugins off; the GitHub tokens and Azure secrets stripped from every subprocess (`credentials.envVars`); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; mod policy; a worker cannot read another user's home (0750; untested live) |
+| Enforced | for everyone: the law (credential reads, `git commit`, `git push`, bypass mode off, mod policy) and the fail-closed hook; for a worker: the full deny set and the hook's other rules, its settings checked against the jail before every tool, the Bash sandbox with no unsandboxed fallback; `~/.ssh` and the agent socket hidden; account connectors and account-synced skills and plugins off; the GitHub tokens and Azure secrets stripped from every subprocess (`credentials.envVars`); the repo's own settings, hooks, skills, plugin manifest and `.git` hooks and config as literal `denyWrite` paths; mod policy; a worker cannot read another user's home (0750, or the host's `homeMode`; tested live 2026-10-29) |
 | Prompted | network hosts outside the allowlist; edits outside the working directory |
 | Open | every unix socket (D-Bus, the display, the secret service; `allowAllUnixSockets`, all-or-none on Linux); reads within the worker's own home and of the rest of the machine except the `denyRead` paths (the read fence, off by default, narrows it); dynamic shell constructs the hook's text rules cannot see (runbook section 8); `/add-dir` |
 
@@ -251,7 +256,7 @@ workers come from `useradd`, which holds while `users.mutableUsers` is true
 reports a worker the receipt names but the host lacks. The `/etc/claude-code`
 link survives rebuilds (NixOS only cleans links into `/etc/static`). A host
 configuration carries nothing of ai-jailer; `bilibo/nixos-wsl` takes only
-`ajmux` and the tmux rules from this flake.
+`ajmux`, `direnv.toml` and the tmux rules from this flake.
 
 The host-wide options of the managed tree go into `host.nix` at the
 checkout root, gitignored (it is this host's policy, not the jailer's); a
@@ -319,7 +324,7 @@ kills a distro binary loading libasound (`pkgs/claude-code.nix` drops the
 variable; the binary is otherwise unpatched, so audio output, which needed
 it, does not work; the devenv module uses it). `aj doctor` reports
 every host prerequisite, `claude doctor` included, and `aj init
-<customer>/<repo>` writes the files above into a repo and runs its first
+<org>/<repo>` writes the files above into a repo and runs its first
 shell entry. `nix run path:<checkout>#aj -- <command>` runs the CLI
 from a checkout outside its shell.
 
@@ -360,7 +365,7 @@ the passphrase in shell history.
 
 Open: how a commit staged in a worker's clone reaches the remote. The owner
 reads the clone through the worker's group (0750 home) and can run `git`
-there with `sudo -u w-<customer> -i`, but that user has no credential to
+there with `sudo -u w-<org> -i`, but that user has no credential to
 push with, and the design does not yet say whether the owner pushes from
 the worker's clone or fetches the branch into their own. Not tested.
 
@@ -382,6 +387,6 @@ the pending first-run checks):
 
 ```sh
 aj doctor                   # as the owner and as a worker: managed file, hook, users, sudo rule, linger; exit 1 when one is missing
-aj init <customer>/<repo>   # as the worker; writes a repo, enters its shell, runs both unit tests on the result
+aj init <org>/<repo>        # as the worker; writes a repo, enters its shell, runs both unit tests on the result
 aj check <repo>             # as the worker: seventeen `claude -p` sessions, eighteen as an `agents` member, two more in a fenced repo, one fewer outside tmux; judged on transcripts and files; costs API calls
 ```

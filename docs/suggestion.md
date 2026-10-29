@@ -88,9 +88,9 @@ For it the only lever is the identity, which is section 2.
 
 The jailer is the process half of agent control: what the process can
 read, write, run and reach. Roadmap item 5 names the other half from the
-process's side: "Reader-only service principal per customer. The one
+process's side: "Reader-only service principal per org. The one
 control that holds against every client, including things the hook never
-sees." Roadmap item 9's customer module already shapes it: `AZURE_CONFIG_DIR` under
+sees." Roadmap item 9's org module already shapes it: `AZURE_CONFIG_DIR` under
 `.git/devenv-base/azure-<actor>`, the actor `agent` or `human` from
 `CLAUDECODE`, `agentAuth = user | sp` with `user` the default, `az login`
 in the universal deny set so only the human logs either directory in, a
@@ -115,7 +115,7 @@ security administrators), different artifacts (KQL hunts for
 service-principal sign-ins and app-credential changes, Conditional Access
 for workload identities as code, app-consent governance, a playbook),
 usable by someone who never installs Nix. The jailer must keep working
-for non-Azure customers; it is cloud-agnostic apart from the `az` regex
+for non-Azure orgs; it is cloud-agnostic apart from the `az` regex
 and the network allowlist.
 
 The seams, each already in the code or the roadmap:
@@ -152,7 +152,7 @@ there until someone runs `aj upgrade`; a host configuration that takes
 pins its own revision in its lock, and nothing compares the two. The
 tools that would say so, `aj doctor` and the host's `verify.sh`, are
 operator tools: run at install, after a rebuild, when something is
-broken. The daily flow is `aj init <customer>/<repo>` and then work,
+broken. The daily flow is `aj init <org>/<repo>` and then work,
 and nothing in it reads a revision.
 
 What holds without any of that is fail-closed: the hook blocks on its

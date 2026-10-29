@@ -173,7 +173,7 @@ in
 
       enterShell = ''
         [ -r "${cfg.managedSettingsPath}" ] || echo "ai-jail: ${cfg.managedSettingsPath} is missing: no law, jail or hook on this host (aj bootstrap from the ai-jailer checkout's devenv shell)" >&2
-        # Name this project for `ajmux`: <customer>/<repo> relative to the code
+        # Name this project for `ajmux`: <org>/<repo> relative to the code
         # root, from the main checkout or any worktree under it, else
         # local/<name> with the directory alongside. A bare `ajmux` in this
         # shell then opens the right tmux session.

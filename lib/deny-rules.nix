@@ -49,8 +49,19 @@ let
     "Read(~/.claude/.credentials.json)"
     "Read(~/.claude.json)"
   ];
+  # The workers' half of the Reads, not the law's. `.devenv/` and `.direnv/`
+  # hold the evaluated profile and env dumps, which a model does not need to
+  # read and which are large. Bash must still run binaries under
+  # `.devenv/profile/bin`, which is why this is a Read deny and not
+  # `sandbox.filesystem.denyRead` in lib/settings.nix.
+  workerReads = [
+    "Read(**/.devenv/**)"
+    "Read(**/.direnv/**)"
+  ];
+
   credentials =
     credentialReads
+    ++ workerReads
     ++ bash [
       "az login"
       "az logout"

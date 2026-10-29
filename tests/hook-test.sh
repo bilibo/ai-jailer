@@ -278,7 +278,7 @@ allow 'claude -p "summarise the settings reference"'
 allow 'code --settings-file x'
 allow 'claude --version; echo --settings'
 # ajmux hands everything after its project to claude: the same flags, after
-# a <customer>/<repo>, a path or nothing (2026-10-24: these all passed).
+# a <org>/<repo>, a path or nothing (2026-10-24: these all passed).
 block 'ajmux cust/repo --bare'
 block 'ajmux cust/repo --setting-sources user'
 block 'ajmux cust/repo --dangerously-skip-permissions'

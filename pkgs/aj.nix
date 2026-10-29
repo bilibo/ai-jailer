@@ -74,7 +74,7 @@ pkgs.writeShellApplication {
       bootstrap   set this host up (scripts/install.sh runs it once Nix is there)
       upgrade     bootstrap, and move the profile packages to the ai-jailer ref's current lock
       doctor      every host prerequisite, claude doctor, and the jail in the cwd
-      init        a jail: <customer>/<repo> under the code root, or a path
+      init        a jail: <org>/<repo> under the code root, or a path
       check       the live checks in a jail (claude -p sessions; costs API calls)
       reset       remove what bootstrap put on this host, from the receipt
 

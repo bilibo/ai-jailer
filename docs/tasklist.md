@@ -25,14 +25,54 @@ Host nixos-wsl, bootstrapped today for the first time, workers
   direnv/environment.d/Code files. The workers still have theirs from
   the first bootstrap (harmless duplicates).
 
+## 0. State after the 2026-10-29 morning run
+
+Sections 1, 2, 3, 6.1 to 6.5 and the rename are done in the working
+tree (23 files, nothing committed; `nix flake check` passes on the
+tree, 2026-10-29). The new rules are applied live: `aj upgrade
+--no-profile --workers acme,globex` ran, `w-acme`'s `aj init acme/infra`
+is 443/443, `verify.sh` 37 ok. Release = a tag on `main` with the README
+true (decided 2026-10-29); the nixos-wsl `install-wsl.ps1` run from
+scratch is a later item. `docs/changelog.md` has the day's entry; the
+roadmap has V15 and the Read-deny answer.
+
+New today, not in the list before: `aj check` has a login pre-flight
+(the first live run as `w-acme` was 16 "no line matched" failures from
+one missing login); the factory has `.ignore` with `devenv.lock`.
+
+### Human steps left on the live gate (the session cannot do these)
+
+- [ ] V13: `sudo -u w-acme -i claude /login` (a TTY; the worker has never
+      logged in), then `sudo -u w-acme -i aj check /home/w-acme/code/git/acme/infra`.
+      Expect: no `FAIL  login`, and the cases pass (the `sandbox`,
+      `cred-read`, `sudo-text`, `home-fence` lines are the ones that
+      prove the jail). Paste the summary line into roadmap item 14.
+- [ ] V14, as `w-acme` (the session's classifier refuses this edit):
+      `sudo -u w-acme -i sh -c 'cp ~/.claude/settings.json /tmp/s.bak && jq "del(.permissions.deny[0])" /tmp/s.bak > ~/.claude/settings.json'`,
+      then `sudo -u w-acme -i sh -c 'cd ~/code/git/acme/infra && claude -p "run pwd" 2>&1 | tail -3'`.
+      Expect `env-guard: worker without a jail: ... differs from ... (aj bootstrap rewrites it ...)`.
+      Repair: `sudo -u w-acme -i aj bootstrap --no-root --yes` (what the
+      owner's `aj upgrade --workers` runs per worker); rerun the `claude -p`,
+      expect a normal answer. `aj doctor` as the worker says
+      `the jail in ~/.claude/settings.json differs from` while broken.
+- [ ] V4: from your own terminal, `sudo -u w-acme -i tmux attach` while
+      an `ajmux` session of `w-acme` is open (needs a TTY).
+- [ ] The three managed-only keys (roadmap item 14, last box): bypass
+      mode off, `allowManagedHooksOnly`, the mod policy; each a yes/no
+      from you, then a dated roadmap line.
+- [ ] Review the diff, commit, push; then in `/etc/nixos`
+      `nix flake update ai-jailer && nh os switch` only if `verify.sh`
+      says the lock lags (ajmux.nix changed today: comments and error
+      text, so it will).
+
 ## 1. Close today's loop (15 min)
 
-- [ ] ai-jailer: commit the staged hook-test fix.
-- [ ] In the checkout shell: `direnv reload`, then
+- [x] ai-jailer: commit the staged hook-test fix.
+- [x] In the checkout shell: `direnv reload`, then
       `aj upgrade --no-profile --workers acme,globex`.
-- [ ] `sudo -u w-acme -i aj init acme/infra --yes`: idempotent; must end
+- [x] `sudo -u w-acme -i aj init acme/infra --yes`: idempotent; must end
       with the `ajmux -n` note and "Ready", hook-test 443/443.
-- [ ] Run the DAC and linger lines that were never pasted:
+- [x] Run the DAC and linger lines that were never pasted:
       `sudo -u w-acme -i sh -c 'ls /home/nixos'` (denied),
       `sudo -u w-acme -i sh -c 'ls /home/w-globex'` (denied),
       `sudo -u w-acme -i sh -c 'test -d /run/user/$(id -u) && echo linger ok'`.
@@ -41,14 +81,14 @@ Host nixos-wsl, bootstrapped today for the first time, workers
 
 Both checked against the code on 2026-10-28; see the chat's verdict.
 
-- [ ] Bare `aj upgrade` loads `.root.workers[]` from the receipt into
+- [x] Bare `aj upgrade` loads `.root.workers[]` from the receipt into
       `WORKERS` when none were passed and `--no-root` is off
       (`pkgs/aj/bootstrap.sh`, the `upgrade` branch of the dispatch).
       README line 234 already promises this. Test: bare `upgrade` after
       a `--workers` bootstrap runs `upgrade` as each worker. Decide: a
       receipt worker the host lacks gets `useradd` again on every
       upgrade (what doctor tells the operator to do anyway).
-- [ ] `useradd -s "$(command -v bash)"` instead of `/bin/bash`, and
+- [x] `useradd -s "$(command -v bash)"` instead of `/bin/bash`, and
       `true` instead of `/bin/true` in doctor's bwrap probe. Real on plain
       NixOS (only `/bin/sh` there); moot on NixOS-WSL, which links
       `/bin/bash` and `/bin/true` itself. Test 20's exact `useradd` line
@@ -56,14 +96,14 @@ Both checked against the code on 2026-10-28; see the chat's verdict.
 
 ## 3. Small wording fixes seen today (20 min)
 
-- [ ] The per-worker `warn the ai-jailer ref is this aj's store path …
+- [x] The per-worker `warn the ai-jailer ref is this aj's store path …
       a later upgrade cannot move it` is misleading: an owner-side
       `aj upgrade --workers` prefetches a fresh snapshot and does move
       it. Only a worker upgrading on its own cannot.
-- [ ] The "Next: open a new terminal (PATH and NIX_SSL_CERT_FILE come
+- [x] The "Next: open a new terminal (PATH and NIX_SSL_CERT_FILE come
       from profile.d and ~/.bashrc.d)" trailer is stale on NixOS, where
       bootstrap writes neither.
-- [ ] `verify.sh` in nixos-wsl: nothing pending; the README there could
+- [x] `verify.sh` in nixos-wsl: nothing pending; the README there could
       name the new lock-drift check in its verify table.
 
 ## 4. Live verification still open in the roadmap (the release gate)
@@ -78,20 +118,20 @@ boxes, tick what passes.
 - [ ] V14: edit `~/.claude/settings.json` as the worker (drop a deny
       rule): every tool refused with the hook's `differs from` message;
       `aj bootstrap` as that worker repairs it.
-- [ ] V15: a jailer session in this checkout runs `nix flake check`,
+- [x] V15: a jailer session in this checkout runs `nix flake check`,
       `git add`, `sudo -v`; is refused `git commit`, `git push`,
       `cat ~/.ssh/id_ed25519`. (Today's session did `git add` and
       `sudo -n` fine; the refusals were not tried on purpose.)
 - [ ] V12, V10, V11: the managed sandbox list and `failIfUnavailable`
       cases, as written in the roadmap.
 - [ ] V4: owner watching a worker, `sudo -u w-acme -i tmux attach`.
-- [ ] Whether `permissions.deny Read(...)` stops the Read tool for the
+- [x] Whether `permissions.deny Read(...)` stops the Read tool for the
       unsandboxed jailer (roadmap, item 14).
 - [ ] The three managed-only keys in the law, each decided on its own.
 
 ## 5. Release itself (decide first thing)
 
-- [ ] Rename `customer` → `org` everywhere (decided 2026-10-28 evening:
+- [x] Rename `customer` → `org` everywhere (decided 2026-10-28 evening:
       no consulting speak; `project` is out because it already names the
       pair, `AI_JAIL_PROJECT=acme/infra`). 98 occurrences in 17 files:
       roadmap 18, ajmux.nix 11, bootstrap.sh 11, README 9, sessions 8,
@@ -102,13 +142,13 @@ boxes, tick what passes.
       team, an open-source org, yourself); one Linux user per org is
       the boundary. Then reread README and runbook for sentences that
       lean on the client framing. Before the release, not after.
-- [ ] Say what "release" means: a tag on `main` plus README "current
+- [x] Say what "release" means: a tag on `main` plus README "current
       state" true, or also the nixos-wsl side installable from scratch
       by `install-wsl.ps1` (untested end to end since the rename).
-- [ ] README current-state pass: the host table, the lockdown table
+- [x] README current-state pass: the host table, the lockdown table
       (`a worker cannot read another user's home (0750; untested live)`
       is now tested live), the three ai-jailer pieces nixos-wsl consumes.
-- [ ] Changelog entry for the release day; the roadmap's Done section.
+- [x] Changelog entry for the release day; the roadmap's Done section.
 - [ ] Not for the release, parked: the factory-shell staleness signal
       (`docs/suggestion.md` 3); moving anything into home-manager (no:
       decided 2026-10-28); automating the lock bump (no: `verify.sh`
@@ -121,7 +161,7 @@ before it was written here. Order is by value over cost. None of them
 gates the release; 6.1 to 6.5 are an hour together, do them after
 section 5 or when touching the file anyway.
 
-- [ ] 6.1 CLAUDE.md "Checks" (factory): drop the tar copy and `-L` as
+- [x] 6.1 CLAUDE.md "Checks" (factory): drop the tar copy and `-L` as
       the default. Verified live tonight: this jailer session (law only,
       no sandbox) built `nix build .#checks.x86_64-linux.managed-tree-test
       --no-link` straight on the checkout, 4 s, three lines of output.
@@ -130,7 +170,7 @@ section 5 or when touching the file anyway.
       after a failure; keep the `git ls-files | tar` copy as the fallback
       for a sandboxed worker session. One full `nix flake check` on the
       checkout still to be run once before the fallback paragraph shrinks.
-- [ ] 6.2 `hooks/env-guard.sh`: refusals that say what to do instead.
+- [x] 6.2 `hooks/env-guard.sh`: refusals that say what to do instead.
       Models answer a bare `blocked` by trying flag variants for 2-3
       turns. Keep the prefix text (`pkgs/aj/check.sh` 185 matches only
       `env-guard:`; `tests/hook-test.sh` 36 discards stderr), append one
@@ -140,7 +180,7 @@ section 5 or when touching the file anyway.
       blocked: plan/validate only; propose apply/state commands to the
       human`, `az write blocked: read/list/show only; propose write
       commands to the human`. L1 is fine as is (the model stops).
-- [ ] 6.3 `pkgs/aj/init.sh` 217-234, the cell CLAUDE.md contract:
+- [x] 6.3 `pkgs/aj/init.sh` 217-234, the cell CLAUDE.md contract:
       rewrite for action, not plumbing. The first paragraph explains
       where the three layers come from, which a worker never needs;
       missing are the rules that save discovery turns. Keep the heading
@@ -159,14 +199,14 @@ section 5 or when touching the file anyway.
       `-o table`/`-o tsv`, never unfiltered JSON; a refusal (`env-guard:`,
       a deny rule, a sandbox error) is expected: stop and propose, no
       workarounds. Keep "credential paths are hidden; clone over HTTPS".
-- [ ] 6.4 `pkgs/aj/init.sh` 212: add `proposals/` to the .gitignore
+- [x] 6.4 `pkgs/aj/init.sh` 212: add `proposals/` to the .gitignore
       lines (the factory's own .gitignore has it, the cell template does
       not, yet CLAUDE.md promises the path is gitignored) and
       `ensure_lines .ignore 'devenv.lock'` so ripgrep-backed Grep skips
       the tracked lockfile (gitignore does not cover tracked files).
       Test: a "plans .ignore" dry-run check next to `tests/aj-init-test.sh`
       line 44.
-- [ ] 6.5 `lib/deny-rules.nix`: add `"Read(**/.devenv/**)"` and
+- [x] 6.5 `lib/deny-rules.nix`: add `"Read(**/.devenv/**)"` and
       `"Read(**/.direnv/**)"` to the credentials/`jail` side, not the
       law (`tests/managed-tree-test.sh` 34 asserts the law's shape; it
       would still pass, but the rule is the workers'). Not in

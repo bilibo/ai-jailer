@@ -11,7 +11,7 @@
 # after a Claude Code upgrade is the point of this file. --parse prints what
 # the verdicts see in a saved transcript (tests/check-parser-test.sh).
 #
-# Costs API calls (seventeen short sessions, eighteen for a worker, where
+# Costs API calls (one login pre-flight, then seventeen short sessions, eighteen for a worker, where
 # case 18 runs, two more in a fenced repo, two more when case 2 fails; one
 # fewer outside tmux, where the second half of case 16 is skipped). Run it
 # from your own terminal, never from inside a session: the nested-session
@@ -189,6 +189,22 @@ echo "transcripts: $out"
 if [ -n "$claude" ]; then echo "claude: $claude ($via)"; else echo "claude: none ($why; $nocli)"; fi
 [ "$noload" = 0 ] || echo "warn  $repo's devenv shell does not load from here: every session's Bash commands will be refused (direnv allow $repo, after reading its .envrc and devenv files)"
 [ "$sandbox" != off ] || echo "warn  the repo file turns the sandbox off; the managed hook refuses every tool of a worker here"
+
+# Login pre-flight: a claude that cannot reach the API (never logged in as
+# this user) answers every session with an is_error result line, which would
+# show as one "no line matched" failure per case. One trivial session finds
+# it once and stops (2026-10-29: 16 of 17 failed for a missing login).
+if [ "$DRY_RUN" = 0 ]; then
+  "$claude" -p hi --output-format stream-json --verbose --max-turns 1 >"$out/login.jsonl" 2>"$out/login.stderr"
+  apierr=$(jq -r 'select(.type? == "result" and .is_error? == true and .terminal_reason? == "api_error") | .result' "$out/login.jsonl" 2>/dev/null | head -1)
+  if [ -n "$apierr" ]; then
+    case "$apierr" in
+      *"Not logged in"*) verdict login 1 "claude is not logged in as $(id -un): run \`claude /login\` as this user (or set an API key), then rerun" ;;
+      *) verdict login 1 "claude's API call failed (api error: $apierr); fix that, then rerun" ;;
+    esac
+    echo "aj check: $pass passed, $fail failed, $skip skipped, remaining cases not run (transcripts in $out)"; exit 1
+  fi
+fi
 
 # 1. Sandbox on: every Bash command runs under bubblewrap.
 run_cmd sandbox 'grep -i nonewprivs /proc/self/status' 'NoNewPrivs:[[:space:]]*1'

@@ -13,7 +13,8 @@
 # does; never dnf, which is scripts/install.sh's), the managed link, the
 # worker users (--workers: groups, useradd, home mode, owner membership,
 # linger, the sudoers rule and its visudo check, each worker's own bootstrap
-# as that user, with --owner-sudo none and password and a visudo failure), the
+# as that user, with --owner-sudo none and password and a visudo failure; a
+# bare upgrade takes them from the receipt), the
 # user files per rc-file layout (none, Fedora's ~/.bashrc.d, a plain
 # ~/.bashrc, zsh only, an existing ~/.tmux.conf, a foreign direnv.toml),
 # idempotent re-runs, the receipt, reset undoing all of it (and printing, not
@@ -173,7 +174,10 @@ echo '{"theme":"dark","env":{"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB":"1"}}' >"$h/.cla
 aj "$h" bootstrap --yes
 exits "fresh bootstrap" 0
 says "nothing missing"             'aj bootstrap: 0 missing'
-says "ran to the end"              'aj init <customer>/<repo>'
+says "ran to the end"              'aj init <org>/<repo>'
+says "next names what this run wrote" 'Next: open a new terminal \(PATH from profile\.d; the direnv hook and NIX_SSL_CERT_FILE from ~/\.bashrc\.d\), then'
+says "log out for GUI VS Code"     'Log out and in once so GUI-launched VS Code'
+called "bwrap probe runs true off PATH" '^bwrap .* -- true$'
 uncalled "no sysctl for AppArmor"  'sysctl -w'
 absent "no sysctl drop-in" "$tmp/etc/99-userns.conf"
 file_has "profile header" "$profile" '^profile bwrap /usr/bin/bwrap flags=\(unconfined\) \{$'
@@ -448,6 +452,8 @@ called "extension installed in the remote" '^code --install-extension mkhl.diren
 says "Code user settings skipped"  'WSL: ~/\.config/Code/User/settings\.json is never read'
 absent "no Code user settings" "$h12b/.config/Code/User/settings.json"
 uncalled "no profile with --no-profile" '^nix profile add'
+says "next: nothing to pick up"    'Next: open a new terminal, then'
+refutes "no log out on nixos"      'Log out and in'
 receipt12b="$h12b/.local/state/ai-jailer/receipt.json"
 in_json "receipt: the extension"   "$receipt12b" '.vscodeExtensions == ["mkhl.direnv"]'
 in_json "receipt: no file written" "$receipt12b" '[.files[] | select(.kind == "file" or .kind == "keys")] == []'
@@ -497,6 +503,7 @@ rm -rf "$tmp"/home-w-*; mkdir -p "$tmp/homes"
 # beta's Claude Code settings already hold a key of its own (/model wrote it).
 mkdir -p "$tmp/home-w-beta/.claude"; echo '{"model":"opus"}' >"$tmp/home-w-beta/.claude/settings.json"
 h15="$tmp/home15"; mkdir -p "$h15"; chmod 0700 "$h15"; receipt15="$h15/.local/state/ai-jailer/receipt.json"
+wsh=/bin/bash; [ -x "$wsh" ] || wsh=/run/current-system/sw/bin/bash   # the workers' login shell (worker_steps)
 account_calls() { grep -E "^sudo (/.*nix build|groupadd|useradd|chmod|usermod|loginctl|visudo|install .*sudoers|-u)" "$log" | sed -e "s#$tmp/tmp\\.[A-Za-z0-9]*#TMPFILE#" -e "s#$tmp#T#g"; }
 ROOT_STEPS="" aj "$h15" bootstrap --yes --workers acme,beta
 exits "workers bootstrap" 0
@@ -504,12 +511,12 @@ ref=github:bilibo/ai-jailer
 want="sudo T/bin/nix build $ref#managed --out-link T/etc-claude-code
 sudo groupadd agents
 sudo groupadd w-acme
-sudo useradd -m -g w-acme -G agents -s /bin/bash -c ai-jailer worker for acme w-acme
+sudo useradd -m -g w-acme -G agents -s $wsh -c ai-jailer worker for acme w-acme
 sudo chmod 0750 T/homes/w-acme
 sudo usermod -aG w-acme tester
 sudo loginctl enable-linger w-acme
 sudo groupadd w-beta
-sudo useradd -m -g w-beta -G agents -s /bin/bash -c ai-jailer worker for beta w-beta
+sudo useradd -m -g w-beta -G agents -s $wsh -c ai-jailer worker for beta w-beta
 sudo chmod 0750 T/homes/w-beta
 sudo usermod -aG w-beta tester
 sudo loginctl enable-linger w-beta
@@ -566,6 +573,19 @@ ROOT_STEPS="" aj "$h15" upgrade --yes --workers acme,beta
 exits "workers upgrade" 0
 for w in acme beta; do called "$w upgraded as itself" "^sudo -u w-$w -i nix run $ref#aj -- upgrade --no-root --yes --jailer $ref$"; done
 uncalled "no bootstrap as a worker on upgrade" '^sudo -u w-[a-z]+ -i nix run .* -- bootstrap '
+# A bare upgrade takes the workers from the receipt (README); one the host
+# lost is created again, and a sudo rule of the operator's own is kept
+# (the receipt does not record --owner-sudo).
+grep -v -x -e w-beta "$tmp/users" >"$tmp/users.new"; mv "$tmp/users.new" "$tmp/users"
+echo 'tester ALL=(%agents) ALL' >"$tmp/etc/sudoers-claude"
+ROOT_STEPS="" aj "$h15" upgrade --yes
+exits "bare workers upgrade" 0
+for w in acme beta; do called "$w upgraded by a bare upgrade" "^sudo -u w-$w -i nix run $ref#aj -- upgrade --no-root --yes --jailer $ref$"; done
+called "lost worker created again" "^sudo useradd -m -g w-beta "
+uncalled "existing worker not recreated" '^sudo useradd .* w-acme$'
+file_is "sudo rule kept on a bare upgrade" "$tmp/etc/sudoers-claude" 'tester ALL=(%agents) ALL'
+ROOT_STEPS="" aj "$h15" upgrade --yes --no-root
+uncalled "no worker upgrade with --no-root" '^sudo -u w-'
 
 # reset: the sudoers file, the link, linger; the users are only named.
 aj "$h15" reset --yes
@@ -623,7 +643,7 @@ exits "bad worker name" 64
 # 22. --dry-run with a worker: every command printed, no sudo.
 h17="$tmp/home17"; mkdir -p "$h17"
 ROOT_STEPS="" aj "$h17" bootstrap --dry-run --workers zeta
-says "dry run: user"               'would run: sudo useradd -m -g w-zeta -G agents -s /bin/bash -c ai-jailer\\ worker\\ for\\ zeta w-zeta'
+says "dry run: user"               "would run: sudo useradd -m -g w-zeta -G agents -s $wsh -c ai-jailer\\\\ worker\\\\ for\\\\ zeta w-zeta"
 says "dry run: worker bootstrap"   'would run: sudo -u w-zeta -i nix run github:bilibo/ai-jailer#aj -- bootstrap --no-root --yes --jailer github:bilibo/ai-jailer'
 says "dry run: sudoers"            "would run: sudo install -m 0440 -o root -g root <new content> $tmp/etc/sudoers-claude"
 uncalled "dry run calls no sudo"   '^sudo'
@@ -651,12 +671,12 @@ refutes "nix.settings not printed when present" 'nix\.settings'
 want="sudo T/bin/nix build $ref#managed --out-link T/etc-claude-code
 sudo groupadd agents
 sudo groupadd w-acme
-sudo useradd -m -g w-acme -G agents -s /bin/bash -c ai-jailer worker for acme w-acme
+sudo useradd -m -g w-acme -G agents -s $wsh -c ai-jailer worker for acme w-acme
 sudo chmod 0750 T/homes/w-acme
 sudo usermod -aG w-acme raul
 sudo loginctl enable-linger w-acme
 sudo groupadd w-beta
-sudo useradd -m -g w-beta -G agents -s /bin/bash -c ai-jailer worker for beta w-beta
+sudo useradd -m -g w-beta -G agents -s $wsh -c ai-jailer worker for beta w-beta
 sudo chmod 0750 T/homes/w-beta
 sudo usermod -aG w-beta raul
 sudo loginctl enable-linger w-beta

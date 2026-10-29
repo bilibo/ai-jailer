@@ -4,20 +4,20 @@ Day-to-day operation. The README explains what the layers are; this is what
 you type and what you should see. Written for the person running it, not
 for an agent.
 
-State on 2026-10-27: the one-Linux-user-per-customer shape is in the code
+State on 2026-10-27: the one-Linux-user-per-org shape is in the code
 and covered by the tests that stub the host. It has not run on a real
 host. Commands below that touch users, sudo or `/etc` are marked untested
 where this document says what they do; section 5 lists the first-run
 checks.
 
 Words used here: the owner is your own login, the human. A worker is the
-Linux user `w-<customer>` that runs one customer's sessions. The managed
+Linux user `w-<org>` that runs one org's sessions. The managed
 file is `/etc/claude-code/managed-settings.json` and the tree next to it,
 where the hard rules live.
 
 ## 1. Daily flow
 
-1. Start a session for a customer's repo from your own terminal:
+1. Start a session for an org's repo from your own terminal:
 
    ```sh
    ajmux acme/infra                     # first window
@@ -29,8 +29,8 @@ where the hard rules live.
    with `sudo -u w-acme -i ajmux acme/infra ...` (the name, not a path: the
    worker resolves it under its own code root, `~/code/git` by default). The
    worker's tmux server creates or attaches the session
-   `<customer>-<repo>` and opens one window named `claude` per call. A
-   worker naming another customer's repo is refused. `ajmux -n ...` prints
+   `<org>-<repo>` and opens one window named `claude` per call. A
+   worker naming another org's repo is refused. `ajmux -n ...` prints
    the resolution, or the handover line, and starts nothing. From inside
    the worker's tmux it switches to the session; from your terminal it
    attaches. Prefix + `d` detaches and leaves the session running.
@@ -56,7 +56,7 @@ where the hard rules live.
    your Claude login), `git commit` and `git push`; nothing else, and no
    sandbox. Commit and push from your own terminal. It edits
    `devenv.nix`, `.envrc` and `.claude/` like any file. The jail is the
-   workers': a session as `w-<customer>` gets the full rules.
+   workers': a session as `w-<org>` gets the full rules.
 4. Several objectives at once: one `ajmux` call each. Sessions that edit
    files get `--worktree`; the worktree lives under `.claude/worktrees/<name>`,
    has its own `.devenv/`, and its `.envrc` is auto-allowed only if it is
@@ -103,9 +103,9 @@ sudo -u w-acme -i aj init <path>          # an existing repo
 ```
 
 The worker's first `claude` needs a login once: `sudo -u w-acme -i claude`,
-then sign in with the customer's account (each worker has its own login in
-its own `~/.claude`; untested live). Clone over HTTPS; the worker holds no
-SSH key.
+then sign in with the Claude account for that org's work (each worker
+has its own login in its own `~/.claude`; untested live). Clone over
+HTTPS; the worker holds no SSH key.
 
 `aj init` does steps 1 to 5 and 7, then runs section 5's unit tests on
 the generated file, with the hook test on the managed hook. `--dry-run`
@@ -145,7 +145,9 @@ script wrote:
    (`pkgs/aj/init.sh` has the text). Never `source_env`, `source_up`,
    or a `whitelist.prefix` in direnv.toml.
 4. `.gitignore`: `.devenv/`, `.direnv/`, `.claude/settings.json`,
-   `.claude/settings.local.json`, `.claude/worktrees/`.
+   `.claude/settings.local.json`, `.claude/worktrees/`, `proposals/`.
+   `.ignore`: `devenv.lock`, so a ripgrep-backed search skips the
+   tracked lockfile (`.gitignore` cannot hide a tracked file).
    `.worktreeinclude`: `.claude/settings.json`, so a `--worktree` session
    starts with the repo's project layer before devenv regenerates it there.
 5. `CLAUDE.md`: the environment contract (the block `aj init`

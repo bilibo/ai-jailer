@@ -31,9 +31,9 @@ The same four steps, whatever the change:
    and stops: the hook refuses its edits to these files and the shell
    commands that write them. You can also write the change yourself.
 2. You apply it in your editor and read it: this file runs as the repo's
-   Linux user (the worker, `w-<customer>`), outside any sandbox, at the
+   Linux user (the worker, `w-<org>`), outside any sandbox, at the
    next shell entry. Edit it as yourself through the worker's group or as
-   the worker (`sudo -u w-<customer> -i`).
+   the worker (`sudo -u w-<org> -i`).
 3. `direnv allow` in the repo, as the worker: the hook refuses `direnv
    allow` to a session, so it is yours to run. `.envrc` ends with `require_allowed
    devenv.nix devenv.yaml devenv.lock`, so after a change to any of the

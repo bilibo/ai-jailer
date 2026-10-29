@@ -57,7 +57,7 @@ check() {
 }
 ok() { check 0 "$@"; }
 
-# Explicit <customer>/<repo>, from anywhere.
+# Explicit <org>/<repo>, from anywhere.
 ok "session=acme-infra repo=$root/acme/infra" "$tmp/elsewhere" acme/infra
 ok "session=acme-infra repo=$root/acme/infra args=--worktree" "$tmp/elsewhere" acme/infra --worktree
 ok "session=acme-app repo=$root/acme/app" "$root/acme/infra" acme/app
@@ -89,7 +89,7 @@ AI_JAIL_PROJECT=local/jailer AI_JAIL_PROJECT_DIR="$tmp/elsewhere/jailer" ok "ses
 AI_JAIL_PROJECT=local/jailer AI_JAIL_PROJECT_DIR="$tmp/elsewhere/jailer" ok "session=acme-app repo=$root/acme/app" "$tmp" acme/app
 # The whole -n output of a direct run: no window or role line.
 ok "^session=acme-infra repo=$root/acme/infra${cl}" "$root/acme/infra"
-# Failures: outside the root, missing repo, customer only.
+# Failures: outside the root, missing repo, org only.
 check 64 "usage" "$tmp/elsewhere"
 # No AI_JAILER_CODE_ROOT at all (install.sh route): the default root under $HOME, and usage still prints.
 out=$(cd "$tmp/elsewhere" && env -u AI_JAILER_CODE_ROOT HOME="$tmp" "$ajmux" -n 2>&1); got=$?
@@ -111,16 +111,16 @@ STUB_USERS=w-acme AI_JAIL_PROJECT=local/jailer AI_JAIL_PROJECT_DIR="$tmp/elsewhe
 # The worker itself: a direct run, no user= in the output.
 STUB_USER=w-acme STUB_USERS=w-acme ok "^session=acme-infra repo=$root/acme/infra${cl}" "$tmp/elsewhere" acme/infra
 STUB_USER=w-acme STUB_USERS=w-acme check 66 "^ajmux: no such repo: $root/acme/x \(give" "$tmp/elsewhere" acme/x
-# Another customer's worker is refused, before anything else.
-STUB_USER=w-beta STUB_USERS="w-acme w-beta" check 66 "^ajmux: a worker cannot open another customer's session \(w-acme\)$" "$tmp/elsewhere" acme/x
-STUB_USER=w-beta STUB_USERS="w-acme w-beta" check 66 "^ajmux: a worker cannot open another customer's session \(w-acme\)$" "$tmp/elsewhere" acme/infra
+# Another org's worker is refused, before anything else.
+STUB_USER=w-beta STUB_USERS="w-acme w-beta" check 66 "^ajmux: a worker cannot open another org's session \(w-acme\)$" "$tmp/elsewhere" acme/x
+STUB_USER=w-beta STUB_USERS="w-acme w-beta" check 66 "^ajmux: a worker cannot open another org's session \(w-acme\)$" "$tmp/elsewhere" acme/infra
 # No such user on the host: a direct run for the caller.
 STUB_USERS=w-other ok "^session=acme-infra repo=$root/acme/infra${cl}" "$tmp/elsewhere" acme/infra
 STUB_USERS=w-other check 66 "^ajmux: no such repo: $root/acme/x \(give" "$tmp/elsewhere" acme/x
 # AI_JAILER_WORKER_PREFIX names the users; w-acme is then just another user.
 AI_JAILER_WORKER_PREFIX=agent- STUB_USERS="w-acme agent-acme" ok "^session=acme-x project=acme/x user=agent-acme \(sudo -u agent-acme -i ajmux acme/x\)$" "$tmp/elsewhere" acme/x
 AI_JAILER_WORKER_PREFIX=agent- STUB_USERS=w-acme check 66 "^ajmux: no such repo" "$tmp/elsewhere" acme/x
-AI_JAILER_WORKER_PREFIX=agent- STUB_USER=agent-beta STUB_USERS=agent-acme check 66 "another customer's session \(agent-acme\)$" "$tmp/elsewhere" acme/x
+AI_JAILER_WORKER_PREFIX=agent- STUB_USER=agent-beta STUB_USERS=agent-acme check 66 "another org's session \(agent-acme\)$" "$tmp/elsewhere" acme/x
 AI_JAILER_WORKER_PREFIX=agent- STUB_USER=w-beta STUB_USERS=agent-acme ok "user=agent-acme " "$tmp/elsewhere" acme/x
 
 # Where the window's claude comes from. PATH first, by absolute path (the

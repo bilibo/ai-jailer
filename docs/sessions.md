@@ -1,8 +1,8 @@
 # Sessions: tiers and proposals
 
 How several Claude Code sessions on one host work together without trusting
-each other. Written 2026-10-20 from the first live case: a session in a
-customer repo was refused an edit by the hook (the rule for `devenv.nix`
+each other. Written 2026-10-20 from the first live case: a session in an
+org repo was refused an edit by the hook (the rule for `devenv.nix`
 matched ai-jailer's own module source), wrote the change up as a diff,
 sent it to the session open in the ai-jailer checkout, and that session put
 the diff in front of Raul before applying it. That sequence is the design;
@@ -50,7 +50,7 @@ checked.
 
 ## 3. Tiers, realised as Linux users
 
-Planned on 2026-10-20 as two tiers, customer and platform, chosen by
+Planned on 2026-10-20 as two tiers, org and platform, chosen by
 `ajmux` from the directory and exported as `AI_JAILER_TIER`. Realised on
 2026-10-24 as a role the repo's devenv shell set (`harness.role`,
 `AI_JAILER_ROLE`). Replaced on 2026-10-27 by Linux users, because a role set
@@ -60,16 +60,16 @@ property of the operating system. Section 5 keeps the old words.
 
 | Tier | Who | Rules | Part in the flow |
 |---|---|---|---|
-| work | the worker user `w-<customer>`, one per customer: private 0750 home, own Claude login, own git identity, own clones under its code root (`~/code/git/<customer>/<repo>`), no push credential, no sudo | the law from the host's managed settings, and the jail: the full deny set, the sandbox with its lists and the account sync off in its own user settings, written by `aj bootstrap` from `/etc/claude-code/jail-settings.json` and checked against it by the hook before every tool (2026-10-28, roadmap item 14); plus the repo's project layer, the cell | proposes; never applies a change the rules refused |
-| owner | your own account, a member of every worker's group, with `sudo -u w-<customer>` to the workers and no sudo rule the other way | the law alone: credential reads, `git commit` and `git push` refused, bypass mode and mods off; no sandbox, no other deny rule or hook rule (2026-10-28, roadmap item 14): the ai-jailer checkout needs nix, sudo, `gh` and the daemon socket | the human: accepts or rejects proposals, applies diffs as the owner or as the worker, reads the workers' clones through the group |
+| work | the worker user `w-<org>`, one per org: private 0750 home, own Claude login, own git identity, own clones under its code root (`~/code/git/<org>/<repo>`), no push credential, no sudo | the law from the host's managed settings, and the jail: the full deny set, the sandbox with its lists and the account sync off in its own user settings, written by `aj bootstrap` from `/etc/claude-code/jail-settings.json` and checked against it by the hook before every tool (2026-10-28, roadmap item 14); plus the repo's project layer, the cell | proposes; never applies a change the rules refused |
+| owner | your own account, a member of every worker's group, with `sudo -u w-<org>` to the workers and no sudo rule the other way | the law alone: credential reads, `git commit` and `git push` refused, bypass mode and mods off; no sandbox, no other deny rule or hook rule (2026-10-28, roadmap item 14): the ai-jailer checkout needs nix, sudo, `gh` and the daemon socket | the human: accepts or rejects proposals, applies diffs as the owner or as the worker, reads the workers' clones through the group |
 
 Which tier a session is in is its UID, not a line in a file an agent could
 edit: a worker cannot become the owner, cannot read the owner's home or
 another worker's (0750; untested live, check V7 and `aj check` case
 18), and cannot use sudo (hook rule 4 refuses it by text; the sudoers file
-has no rule for a worker). `ajmux <customer>/<repo>` from the owner's
-account hands over to the worker (`sudo -u w-<customer> -i`); a worker
-naming another customer is refused. No session has a different rule set
+has no rule for a worker). `ajmux <org>/<repo>` from the owner's
+account hands over to the worker (`sudo -u w-<org> -i`); a worker
+naming another org is refused. No session has a different rule set
 from the workers': a session in this checkout is an ordinary managed
 session. A tmux server is per user, so a worker's `send-keys` reaches only
 its own server (runbook section 8).
@@ -92,7 +92,7 @@ the owner.
    the proposal to the human: the model relays it in chat and asks. The
    window it waits in turns colour in tmux (`tmux-notify.sh`), per user.
 3. The human accepts and applies the diff, as the owner or as the worker
-   (`sudo -u w-<customer> -i`), in an editor or a terminal, since the hook
+   (`sudo -u w-<org> -i`), in an editor or a terminal, since the hook
    refuses a session's edit to these files in every session. The
    `direnv allow` that follows is the human's, run as the worker: the hook
    refuses it to sessions.

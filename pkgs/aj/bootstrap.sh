@@ -12,7 +12,7 @@
 # Fedora 44 or newer from Fedora's own packages, on any other distro with the
 # nix-installer; NixOS has its own) and Claude Code to the shape of the
 # README: the host-wide managed rules at /etc/claude-code (the flake's
-# `managed` package, linked there), optionally one Linux user per customer,
+# `managed` package, linked there), optionally one Linux user per org,
 # direnv >= 2.38, devenv, ajmux and aj from this flake (`nix profile
 # add`, pinned by flake.lock), and the user-side configuration: direnv.toml,
 # the tmux rules, the direnv hook for bash and zsh, AI_JAILER_CODE_ROOT, the
@@ -51,7 +51,9 @@
 # Idempotent: every step checks before it writes, so re-run it after a
 # change. `upgrade` is bootstrap that also moves the profile packages to the
 # ai-jailer ref's current flake.lock (and relinks /etc/claude-code when the
-# ref's rules changed). scripts/install.sh owns the root steps that come
+# ref's rules changed); without --workers it takes the receipt's workers,
+# and leaves their sudo rule as it is unless --owner-sudo is given.
+# scripts/install.sh owns the root steps that come
 # before Nix (dnf on Fedora, the SELinux label, the nix-daemon socket); root
 # is needed here for the steps below. All go through sudo and say what they
 # do first; --no-root skips them (and with them --workers); --no-profile
@@ -94,11 +96,11 @@
 #    removes links into /etc/static). Untested (2026-10-27): `nix build
 #    --out-link` under sudo on a host where the daemon does the build.
 #  - With --workers (or --worker, repeatable): the group `agents`, and per
-#    customer c the user w-c (primary group w-c, member of agents, home 0750,
+#    org c the user w-c (primary group w-c, member of agents, home 0750,
 #    shell bash), the owner added to group w-c so that the owner can read the
 #    worker's home, and `loginctl enable-linger w-c` so the worker's tmux
 #    survives logout. A user that exists is not recreated. Each command is
-#    guarded, so a second run runs none of them. The customers are recorded in
+#    guarded, so a second run runs none of them. The orgs are recorded in
 #    the receipt (root.workers).
 #  - With --workers, unless --owner-sudo none, and never on NixOS:
 #    /etc/sudoers.d/ai-jailer holding `<owner> ALL=(%agents)
@@ -123,8 +125,9 @@
 # line fails with "unknown argument".
 #
 # The ai-jailer ref (what `nix profile add` installs from): --jailer, else
-# AI_JAILER_REF, else the receipt's, else github:bilibo/ai-jailer. A `path:/nix/store/...` ref warns: a
-# later upgrade cannot move it.
+# AI_JAILER_REF, else the receipt's, else github:bilibo/ai-jailer. A `path:/nix/store/...` ref warns: an
+# upgrade this user runs cannot move it; the owner's `aj upgrade --workers`
+# does, with a fresh snapshot.
 #
 # --trusted-user adds the owner (you) to Nix's trusted-users. Not needed: the
 # devenv cache goes into the root-owned nix.conf as a substituter, which is
@@ -139,7 +142,7 @@
 #
 # The receipt, ~/.local/state/ai-jailer/receipt.json, lists what
 # bootstrap put on the host: profile packages, files (whole files, marker
-# blocks, merged keys), dnf packages, root steps and worker customers, the
+# blocks, merged keys), dnf packages, root steps and worker orgs, the
 # VS Code extension, the ai-jailer ref and revision. Each bootstrap and upgrade
 # adds to it. Receipts written before 2026-10-27 may list the strictAllowlist
 # and sync keys of ~/.claude/settings.json; reset still strips them.
@@ -158,7 +161,7 @@ set -euo pipefail
 
 CMD="${AI_JAILER_CMD:-bootstrap}"   # bootstrap, upgrade, doctor or reset: pkgs/aj.nix sets it
 NO_ROOT=0; NO_PROFILE=0; TRUSTED_USER=0; YES=0; DRY_RUN=0; VERBOSE=0
-WORKERS=()   # customers (--workers); the Linux user of customer c is $WORKER_PREFIX$c
+WORKERS=()   # orgs (--workers); the Linux user of org c is $WORKER_PREFIX$c
 OWNER="${USER:-$(id -un)}"; OWNER_SUDO=nopasswd
 WORKER_PREFIX="${AI_JAILER_WORKER_PREFIX:-w-}"
 CODE_ROOT="${AI_JAILER_CODE_ROOT:-$HOME/code/git}"
@@ -168,7 +171,7 @@ AI_JAILER_REF="${AI_JAILER_REF:-path:$AI_JAILER_DIR}"
 AI_JAILER_REF_FROM="${AI_JAILER_REF_FROM:-checkout}"
 usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 ORIG_ARGS=("$@")   # upgrade hands them to the upgraded aj (handover_steps)
-add_workers() { # add_workers <comma list>: customers, in order, no repeats
+add_workers() { # add_workers <comma list>: orgs, in order, no repeats
   local -a names; local w x seen
   IFS=, read -r -a names <<<"$1"
   for w in "${names[@]}"; do
@@ -185,7 +188,7 @@ while [ $# -gt 0 ]; do
     --no-root) NO_ROOT=1 ;;
     --no-profile) NO_PROFILE=1 ;;
     --trusted-user) TRUSTED_USER=1 ;;
-    --workers|--worker) add_workers "${2:?$1 needs a customer name (--workers takes a comma-separated list)}"; shift ;;
+    --workers|--worker) add_workers "${2:?$1 needs an org name (--workers takes a comma-separated list)}"; shift ;;
     --owner) OWNER="${2:?--owner needs a login}"; shift ;;
     --owner-sudo) OWNER_SUDO="${2:?--owner-sudo needs nopasswd, password or none}"; shift ;;
     --code-root) CODE_ROOT="${2:?--code-root needs a directory}"; shift ;;
@@ -504,16 +507,19 @@ managed_step() {
   R_ROOT_STEPS+=(managed)
 }
 
-# One Linux user per customer. A user that already exists is left as it is,
+# One Linux user per org. A user that already exists is left as it is,
 # whatever its groups.
 worker_steps() {
-  local c w home
+  local c w home sh=/bin/bash
   [ ${#WORKERS[@]} -gt 0 ] || return 0
+  # Plain NixOS has only /bin/sh. Not `command -v bash`: in the checkout's
+  # devenv shell that is a store path, which garbage collection removes.
+  [ -x "$sh" ] || sh=/run/current-system/sw/bin/bash
   group_exists agents || { step "create the group agents (marks the worker users)"; run sudo groupadd agents; }
   for c in "${WORKERS[@]}"; do
     w="$WORKER_PREFIX$c"; home="$HOME_BASE/$w"
     group_exists "$w" || { step "create the group $w"; run sudo groupadd "$w"; }
-    user_exists "$w" || { step "create the user $w"; run sudo useradd -m -g "$w" -G agents -s /bin/bash -c "ai-jailer worker for $c" "$w"; }
+    user_exists "$w" || { step "create the user $w"; run sudo useradd -m -g "$w" -G agents -s "$sh" -c "ai-jailer worker for $c" "$w"; }
     [ "$(stat -c %a "$home" 2>/dev/null || true)" = 750 ] || { step "chmod 0750 $home"; run sudo chmod 0750 "$home"; }
     group_has "$w" "$OWNER" || { step "add $OWNER to the group $w (reads $home)"; run sudo usermod -aG "$w" "$OWNER"; }
     linger_on "$w" || { step "enable linger for $w (its tmux survives logout)"; run sudo loginctl enable-linger "$w"; }
@@ -1125,7 +1131,7 @@ report() {
       [ "$(readlink -f "$(command -v bwrap 2>/dev/null || echo /usr/bin/bwrap)")" = /usr/bin/bwrap ] || warn "the profile is for /usr/bin/bwrap but bwrap on PATH is $(command -v bwrap): the sandbox may still be refused"
     else ok "no sysctl confines unprivileged user namespaces"; fi
   fi
-  if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- /bin/true 2>/dev/null; then ok "bubblewrap works here"; else miss "bubblewrap cannot create a sandbox here"; fi
+  if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- true 2>/dev/null; then ok "bubblewrap works here"; else miss "bubblewrap cannot create a sandbox here"; fi
   # ajmux carries its own tmux and a repo's ai-jail.claudeCode.enable puts
   # one in its shell, so a host without tmux still runs sessions; `tmux
   # attach` or `tmux ls` from a plain terminal does not work there.
@@ -1167,7 +1173,7 @@ report() {
     fi
   fi
 
-  [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ajmux resolves <customer>/<repo> under it)"
+  [ -d "$CODE_ROOT" ] && ok "code root $CODE_ROOT" || miss "code root $CODE_ROOT (ajmux resolves <org>/<repo> under it)"
   # The file direnv reads: NixOS programs.direnv points DIRENV_CONFIG at
   # /etc/direnv. A store link is a Nix module's, taken as is; any other
   # file is judged by its two security keys.
@@ -1304,11 +1310,18 @@ case "$CMD" in
     summary ;;
   bootstrap|upgrade)
     if [[ "$AI_JAILER_REF" == path:/nix/store/* ]]; then
-      warn "the ai-jailer ref is this aj's store path ($AI_JAILER_REF_FROM): a later upgrade cannot move it; pass --jailer github:bilibo/ai-jailer or --jailer path:<checkout>"
+      warn "the ai-jailer ref is a store path ($AI_JAILER_REF_FROM): an upgrade this user runs cannot move it, the owner's aj upgrade --workers does (a fresh snapshot); or pass --jailer github:bilibo/ai-jailer or --jailer path:<checkout>"
     fi
     if [ "$CMD" = upgrade ]; then
       load_receipt
       [ "$HAVE_RECEIPT" = 0 ] || [ -z "$(rq '.profile[]?')" ] || mapfile -t PROFILE_PKGS < <(rq '.profile[]')
+      # Bare upgrade moves the recorded workers too; one the host lacks is
+      # created again (what doctor asks for). The receipt does not record
+      # --owner-sudo, so without the flag the sudo rule is left as it is.
+      if [ "$HAVE_RECEIPT" = 1 ] && [ "$NO_ROOT" = 0 ] && [ ${#WORKERS[@]} -eq 0 ]; then
+        mapfile -t WORKERS < <(rq '.root.workers[]?')
+        in_list --owner-sudo "${ORIG_ARGS[@]}" || OWNER_SUDO=none
+      fi
     fi
     [ "$NO_ROOT" = 1 ] || { [ "$DRY_RUN" = 1 ] || sudo -v || die "sudo is needed for the root steps (nix.conf, the user-namespace setting, the managed link, the worker users; or pass --no-root after doing those by hand)"; root_steps; }
     [ "$NO_ROOT" = 1 ] || worker_user_steps
@@ -1322,13 +1335,19 @@ case "$CMD" in
     if [ ${#DEFERRED[@]} -gt 0 ]; then
       echo; echo "Declined, run later (every Claude command is refused until then):"; printf '  %s\n' "${DEFERRED[@]}"
     fi
+    # Only what this run wrote: NixOS puts the nix profile on every PATH
+    # itself, and user_steps leaves ~/.bashrc.d out where /etc/bashrc hooks
+    # direnv.
+    via=""
+    [ "$HOST" = nixos ] || [ "$NO_PROFILE" = 1 ] || via="PATH from profile.d"
+    [[ " ${R_FILES[*]} " != *"\"path\":\"$HOME/.bashrc.d/ai-jailer.sh\""* ]] || via="${via:+$via; }the direnv hook and NIX_SSL_CERT_FILE from ~/.bashrc.d"
     cat <<NEXT
 
-Next: open a new terminal (PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d), then
-  aj init <customer>/<repo>                  # a jail under $CODE_ROOT
-  aj check $CODE_ROOT/<customer>/<repo>       # the live checks (API calls)
-Log out and in once so GUI-launched VS Code gets the nix profile on PATH.
+Next: open a new terminal${via:+ ($via)}, then
+  aj init <org>/<repo>                       # a jail under $CODE_ROOT
+  aj check $CODE_ROOT/<org>/<repo>            # the live checks (API calls)
 NEXT
+    [ "$HOST" = nixos ] || [ "$NO_PROFILE" = 1 ] || echo "Log out and in once so GUI-launched VS Code gets the nix profile on PATH."
     ;;
   *) die "unknown command (bootstrap, upgrade, doctor or reset)" ;;
 esac

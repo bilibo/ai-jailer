@@ -25,7 +25,7 @@ What the pieces add up to, and what is missing for it:
 2. The ai-jailer checkout is the command center: its own devenv shell,
    `ajmux` in it, the session where the human accepts what other
    sessions propose.
-3. `aj init <customer>/<repo>` per project: a standard
+3. `aj init <org>/<repo>` per project: a standard
    `devenv.nix` a non-Nix user can add tools to.
 4. `ajmux` sessions per project, set on tasks by hand or by the command
    center; what their rules refuse, they propose to the command center
@@ -41,7 +41,7 @@ own role (`center`), but its hook is a work repo's, so it still refuses
 its `devenv.nix` and the module source `devenv/devenv.nix`.
 3 works, with a guide since 2026-10-24 (gap C). 4 works by hand.
 Added 2026-10-27: item 11 replaces the center and the role with one
-Linux user per customer and host-wide managed rules; point 2 above is
+Linux user per org and host-wide managed rules; point 2 above is
 superseded by it.
 
 The gaps, in order:
@@ -82,7 +82,7 @@ The gaps, in order:
   (`allow_unfree: true`); the `direnv allow` prompt after every change
   and why (`require_allowed`); and the agent's side: it proposes the
   diff, the human applies it. The template gains one commented line per
-  case pointing at the guide. The customer module's `lang` option (item 9) shortens
+  case pointing at the guide. The org module's `lang` option (item 9) shortens
   it later; the guide comes first. Since 2026-10-21 the template lists
   every ai-jail option commented out; the guide is still to write.
 - D. **Command center as a tier**: realised 2026-10-24 as `harness.role`
@@ -290,7 +290,7 @@ The gaps, in order:
       display-message -p '#S'` prints the session name today; after (a)
       the hook refuses `tmux new-window`; after (b) the client cannot
       connect.
-      Added 2026-10-27 (item 11): with one Linux user per customer the
+      Added 2026-10-27 (item 11): with one Linux user per org the
       tmux socket is per UID, so a worker's session reaches only its own
       worker's server; that server still runs unsandboxed as the worker,
       so (b) stays open.
@@ -310,11 +310,11 @@ The gaps, in order:
    `imports: - devenv-base/azure` resolves to `azure/devenv.nix`, same rule
    as `ai-jailer/devenv`.
 4. **Repo template**: the test repo minus Rust, plus the azure module;
-   `aj init` renders it. Convert one real customer repo; confirm
+   `aj init` renders it. Convert one real org repo; confirm
    `az account show` and `terraform plan` inside the sandbox with the
    network allowlist, and record the exact blob hosts the first
    `terraform init` and `trivy` run need.
-5. **Reader-only service principal per customer.** The one control that
+5. **Reader-only service principal per org.** The one control that
    holds against every client, including things the hook never sees. Human
    logs it into the repo's `AZURE_CONFIG_DIR`.
 6. **Limits suite**: `aj check` (`pkgs/aj/check.sh`) is the first cut. Still to do:
@@ -369,20 +369,20 @@ The gaps, in order:
      (2026-10-27): there is no center.
    - Platform roots without a jail devenv (`~/nixos-config`): no role,
      no generated file; the planned `ajmux --settings` route was not built.
-   - Customer module (`imports: - ai-jailer/devenv/customer`, with items 3
-     to 5): `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `CUSTOMER_NAME`;
+   - Org module (`imports: - ai-jailer/devenv/org`, with items 3
+     to 5): `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `ORG_NAME`;
      `AZURE_CONFIG_DIR` per actor under `.git/devenv-base/`; a human-only
      `az-login` script; an `enterShell` tenant check; a hook branch that
      refuses `az`, `terraform apply|destroy` and `pulumi up` on a tenant or
      subscription mismatch; `allowWrite` and `lang` options.
-   - `aj init` additions: a customer registry
-     (`~/code/git/<customer>/customer.toml`), the customer block in
+   - `aj init` additions: an org registry
+     (`~/code/git/<org>/org.toml`), the org block in
      `devenv.nix`, `README.md` and `.editorconfig`, the first commit, the
      template version in `devenv.yaml`, and `aj upgrade` showing the
      diff.
    - Limits-suite cases for item 6: nested `claude --add-dir ..`, `nh os
      switch`, `nixos-rebuild switch`, `home-manager switch`, reads of a
-     sibling customer file, outside the code root and of another project's
+     sibling org file, outside the code root and of another project's
      `~/.claude/projects/`, `terraform apply` with `allowWrite = false` and
      with a mismatched subscription, a write to `~/.claude/settings.json`,
      `/mnt/c` and `/run/WSL` on WSL, `git push`.
@@ -390,7 +390,7 @@ The gaps, in order:
      working-style rule from nixos-config; platform-tier cloud tools (`az`,
      `azd`, `terraform` into a devenv, or a PATH filter); whether
      `~/nixos-config` sessions may commit; where the doc-quality skills
-     live for customer repos (since 2026-10-24 ai-jailer ships no
+     live for org repos (since 2026-10-24 ai-jailer ships no
      plugins); what `allowWrite = true` means against the unconditional
      apply/destroy deny; pointing `azfn-rust-handler/devenv.yaml` at this
      repo.
@@ -423,12 +423,12 @@ The gaps, in order:
     - Hard rules live in the host-wide managed tree (`/etc/claude-code`,
       root-owned), on every host shape; the owner's sessions are bound
       too. The repo file carries the project layer only, no hooks.
-    - One Linux user per customer from `harness.workers` in the NixOS
-      module: `w-<customer>`, 0750 home, group `w-<customer>` with the
+    - One Linux user per org from `harness.workers` in the NixOS
+      module: `w-<org>`, 0750 home, group `w-<org>` with the
       owner as member, marker group `agents`, linger, never in
       `trusted-users`, Home Manager per worker, user settings seeded
-      once, never a store symlink. `ajmux <customer>/<repo>` hands over
-      with `sudo -u w-<customer> -i`.
+      once, never a store symlink. `ajmux <org>/<repo>` hands over
+      with `sudo -u w-<org> -i`.
     - The host matrix stays; `aj bootstrap` mirrors the module on
       Fedora and Ubuntu (`--workers`, `--owner`, `--owner-sudo`).
     - Claude Code's own sandbox stays; every `strictAllowlist` piece and
@@ -506,7 +506,7 @@ The gaps, in order:
       both modules are gone.
 
 12. **One route on every Linux, run from the checkout (2026-10-27).**
-    Reopens item 11's "one Linux user per customer from
+    Reopens item 11's "one Linux user per org from
     `harness.workers` in the NixOS module" and "Home Manager per
     worker": the owner found that the NixOS route put jailer users,
     rules and options into the host repo (`bilibo/nixos-wsl`), which
@@ -623,7 +623,7 @@ The gaps, in order:
     sandbox. The picture, the owner's: ai-jailer is the factory. `aj
     bootstrap` sets up the jailer's host: the law under
     `/etc/claude-code`, the prisoner users and groups, and each
-    prisoner's chains. `aj init <customer>/<repo>` builds a cell, the
+    prisoner's chains. `aj init <org>/<repo>` builds a cell, the
     project layer of one repo. The owner works in a cell through `ajmux`
     as the prisoner; the AI minion is the escape risk, not the human.
     The shape comes first, so that what guides the tree away from it is
@@ -722,10 +722,16 @@ The gaps, in order:
     shellcheck clean on bootstrap.
 
     Open:
-    - [ ] Whether `permissions.deny` `Read(...)` on the credential files
+    - [x] Whether `permissions.deny` `Read(...)` on the credential files
       stops the Read tool for an unsandboxed jailer as the reference says
       (the hook covers Bash; Edit and Write of those files rely on the
-      Read deny, 2.1.228+).
+      Read deny, 2.1.228+). 2026-10-29, from the jailer session: yes
+      inside the project directory (a Write of `<cwd>/probe.tfstate` was
+      refused with "covered by a Read deny rule"), but a `**/` pattern is
+      relative to the session's project directory: the same file under
+      `/tmp` was written and read back by the tools, and only the hook's
+      Bash rule caught `cat` on it. Absolute patterns (`~/.ssh/**`) are
+      not affected.
     - [x] `nix flake check` on a copy of the regular files, 2026-10-28,
       from a session whose Bash sandbox had been turned off: every check
       passes (hook-test 443, hook-test-worktree 462, aj-bootstrap 280,
@@ -741,6 +747,18 @@ The gaps, in order:
       repairs it; V15 a jailer session in this checkout runs `nix flake
       check`, `git add` and `sudo -v` (prompted), and is refused `git
       commit`, `git push` and `cat ~/.ssh/id_ed25519`.
+      2026-10-29: V15 passes as written (`nix flake check` 25 s on the
+      checkout, `git add`, `sudo -v`; the three refusals each came back
+      as `env-guard: git commit/push blocked` or `credential file access
+      blocked`, and a compound command containing `git commit` was
+      refused whole). V13: the worker session starts (SessionStart hook
+      exit 0, init line, `permissionMode: default`), but `w-acme` has
+      never logged in, so `aj check` ended `1 passed, 16 failed`, every
+      one a `Not logged in · Please run /login` result; `aj check` now
+      says that once (login pre-flight). Left for the human: `claude
+      /login` as `w-acme`, then `aj check` again. V14: not run; the
+      session's permission classifier refuses editing a worker's
+      settings, so the human runs it (commands in the tasklist).
     - [ ] Each managed-only key in the law, decided on its own: bypass
       mode off, `allowManagedHooksOnly`, the mod policy. All three bind
       the jailer today.

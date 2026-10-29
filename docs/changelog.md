@@ -3,6 +3,68 @@
 Dated entries, newest first. The roadmap says what is next; this says what
 happened and what was learned on the day.
 
+## 2026-10-29
+
+- `customer` is `org` everywhere: `<org>/<repo>`, `w-<org>`, the
+  `ajmux` usage and errors (`a worker cannot open another org's
+  session`), `aj` help, bootstrap's text, the comments and the docs. The
+  README defines an org once: whoever the work is for, a client, a team,
+  an open-source org or yourself, with one Linux user per org as the
+  boundary. Worker user names, the receipt's `root.workers` and
+  `AI_JAIL_PROJECT` are unchanged. Decided 2026-10-28: no consulting
+  speak; `project` already names the pair.
+- Bare `aj upgrade` upgrades the workers recorded in the receipt
+  (`root.workers`), as the README promised since 2026-10-28; a recorded
+  worker the host lacks is created again, which is what doctor would
+  ask for. Without `--owner-sudo` the existing sudo rule is left alone,
+  because the receipt does not record it.
+- Worker users get `/bin/bash`, or `/run/current-system/sw/bin/bash` on
+  plain NixOS (only `/bin/sh` there), never `$(command -v bash)`: from
+  the checkout's devenv shell that is a store path garbage collection
+  would remove, and `sudo -u w-x -i` with it. Doctor's bwrap probe runs
+  `true` off PATH instead of `/bin/true`.
+- Bootstrap's store-ref warning says what is true: the owner's
+  `aj upgrade --workers` does move a worker's snapshot, an upgrade the
+  worker runs itself cannot. The closing "Next" text names only what the
+  run wrote: no profile.d or `~/.bashrc.d` on NixOS, no log-out note on
+  NixOS or with `--no-profile`.
+- `aj check` makes one login pre-flight call before the cases. The first
+  live run as `w-acme` ended `1 passed, 16 failed`, every FAIL a
+  `no line matched` whose transcript carried `Not logged in · Please run
+  /login`: a worker that has never logged in looked like sixteen
+  regressions. Now one `FAIL  login` names the user and the fix, the
+  cases do not run, exit 1. The parser test has a stub-claude case.
+- `hooks/env-guard.sh` refusals say what to do instead: the git
+  history/index, terraform and az write messages keep their prefix and
+  append the alternative (`git add`, `git switch -c`, `git show
+  HEAD:<path>` for git; plan/validate for terraform; read/list/show for
+  az, the human runs the writes). A bare `blocked` made a model try flag
+  variants for two or three turns.
+- `aj init`'s CLAUDE.md contract is action rules, not plumbing: read
+  `devenv.nix` first for tools and identifiers, never read dotenv,
+  tfvars, tfstate, `.devenv/`, `.direnv/`; a change to the protected
+  files goes to `proposals/<YYYY-MM-DD>-<topic>.patch`; stage only,
+  revert with `git show HEAD:<f> > <f>`; scope `az` output; stop on a
+  refusal. The paragraph on where the layers come from is gone, a
+  worker never needed it. The template now gitignores `proposals/`
+  (promised, not done) and writes `.ignore` with `devenv.lock`, so a
+  ripgrep-backed Grep skips the tracked lockfile; the factory has the
+  same `.ignore`, since `scripts/install.sh` runs `aj init` here.
+- Workers can no longer Read or Edit `.devenv/` and `.direnv/` (the
+  evaluated profile and env dumps: large, nothing a model needs). A jail
+  `Read` deny, not a sandbox `denyRead`, so Bash still runs
+  `.devenv/profile/bin`; `lib/deny-rules.nix` has a `workerReads` list
+  for rules that are the workers' and not the law's. The tests now pin
+  the `.terraform` rule too.
+- CLAUDE.md's Checks: an unsandboxed session runs `nix flake check` on
+  the checkout (25 s, exit 0 today); the tar copy is the sandboxed
+  worker's fallback, `-L` only after a failure.
+- Live, from the jailer session: V15 of the release gate passes; the
+  `Read(...)` deny binds the unsandboxed jailer's Read and Write inside
+  the project directory, and `**/` patterns stop at that directory (the
+  roadmap has the detail). V13 waits on the worker's first `claude
+  /login`; V14 on the human.
+
 ## 2026-10-28
 
 - `aj bootstrap` on NixOS writes nothing the system configuration already
@@ -158,8 +220,8 @@ happened and what was learned on the day.
   a bare `*` in `allowedDomains` is undocumented for the sandbox list.
 - Decision (the owner's), roadmap item 11, which reopens item 10: rules
   move to the host-wide managed tree and bind the owner's sessions too;
-  one Linux user per customer from `harness.workers` (`w-<customer>`,
-  0750 home, group `w-<customer>` with the owner, marker group `agents`,
+  one Linux user per org from `harness.workers` (`w-<org>`,
+  0750 home, group `w-<org>` with the owner, marker group `agents`,
   linger, never in `trusted-users`, Home Manager per worker, user
   settings seeded once, never a store symlink); the host matrix stays
   and bootstrap mirrors the module on Fedora and Ubuntu; Claude Code's
@@ -212,7 +274,7 @@ happened and what was learned on the day.
   CLAUDE.md correction is the second patch (`f1-claude-md.patch`).
 - `pkgs/ccmux.nix`: hands over with `exec sudo -u w-<c> -i ccmux
   <c>/<r>` when the caller is not that worker and the user exists; a
-  worker naming another customer is refused; a name with no clone under
+  worker naming another org is refused; a name with no clone under
   the caller's root still hands over; the window is `claude`;
   `XDG_RUNTIME_DIR` is exported (V5 pending). `pkgs/tmux.conf` loses the
   role line.
@@ -519,7 +581,7 @@ happened and what was learned on the day.
   to the checkout's `origin` URL (`git -C <checkout> remote get-url
   origin`), else the checkout folder; `-Output`, `-Tag`, `-NoSwitch` and
   `-SkipVerify` are unchanged, and Done lists bootstrap, a new terminal,
-  `harness doctor`, the clone under `~/code/git/<customer>/` and `harness
+  `harness doctor`, the clone under `~/code/git/<org>/` and `harness
   init`. The in-distro update is `sudo sh
   /etc/nixos/scripts/wsl/update.sh <name>`. The README (host table, the
   Windows section, layout), runbook section 4, the roadmap's Done entry (a
@@ -1426,7 +1488,7 @@ happened and what was learned on the day.
   imports that file with no `require_allowed` prompt, so the human's next
   shell would have run it; a literal `denyWrite` masks a missing path, so
   it cannot be created now. Bootstrap's pasted tmux block lacked the
-  `HARNESS_PROJECT` unsets that `pkgs/tmux.conf` has (a pane for customer B
+  `HARNESS_PROJECT` unsets that `pkgs/tmux.conf` has (a pane for org B
   inherited A's project); bootstrap now appends the `pkgs/` files, handed
   over by `harness.nix`. `reset` without a receipt no longer lists Nix as
   its own. `scripts/install.sh` keeps only the dnf step and execs `harness
@@ -1547,7 +1609,7 @@ happened and what was learned on the day.
 - Docs reworked to the Fedora reality: README opening, host table, a
   "Lockdown level today" table; runbook sections 3 to 6 and 8; the
   handoff's inventory; this file.
-- First cross-session case live: a customer session's refused edit to
+- First cross-session case live: an org session's refused edit to
   `devenv/devenv.nix` relayed as a diff to the platform session, which
   asked Raul before applying. Written up as `docs/sessions.md`: identity
   from the host, the human as the only gate, a proposal flow, and the

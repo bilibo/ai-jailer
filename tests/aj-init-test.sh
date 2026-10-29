@@ -12,8 +12,9 @@
 # file; init reports it and exits 0 without the checks. The hook test runs on
 # the hook in the managed settings (AI_JAILER_MANAGED_SETTINGS, a fixture
 # here); with no such file init prints MISSING, runs the settings test and
-# exits 1. The generated devenv.nix and CLAUDE.md carry no role, memory or
-# local-commit text and say the rules come from the managed settings.
+# exits 1. The generated devenv.nix carries no role, memory or local-commit
+# text; CLAUDE.md carries the contract's action rules (proposals path, revert
+# line). .gitignore gains proposals/ and .ignore devenv.lock (Grep skips it).
 # With no claude on the host PATH (the default here: PATH is empty) the
 # template turns ai-jail.claudeCode.enable on and devenv.yaml gets
 # allow_unfree: true; with one, both stay commented out. A claude in a store
@@ -42,6 +43,8 @@ if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: init
 check "the repo path"         "aj init: $tmp/code/acme/demo \\(project acme/demo\\)"
 for f in devenv.yaml devenv.nix .envrc CLAUDE.md; do check "plans $f" "would write +$f"; done
 check "plans .gitignore"       'would add +\.gitignore: \.claude/settings\.json'
+check "plans .gitignore proposals/" 'would add +\.gitignore: proposals/'
+check "plans .ignore"          'would add +\.ignore: devenv\.lock'
 check "plans .worktreeinclude" 'would add +\.worktreeinclude: \.claude/settings\.json'
 check "no shell step"          'shell step skipped'
 check "default ref is the published repo" 'jailer: +github:bilibo/ai-jailer \(default\)'
@@ -63,7 +66,7 @@ if [ ! -e "$tmp/code" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAI
 init
 if [ "$rc" = 64 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: init without a target exits $rc, want 64"; fi
 out=$("$aj" init --help 2>&1)
-check "init --help" 'aj init <customer>/<repo>'
+check "init --help" 'aj init <org>/<repo>'
 out=$("$aj" check --help 2>&1)
 check "check --help" 'aj check \[<repo>\]'
 
@@ -160,8 +163,13 @@ lacks "template: no role line"             "$tmp/code/acme/plain/devenv.nix" 'ro
 lacks "template: no allowMemoryEdits"      "$tmp/code/acme/plain/devenv.nix" 'allowMemoryEdits'
 lacks "template: no allowLocalCommits"     "$tmp/code/acme/plain/devenv.nix" 'allowLocalCommits'
 has   "template: extraAllowedDomains note" "$tmp/code/acme/plain/devenv.nix" 'project hosts for the sandbox; live check V2 \(2026-10-27\) pending on whether a managed sandbox honours them'
-has   "CLAUDE.md: the jail's rules"        "$tmp/code/acme/plain/CLAUDE.md" "the Bash sandbox come from the worker user's own settings \\(the jail\\)"
-has   "CLAUDE.md: the law's hook"          "$tmp/code/acme/plain/CLAUDE.md" "hook from the host's managed settings \\(the law\\)"
+has   "CLAUDE.md: the contract heading"    "$tmp/code/acme/plain/CLAUDE.md" '^## Environment contract \(ai-jailer\)$'
+has   "CLAUDE.md: devenv.nix read first"   "$tmp/code/acme/plain/CLAUDE.md" 'devenv\.nix.: read it first'
+has   "CLAUDE.md: the proposals path"      "$tmp/code/acme/plain/CLAUDE.md" 'proposals/<YYYY-MM-DD>-<topic>\.patch'
+has   "CLAUDE.md: the revert line"         "$tmp/code/acme/plain/CLAUDE.md" 'git show HEAD:<f> > <f>'
+has   "CLAUDE.md: az scoped"               "$tmp/code/acme/plain/CLAUDE.md" 'never unfiltered JSON'
+has   "the real run: .gitignore proposals/" "$tmp/code/acme/plain/.gitignore" '^proposals/$'
+has   "the real run: .ignore devenv.lock"  "$tmp/code/acme/plain/.ignore" '^devenv\.lock$'
 
 # The template's .envrc fails the load while devenv.local.nix or
 # devenv.local.yaml exists (roadmap 2.7), before `use devenv`, with an error

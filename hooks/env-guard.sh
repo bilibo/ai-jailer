@@ -3,7 +3,7 @@
 # FileChanged, ConfigChange and PreToolUse from managed settings only; the
 # repo's .claude/settings.json carries no hook since 2026-10-27. The Setup
 # branch below is ready but not registered. Every rule applies in every
-# directory: per-customer isolation comes from the Linux users (decided
+# directory: per-org isolation comes from the Linux users (decided
 # 2026-10-27), not from this hook.
 #
 # Two rule sets (roadmap item 14, 2026-10-28). The law binds every user,
@@ -290,25 +290,25 @@ ENV
         [ "$ALLOW_LOCAL_COMMITS" = 1 ] || git_ops="commit|$git_ops"
         # `/usr/bin/git`, `git -C . push`, `git --git-dir=.git push`.
         re="(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +($git_ops)$e"
-        [[ "$n" =~ $re ]] && deny "git history/index write blocked"
+        [[ "$n" =~ $re ]] && deny "git history/index write blocked: stage with git add, branch with git switch -c; revert a file with git show HEAD:<path> > <path>"
         # `-C`/`-B` reset an existing branch; lowercased they read as the harmless `-c`/`-b`.
         re='(^|[^a-zA-Z0-9_.-])git( +[^ ;&|]+)* +(switch +-C|checkout +-B)( |$)'
-        [[ "$nc" =~ $re ]] && deny "git history/index write blocked"
+        [[ "$nc" =~ $re ]] && deny "git history/index write blocked: stage with git add, branch with git switch -c; revert a file with git show HEAD:<path> > <path>"
         # `git checkout <ref> <path>...` discards edits to those paths; the
         # branch-creating forms take a start point and are the exception.
         re='(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +checkout( +-[^ ;&|]+)* +[^- ;&|][^ ;&|]* +[^- ;&|][^ ;&|]*'
         creates='checkout( +[^ ;&|]+)* +(-b|--orphan|-t|--track)( |$)'
-        [[ "$n" =~ $re ]] && ! [[ "$n" =~ $creates ]] && deny "git history/index write blocked"
+        [[ "$n" =~ $re ]] && ! [[ "$n" =~ $creates ]] && deny "git history/index write blocked: stage with git add, branch with git switch -c; revert a file with git show HEAD:<path> > <path>"
         re='git_dir=|git_work_tree=|git_index_file=|git_config_global=|git_config_system='
         [[ "$n" =~ $re ]] && deny "git env redirect blocked"
 
         # 2. cloud and infrastructure writes
         re="(^|[^a-z])(terraform|tofu|terragrunt)( +-[^ ]+)* +(apply|destroy|import|taint|untaint|state|force-unlock|workspace +(new|delete|select))$e"
-        [[ "$n" =~ $re ]] && deny "terraform write blocked"
+        [[ "$n" =~ $re ]] && deny "terraform write blocked: plan/validate only; propose apply/state commands to the human"
         re="(^|[^a-z])az .* (create|delete|update|set|start|stop|restart|deploy|purge|assign|remove|rotate|regenerate|invoke|run|import|restore|scale)$e"
-        [[ "$n" =~ $re ]] && deny "az write blocked"
+        [[ "$n" =~ $re ]] && deny "az write blocked: read/list/show only; propose write commands to the human"
         re='(^|[^a-z])az +(deployment|group +(create|delete)|rest +.*--method +(post|put|patch|delete))'
-        [[ "$n" =~ $re ]] && deny "az deployment/rest write blocked"
+        [[ "$n" =~ $re ]] && deny "az deployment/rest write blocked: read/list/show only; propose deployment and rest write commands to the human"
         re='(^|[^a-z])(func +azure +functionapp +publish|pulumi +(up|destroy)|bicep +publish)'
         [[ "$n" =~ $re ]] && deny "deploy blocked"
 

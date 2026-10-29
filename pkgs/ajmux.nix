@@ -1,14 +1,14 @@
-# ajmux [-n] [<customer>/<repo> | <path>] [claude args...]
+# ajmux [-n] [<org>/<repo> | <path>] [claude args...]
 # Starts or attaches the project's tmux session and runs claude in a window
 # named `claude`. AI_JAIL_PROJECT is exported by the jail's devenv shell, so
 # inside a repo (or its worktree) the project argument is optional; for a
 # clone outside the code root the shell also exports AI_JAIL_PROJECT_DIR.
 #
-# Each customer is a Linux user, ${AI_JAILER_WORKER_PREFIX:-w-}<customer>, with
+# Each org is a Linux user, ${AI_JAILER_WORKER_PREFIX:-w-}<org>, with
 # its own tmux server. Run by anyone else, ajmux hands over with
-# `sudo -u <worker> -i ajmux <customer>/<repo> [claude args]` and does not
+# `sudo -u <worker> -i ajmux <org>/<repo> [claude args]` and does not
 # touch tmux itself; run by that worker, it starts the session. A worker
-# naming another customer's project is refused (exit 66). With no such user
+# naming another org's project is refused (exit 66). With no such user
 # on the host, ajmux runs directly for the caller.
 #
 # The handover always passes the name, never a path: a path under the
@@ -32,20 +32,20 @@ pkgs.writeShellApplication {
   # keeps after these: sudo has to be the host's setuid binary.
   runtimeInputs = [ pkgs.tmux ];
   text = ''
-    usage() { echo "usage: ajmux [<customer>/<repo> | <path>] [claude args]  (inside a repo under $root, the project is optional)" >&2; exit 64; }
+    usage() { echo "usage: ajmux [<org>/<repo> | <path>] [claude args]  (inside a repo under $root, the project is optional)" >&2; exit 64; }
     die() { echo "ajmux: $*" >&2; exit 66; }
     # Physical path, like the `pwd -P` in resolve, so a symlinked root still matches.
     root="''${AI_JAILER_CODE_ROOT:-${codeRoot}}"
     root=$(cd "$root" 2>/dev/null && pwd -P) || die "no such directory: $root"
 
-    # resolve <dir>: the <customer>/<repo> containing <dir>, or die.
+    # resolve <dir>: the <org>/<repo> containing <dir>, or die.
     resolve() {
       local p rel a b
       p=$(cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"
-      [[ "$p" == "$root/"* ]] || die "$p is not under $root/<customer>/<repo>"
+      [[ "$p" == "$root/"* ]] || die "$p is not under $root/<org>/<repo>"
       rel="''${p#"$root/"}"
       IFS=/ read -r a b _ <<<"$rel"
-      [ -n "$a" ] && [ -n "$b" ] || die "$p is not under $root/<customer>/<repo>"
+      [ -n "$a" ] && [ -n "$b" ] || die "$p is not under $root/<org>/<repo>"
       printf '%s/%s' "$a" "$b"
     }
 
@@ -63,7 +63,7 @@ pkgs.writeShellApplication {
         # Possibly a worker's repo the caller has no copy of.
         project="''${BASH_REMATCH[1]}" missing="$root/$arg"
       else
-        die "no such repo: $root/$arg (give <customer>/<repo>, or a path to a repo under $root)"
+        die "no such repo: $root/$arg (give <org>/<repo>, or a path to a repo under $root)"
       fi
     elif [ -n "''${AI_JAIL_PROJECT:-}" ]; then
       project="$AI_JAIL_PROJECT"
@@ -78,7 +78,7 @@ pkgs.writeShellApplication {
     worker="$prefix''${project%%/*}"
     me=$(id -un)
     if [ "$me" != "$worker" ] && getent passwd "$worker" >/dev/null 2>&1; then
-      case "$me" in "$prefix"*) die "a worker cannot open another customer's session ($worker)" ;; esac
+      case "$me" in "$prefix"*) die "a worker cannot open another org's session ($worker)" ;; esac
       if [ "$dry" = 1 ]; then
         printf 'session=%s project=%s user=%s (sudo -u %s -i ajmux %s' "$session" "$project" "$worker" "$worker" "$project"
         [ $# -eq 0 ] || printf ' %s' "$*"
@@ -86,7 +86,7 @@ pkgs.writeShellApplication {
       fi
       exec sudo -u "$worker" -i ajmux "$project" "$@"
     fi
-    [ -z "$missing" ] || die "no such repo: $missing (give <customer>/<repo>, or a path to a repo under $root)"
+    [ -z "$missing" ] || die "no such repo: $missing (give <org>/<repo>, or a path to a repo under $root)"
 
     if [ -n "''${AI_JAIL_PROJECT_DIR:-}" ] && [ "$project" = "''${AI_JAIL_PROJECT:-}" ]; then
       repo="$AI_JAIL_PROJECT_DIR"

@@ -141,5 +141,21 @@ for c in "work PATH=$tmp/dbin|no claude in $tmp/work's devenv shell or on the ho
   refute "no claude (${a[0]}): no session started" 'transcripts:'
 done
 
+# A claude that is not logged in answers every session with an is_error
+# result line: a real run stops after the login pre-flight with one line
+# naming the cause, the other cases never start, and the exit is 1.
+mkdir -p "$tmp/stub"
+cat >"$tmp/stub/claude" <<'EOF'
+#!/bin/sh
+echo '{"type":"system","subtype":"hook_started"}'
+echo '{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","result":"Not logged in · Please run /login","num_turns":1}'
+EOF
+chmod +x "$tmp/stub/claude"
+out=$(env -i HOME="$tmp" TMPDIR="$tmp" PATH="$tmp/stub" DEVENV_ROOT="$tmp/work" "$aj" check "$tmp/work" 2>&1); rc=$?
+if [ "$rc" = 1 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: not logged in exits $rc, want 1: $out"; fi
+check  "not logged in: one line names the cause" 'FAIL  login +claude is not logged in as [^:]+: run .claude /login. as this user \(or set an API key\), then rerun'
+check  "not logged in: summary"                  '0 passed, 1 failed, 0 skipped, remaining cases not run'
+refute "not logged in: no case ran"              'no line matched|sandbox '
+
 echo "check-parser-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

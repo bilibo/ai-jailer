@@ -37,24 +37,30 @@ inputs without asking.
 
 ## Checks
 
-A bare `nix flake check` fails inside a sandboxed session, and so does
-`path:` on the checkout: the sandbox masks the checkout's untracked dotfiles
-(`.bashrc`, `.gitmodules`, `.vscode`, ...) as device nodes or empty files,
-which the `path:` fetcher refuses. Run it on a copy of the regular files
-only:
+An unsandboxed session (the jailer's, here) runs `nix flake check` and
+`nix build .#checks.x86_64-linux.<name> --no-link` straight on the
+checkout (the full check 25 s, one check 4 s, 2026-10-29). A passing
+run prints three lines; add `-L`, or run `nix log`, only after a
+failure.
 
-```
+A sandboxed worker session cannot: a bare `nix flake check` fails there,
+and so does `path:` on the checkout, because the sandbox masks the
+checkout's untracked dotfiles (`.bashrc`, `.gitmodules`, `.vscode`, ...)
+as device nodes or empty files, which the `path:` fetcher refuses. The
+fallback is a copy of the regular files only:
+
+```sh
 git ls-files -co --exclude-standard -z \
   | while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\0' "$f"; done \
   | tar --null -T - -cf - | tar -xf - -C <dir>
 nix flake check path:<dir>
+nix build path:<dir>#checks.x86_64-linux.<name> --no-link
 ```
 
-One check at a time: `nix build path:<dir>#checks.x86_64-linux.<name>
---no-link -L`. Before handing over Nix changes: format, `statix`,
-`deadnix`; never pass `self` into a package. From a session `nix fmt`
-finds no tree root in the copy and walks the whole visible filesystem
-(six minutes, nothing formatted, 2026-10-24), so run the tools on the
-files: `nixfmt --check $(git ls-files -- '*.nix')` (`nix shell
-nixpkgs#nixfmt`), `nix run nixpkgs#statix -- check <file>`, `nix run
-nixpkgs#deadnix -- --fail <file>`.
+Before handing over Nix changes: format, `statix`, `deadnix`; never pass
+`self` into a package. From a session `nix fmt` finds no tree root in the
+copy and walks the whole visible filesystem (six minutes, nothing
+formatted, 2026-10-24), so run the tools on the files: `nixfmt --check
+$(git ls-files -- '*.nix')` (`nix shell nixpkgs#nixfmt`), `nix run
+nixpkgs#statix -- check <file>`, `nix run nixpkgs#deadnix -- --fail
+<file>`.
