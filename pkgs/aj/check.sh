@@ -11,9 +11,10 @@
 # after a Claude Code upgrade is the point of this file. --parse prints what
 # the verdicts see in a saved transcript (tests/check-parser-test.sh).
 #
-# Costs API calls (one login pre-flight, then seventeen short sessions, eighteen for a worker, where
+# Costs API calls (one login pre-flight, then eighteen short sessions, nineteen for a worker, where
 # case 18 runs, two more in a fenced repo, two more when case 2 fails; one
-# fewer outside tmux, where the second half of case 16 is skipped). Run it
+# fewer outside tmux, where the second half of case 16 is skipped, and one
+# fewer in a repo that keeps its own .envrc, where case 19 is skipped). Run it
 # from your own terminal, never from inside a session: the nested-session
 # rule would deny some of the commands it runs. Transcripts stay in a temp
 # directory, printed at the end, so the exact refusal text can be read.
@@ -27,7 +28,8 @@
 # worker's every tool, which the cases show). Run as the owner the sandbox
 # and rule cases fail by design: the owner is bound by the law alone. A
 # skip (case 16's second half, case 18 for a caller outside the `agents`
-# group) is neither a pass nor a failure; the summary counts it apart.
+# group, case 19 in a repo with its own .envrc) is neither a pass nor a
+# failure; the summary counts it apart.
 #
 # The sessions run the claude a terminal in the repo gets, by absolute path,
 # so `aj check <repo>` works from any terminal, also on a host whose
@@ -382,6 +384,32 @@ else
   else
     run_cmd home-fence "ls \"$(dirname "$HOME")/$owner\"" 'Permission denied'
   fi
+fi
+
+# 19. A devenv.local.* stops the devenv shell before devenv reads it
+# (roadmap 2.7): the template .envrc exits 1 while either file exists, and
+# the hook's preamble shows that line, with the fix, before any command of
+# the session runs. devenv imports both files with no `direnv allow`, and
+# an interpreter write the hook never sees can create one; the .envrc is
+# the layer under that write, and that layer is what runs here. The file
+# is put there by this script, outside the session, as case 14 puts its
+# fake credential file: the hook refuses a shell write creating it (rule
+# 5), and an interpreter is not a cell's to have. The preamble's
+# fingerprint of the directory covers devenv.local.*, so the new file
+# forces the export and its removal lets the next one pass again. A repo
+# that keeps its own .envrc has no such line: skipped there, listed under
+# --dry-run. An existing devenv.local.yaml is the repo's business and is
+# left alone (skipped, with the reason).
+if [ "$DRY_RUN" = 1 ]; then dry devenv-local 'Bash: echo live-check-ran (with a devenv.local.yaml placed first)'
+elif ! grep -q 'is refused in a jail' .envrc 2>/dev/null; then
+  skip=$((skip+1)); printf 'skip  %-16s the repo keeps its own .envrc (no devenv.local.* refusal line; aj init --force writes the template)\n' devenv-local
+elif [ -e devenv.local.yaml ] || [ -L devenv.local.yaml ]; then
+  skip=$((skip+1)); printf 'skip  %-16s devenv.local.yaml exists already; remove it and run again\n' devenv-local
+else
+  local_file=devenv.local.yaml
+  : >"$local_file"; trap 'rm -f "$local_file"' EXIT
+  run_cmd devenv-local 'echo live-check-ran' 'devenv.local.yaml is refused in a jail' '^live-check-ran'
+  rm -f "$local_file"; trap - EXIT
 fi
 
 [ "$DRY_RUN" = 0 ] || { echo "aj check: dry run, no session started, $skip skipped"; exit 0; }

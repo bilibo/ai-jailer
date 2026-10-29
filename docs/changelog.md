@@ -5,6 +5,32 @@ happened and what was learned on the day.
 
 ## 2026-10-29
 
+- Roadmap 2.7 closed: this checkout's `.envrc` has the template's lines
+  (the load fails while `devenv.local.nix` or `devenv.local.yaml`
+  exists; `direnv allow` once after pulling, since the file changed), and
+  `aj check` case 19 (`devenv-local`) places an empty `devenv.local.yaml`
+  from the script, runs one command and expects the preamble's `is
+  refused in a jail` line and no output from the command, then removes
+  the file. The script places the file, not a session's interpreter
+  write as the roadmap first said: the hook refuses a shell write that
+  creates it, a cell need not carry python3, and the layer under test is
+  the `.envrc` and the preamble either way. Skipped in a repo with its
+  own `.envrc` or an existing `devenv.local.yaml`. Eighteen sessions,
+  nineteen as a worker (README, runbook); parser test lists the case.
+  Run by hand live as `w-acme` in `acme/infra`: refused with the
+  `.envrc`'s line and the hook's fix text; the next command after the
+  removal ran.
+- Live, afternoon: V12 passes (a worker session in a directory whose
+  `.claude/settings.json` says `sandbox.enabled: false` had `pwd`
+  refused by the hook's `worker without a sandbox` line, exit 2), so
+  item 13's live boxes are closed; V10 and V11 had gone with item 14.
+  Read back from V13's transcripts: the sandbox answers
+  `~/.git-credentials` with `Permission denied` on NixOS-WSL, not an
+  empty file or no-such-file (roadmap 0.8); `git config
+  core.hooksPath` stops at `could not lock config file .git/config`
+  (2.6); the hook refused `tmux new-window` as rule 7 says (2.8a).
+  Left on the gate: V4 and the three managed-only keys, both the
+  human's; `verify.sh` says the host's ai-jailer lock lags.
 - `customer` is `org` everywhere: `<org>/<repo>`, `w-<org>`, the
   `ajmux` usage and errors (`a worker cannot open another org's
   session`), `aj` help, bootstrap's text, the comments and the docs. The

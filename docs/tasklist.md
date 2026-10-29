@@ -63,10 +63,11 @@ one missing login); the factory has `.ignore` with `devenv.lock`.
 - [ ] The three managed-only keys (roadmap item 14, last box): bypass
       mode off, `allowManagedHooksOnly`, the mod policy; each a yes/no
       from you, then a dated roadmap line.
-- [ ] Review the diff, commit, push; then in `/etc/nixos`
-      `nix flake update ai-jailer && nh os switch` only if `verify.sh`
-      says the lock lags (ajmux.nix changed today: comments and error
-      text, so it will).
+- [x] Review the diff, commit, push (`c1e9b69`, 2026-10-29 13:06).
+- [ ] In `/etc/nixos`: `nix flake update ai-jailer && nh os switch`;
+      `verify.sh` says the lock lags (36 ok, 1 failed, 2026-10-29
+      afternoon). Also staged there, uncommitted: the README verify-table
+      line.
 
 ## 1. Close today's loop (15 min)
 
@@ -125,8 +126,8 @@ boxes, tick what passes.
       `git add`, `sudo -v`; is refused `git commit`, `git push`,
       `cat ~/.ssh/id_ed25519`. (Today's session did `git add` and
       `sudo -n` fine; the refusals were not tried on purpose.)
-- [ ] V12, V10, V11: the managed sandbox list and `failIfUnavailable`
-      cases, as written in the roadmap.
+- [x] V12 passes, 2026-10-29 afternoon (roadmap item 13 has the hook
+      line). V10 and V11 were cut by item 14 on 2026-10-28.
 - [ ] V4: owner watching a worker, `sudo -u w-acme -i tmux attach`.
 - [x] Whether `permissions.deny Read(...)` stops the Read tool for the
       unsandboxed jailer (roadmap, item 14).

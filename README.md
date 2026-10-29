@@ -388,5 +388,5 @@ the pending first-run checks):
 ```sh
 aj doctor                   # as the owner and as a worker: managed file, hook, users, sudo rule, linger; exit 1 when one is missing
 aj init <org>/<repo>        # as the worker; writes a repo, enters its shell, runs both unit tests on the result
-aj check <repo>             # as the worker: seventeen `claude -p` sessions, eighteen as an `agents` member, two more in a fenced repo, one fewer outside tmux; judged on transcripts and files; costs API calls
+aj check <repo>             # as the worker: eighteen `claude -p` sessions, nineteen as an `agents` member, two more in a fenced repo, one fewer outside tmux or with a repo's own .envrc; judged on transcripts and files; costs API calls
 ```

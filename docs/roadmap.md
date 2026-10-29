@@ -133,7 +133,10 @@ The gaps, in order:
       the second `direnv allow` without being shown, and it pins every
       input, nixpkgs included.
    7. Done 2026-10-21: hook refuses `git checkout <ref> <path>...` (changelog).
-   8. Written 2026-10-24, not yet run live: `aj check` case 14
+   8. Run live 2026-10-29 as `w-acme` in `acme/infra`: the sandbox
+      answers `wc: /home/w-acme/.git-credentials: Permission denied`,
+      exit 1, neither `0` nor no-such-file; the case's pattern already
+      accepts it (changelog). Written 2026-10-24: `aj check` case 14
       (`cred-sandbox`), the sandbox hiding `~/.git-credentials` on its
       own, by `wc -c ~/.git-cred*` with a fake file when the host has
       none; which of `0` or no-such-file the sandbox answers is for the
@@ -214,10 +217,24 @@ The gaps, in order:
       `aj check` itself, and runbook section 8 names the `-c`,
       `--global` and worktree forms as the accepted gaps (changelog). As
       written: `git config core.hooksPath /tmp/h` inside the sandbox,
-      expecting a permission error on `.git/config`.
-   7. Done 2026-10-26 for new repos (changelog): the template `.envrc`
+      expecting a permission error on `.git/config`. Run by `aj check`
+      live 2026-10-29 as `w-acme`: `could not lock config file
+      .git/config: File exists`, exit 255.
+   7. Done 2026-10-29 (changelog): this checkout's `.envrc` carries the
+      template's refusal lines, and `aj check` case 19 (`devenv-local`)
+      places a `devenv.local.yaml` from outside the session and expects
+      the next command's preamble to show the `.envrc`'s line; the file
+      is the script's, not an interpreter write's, since a cell need not
+      have an interpreter and the hook never sees that write anyway.
+      Skipped in a repo that keeps its own `.envrc`. Run by hand live the
+      same day as `w-acme` in `acme/infra`: the hook answered `direnv
+      export failed in ...: error: devenv.local.yaml is refused in a jail
+      (...) (fix: remove the devenv.local file from your own terminal; it
+      is not the agent's to remove)`, and after the removal the next
+      session's command ran.
+      Done 2026-10-26 for new repos (changelog): the template `.envrc`
       fails the load while either file exists; this checkout's own
-      `.envrc` and the `aj check` case are still to do. As written:
+      `.envrc` and the `aj check` case were still to do. As written:
       `devenv.local.nix` and `devenv.local.yaml` can be created by an
       interpreter write the hook does not see, and devenv imports them on
       the next evaluation without a `direnv allow` (the literal `denyWrite`
@@ -230,7 +247,10 @@ The gaps, in order:
    8. **The tmux socket** (2026-10-24; work it before 2.1: the one open
       item that leaves the sandbox entirely). 2026-10-26: (a) written as
       hook rule 7 with hook-test cases and `aj check` case 16, both
-      not yet run live (changelog); (b) open. `allowAllUnixSockets`
+      not yet run live (changelog); (b) open. 2026-10-29: case 16 ran
+      live as `w-acme`, the hook refused `tmux new-window` with rule 7's
+      message; `tmux display-message -p` is still unobserved (the check
+      skips it outside tmux). `allowAllUnixSockets`
       reaches the user's tmux server, which runs outside the sandbox as
       the user: a sandboxed `tmux send-keys`, `run-shell` or `new-window`
       runs a command with no sandbox and no hook, or types a prompt into
@@ -601,15 +621,23 @@ The gaps, in order:
     `project-settings-test` and its flake check. The module option and
     this checkout's setting are `proposals/2026-10-28-unsandboxed-checkout.patch`
     (the hook refuses both files). Open:
-    - [ ] V10 a managed sandbox list (`denyRead`, `credentials.envVars`,
+    - [ ] V10 (cut by item 14 on 2026-10-28: the lists left the managed
+      body) a managed sandbox list (`denyRead`, `credentials.envVars`,
       `allowedDomains`) applies when only the user scope sets
       `sandbox.enabled`: a worker session's `cat ~/.git-credentials`
       gets no file and `echo $GH_TOKEN` prints nothing.
-    - [ ] V11 managed `failIfUnavailable = true` with `enabled` unset
-      anywhere starts an owner session normally.
-    - [ ] V12 a worker session in a repo whose committed
+    - [ ] V11 (cut by item 14 on 2026-10-28) managed `failIfUnavailable =
+      true` with `enabled` unset anywhere starts an owner session normally.
+    - [x] V12 a worker session in a repo whose committed
       `.claude/settings.json` says `"enabled": false`: every tool
-      refused with the hook's message.
+      refused with the hook's message. 2026-10-29, from the jailer
+      session as `w-acme`, in a throwaway directory under the worker's
+      home with only that file: `claude -p "run pwd"` got `env-guard:
+      worker without a sandbox: enabled, allowUnsandboxedCommands and
+      failIfUnavailable resolve to (false false true), not (true false
+      true); the jail in ~/.claude/settings.json sets them and a project
+      or local file must not change them`, exit 2, and the model stopped
+      and named the project file. Item 13's live boxes are closed.
     - [ ] Not seen by the hook: `claude --settings <file>` at launch;
       `ajmux` never passes it, and rule 6 refuses it inside a session.
     - [ ] `aj check` as the owner: its `sandbox` case and the cases that
@@ -775,7 +803,8 @@ The gaps, in order:
       rewrites it; a session must not edit it)`, exit 2; `aj doctor` as the
       worker: MISSING, same words. `aj bootstrap --no-root --yes` as the
       worker rewrote the jail; hook exit 0, doctor 0 missing, a session
-      ran `pwd` again. V12 is item 13's, still open.
+      ran `pwd` again. V12 is item 13's, still open (passed 2026-10-29,
+      item 13).
     - [ ] `Read(**/.terraform/**)` in the jail: the same merge masks every
       match with a tmpfs, so a cell with `.terraform/providers` would lose
       them inside the sandbox and `terraform plan` could not load providers

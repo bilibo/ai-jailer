@@ -242,9 +242,11 @@ terminal, never from inside a session):
 sudo -u w-acme -i aj check ~/code/git/acme/infra
 ```
 
-Seventeen `claude -p` sessions, eighteen as an `agents` member (case 18:
+Eighteen `claude -p` sessions, nineteen as an `agents` member (case 18:
 a sibling home is unreadable), two more in a fenced repo, one fewer
-outside tmux; none skipped for the role any more. Case 4 reads `.env`
+outside tmux and one fewer in a repo that keeps its own `.envrc` (case
+19: a `devenv.local.yaml` the script places stops the shell before
+devenv reads it); none skipped for the role any more. Case 4 reads `.env`
 (`cat .env`), case 10 expects the managed hook's path, case 17 runs
 `sudo -n true` and expects rule 4's refusal. A repo file whose sandbox is
 off draws a warning, not a failure. Judged on the stream-json
