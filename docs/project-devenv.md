@@ -108,7 +108,7 @@ from `packages` need none of this: Nix fetches them outside the sandbox.
 Exported into your shell and every command a session runs. Identifiers
 only: `devenv.nix` is committed and the agent reads it. Secrets stay in
 `.env` or your `az login` session, which the agent never sees (README,
-"Where project configuration goes", has the split and why).
+"Make it yours", has the split and why).
 
 ## Project allow rules
 
@@ -150,13 +150,10 @@ the host. A project that needs more lists them:
   ai-jail.extraAllowedDomains = [ "dev.azure.com" "index.crates.io" "static.crates.io" ];
 ```
 
-Whether a managed sandbox honours a repo's list, merges it with the
-managed base list or ignores it is not settled: check V2 in the runbook
-(section 5) is pending as of 2026-10-27. Until it has run, treat this
-option as unconfirmed, and expect to put the host in the host-wide
-`extraAllowedDomains` of the ai-jailer checkout's `host.nix` if it turns out
-to be ignored. Hosts not on either list prompt in an interactive session and are
-refused in a `-p` one.
+The repo's list is merged into the sandbox's base allowlist (checked live
+2026-10-29); a host-wide addition goes into `extraAllowedDomains` in the
+ai-jailer checkout's `host.nix` instead. Hosts on neither list prompt in an
+interactive session and are refused in a `-p` one.
 
 ## The other ai-jail options
 
@@ -176,8 +173,8 @@ descriptions.
 
 Whether agents may commit locally, whether Claude keeps its auto-memory
 and the account's connectors by default are host decisions now
-(`allowLocalCommits`, `allowMemoryEdits` and `allowConnectors` in the NixOS
-module); a repo no longer sets the first two.
+(`allowLocalCommits`, `allowMemoryEdits` and `allowConnectors` in the
+checkout's `host.nix`); a repo no longer sets the first two.
 
 ## Turning the guard rails off (and on)
 

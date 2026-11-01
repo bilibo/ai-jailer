@@ -3,37 +3,41 @@
 Guard-railed Claude Code for hosts with Nix. This checkout is the
 factory: it builds the law (what binds everyone on the host), the jail
 (what binds a worker user) and the cells (a repo's project layer), and a
-session here is the jailer's (roadmap item 14, 2026-10-28). Once the host
-is bootstrapped a session here is bound by the law alone: no credential
-reads, no `git commit`, no `git push`; no sandbox, and the hook's other rules are the
-workers'. It edits `devenv.nix`, `devenv/devenv.nix`, `.envrc` and
-`.claude/` here like any file. The root `devenv.yaml` imports `./devenv`
-from the working tree. That is fine because the live hook is the one
-under `/etc/claude-code`, not the tree's `hooks/`: a working-tree edit
-takes effect only when the human rebuilds or runs `aj upgrade`. Agents
-stage and diff; the human commits and pushes. A worker's handoff goes to
+session here is the jailer's. Once the host is bootstrapped a session here
+is bound by the law alone: no credential reads, no `git commit`, no `git
+push`; no sandbox, and the hook's other rules are the workers'. It edits
+`devenv.nix`, `devenv/devenv.nix`, `.envrc` and `.claude/` here like any
+file. The root `devenv.yaml` imports `./devenv` from the working tree.
+That is fine because the live hook is the one under `/etc/claude-code`,
+not the tree's `hooks/`: a working-tree edit takes effect only when the
+human rebuilds or runs `aj upgrade`. Agents stage and diff; the human
+commits and pushes. A worker's handoff goes to
 `proposals/<date>-<topic>.patch` at its checkout root (gitignored),
 applied with `git apply`; never only the session scratchpad, which the
 human cannot reach.
 
 ## Which document owns what
 
-- `README.md`: current state, the layers, the host and lockdown tables;
-  what exists.
-- `docs/roadmap.md`: what is next, in order.
-- `docs/changelog.md`: dated history, newest first, with what was learned.
-- `docs/verified.md`: one row per live check (date, claim, how, result);
-  the evidence a README or runbook claim points at. Rows come from runs
-  on a host, never from reading the code.
-- `docs/sessions.md`: how sessions coordinate (tiers, proposals).
-- `docs/runbook.md`: what the operator types; written for the human.
+- `README.md`: what it is, install, daily use, what to expect, quirks.
+  Short, in the style of `bilibo/nixos-wsl`'s README: what exists today,
+  no history, no task list.
+- `docs/runbook.md`: the operator's reference: host configuration,
+  verifying, upgrades, troubleshooting, known gaps. Written for the human.
 - `docs/project-devenv.md`: a project's `devenv.nix`, for a human who
   does not know Nix; `aj init`'s template links it.
-- `docs/suggestion.md`: ideas with a shape but no commitment; the
-  roadmap's "Ideas, not planned" points here.
+- Tasks, open questions, ideas and decisions live in Linear (the claude.ai
+  Linear connector; it loads in a session here only while this checkout's
+  `devenv.nix` sets `ai-jail.allowConnectors = true`, a line the human
+  flips), not in this repo. A closed decision is
+  reopened by a new issue that links the old one, never by editing it.
+  Until 2026-11-01 they lived in `docs/roadmap.md`, `docs/changelog.md`,
+  `docs/sessions.md`, `docs/suggestion.md` and `docs/verified.md`; a code
+  comment that cites "roadmap item N", "changelog <date>" or a verified
+  row points at those files as of `v0.1.0`: `git show
+  v0.1.0:docs/roadmap.md`.
 
-A closed decision is reopened only by a new dated roadmap or changelog
-entry, never by editing the old one. Dates are absolute, never relative.
+Dates are absolute, never relative. Don't add a README line for every
+change; update it when the project's shape or an important quirk changes.
 
 Never activate a NixOS or home-manager generation, and never change flake
 inputs without asking.
