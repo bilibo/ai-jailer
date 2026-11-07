@@ -471,6 +471,22 @@ count_is "~/.bashrc created for it" "$h12b/.bashrc" "$mark" 1
 rm -f "$tmp/bin/code" "$tmp/exts" "$tmp/wsl" "$tmp/etc/nix.conf"
 ubuntu
 
+# 17b. `code --install-extension` fails (VS Code's vsce-sign dumped core on
+# Fedora 46 Rawhide, 2026-11-07, and took bootstrap with it before the
+# receipt): a warning, the run goes on, the receipt is written without the
+# extension, and doctor keeps asking for it.
+stub code 'case "$1" in --version) echo 1.144.0 ;; --list-extensions) : ;; --install-extension) echo "vsce-sign: aborted" >&2; exit 134 ;; esac'
+h12c="$tmp/home12c"; mkdir -p "$h12c"
+aj "$h12c" bootstrap --yes --no-profile
+exits "failed extension install: exit 1 from the report, not a die" 1
+says "failed extension install: a warning" 'warn  code --install-extension mkhl\.direnv failed'
+says "report: the extension is the one gap" 'MISSING VS Code extension mkhl\.direnv.*aj bootstrap: 1 missing'
+called "the install was attempted" '^code --install-extension mkhl.direnv$'
+in_json "receipt written, no extension recorded" "$h12c/.local/state/ai-jailer/receipt.json" '.vscodeExtensions == []'
+aj "$h12c" doctor
+says "doctor: the extension still missing" 'MISSING VS Code extension mkhl\.direnv'
+rm -f "$tmp/bin/code"
+
 # 18. WSL: the host line says so; nothing else changes here.
 touch "$tmp/wsl"
 WSL_MARKER="$tmp/wsl" aj "$h11" doctor

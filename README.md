@@ -47,7 +47,7 @@ covered by stubbed-host tests only so far.
 - `pkgs/`: `aj` (`bootstrap`, `doctor`, `init`, `check`, `upgrade`, `reset`),
   `ajmux` (the tmux launcher that hands over to the worker), and the tmux
   and direnv configs. `scripts/install.sh` puts Nix on a host that lacks it,
-  then runs `aj bootstrap`.
+  then runs `aj bootstrap` for the host and `aj init` on the checkout.
 - `docs/runbook.md`: operator notes, verification steps, troubleshooting and
   known gaps. `docs/project-devenv.md`: a practical guide to customizing a
   repo's `devenv.nix` (packages, languages, env vars, allow rules) without
@@ -55,31 +55,38 @@ covered by stubbed-host tests only so far.
 
 ## Install
 
-The install is `aj bootstrap`, run from this checkout's devenv shell. Any
-Linux with Nix, git and sudo:
+Three steps on any Linux with git and sudo: the host, then the workers,
+then a repo per worker.
 
 ```sh
 git clone https://github.com/bilibo/ai-jailer.git ~/code/ai-jailer
 cd ~/code/ai-jailer
-devenv shell                                # nix run nixpkgs#devenv -- shell if devenv is not on PATH yet
+scripts/install.sh                          # --check prints the plan and changes nothing
+```
+
+`install.sh` installs Nix where it is missing (Fedora's own packages on
+Fedora 44+, `nix-installer` elsewhere, nothing on NixOS), runs
+`aj bootstrap` for the host (the devenv cache in `nix.conf`, the
+user-namespace setting the sandbox needs, and `/etc/claude-code` linked to
+the host rules) and `aj init` on this checkout so its devenv shell exists.
+From then on `aj` is on PATH in a new terminal through `profile.d`, and in
+this checkout's shell (`direnv allow` here, or `devenv shell`). Every step
+checks before it writes, so a second run is a no-op.
+
+Workers come next, from this checkout's shell, when you know what to call
+them:
+
+```sh
+cd ~/code/ai-jailer && devenv shell
 aj bootstrap --workers acme,globex          # --dry-run shows the plan and changes nothing
 aj doctor
 ```
 
-Bootstrap links `/etc/claude-code`, creates a user and group per worker with
-a `0750` home, puts you in those groups, enables systemd linger, writes one
-sudoers rule (you to the workers, never the other way), and sets each worker
-up with direnv, devenv, tmux and a git identity. Running it a second time is
-a no-op.
-
-On a host without Nix (Fedora, Ubuntu, anything that is not NixOS), run
-`scripts/install.sh --workers acme,globex` instead: it installs Nix
-(Fedora's own packages on Fedora 44+, `nix-installer` elsewhere), then runs
-the same `aj bootstrap` with your flags and `aj init` on the checkout so its
-shell exists. `--check` prints the plan and changes nothing. Afterwards a
-new terminal has `aj` on PATH through `profile.d`; so does this checkout's
-shell (`direnv allow` here, or `devenv shell`), which `aj init` already
-built.
+That creates a user and group per worker with a `0750` home, puts you in
+those groups, enables systemd linger, writes one sudoers rule (you to the
+workers, never the other way), and sets each worker up with direnv, devenv,
+tmux and a git identity. Run it again with another name to add a worker
+later. The third step, `aj init` on a repo, is under "Using it".
 
 On NixOS (including NixOS-WSL) anything owned by the system configuration is
 printed instead of written (the `nix.settings` block and the user-namespace
@@ -102,11 +109,9 @@ if you want them gone too.
 
 ## Using it
 
-Each worker logs in once with its own Claude account, then you initialize
-repos under it:
+Initialize a repo under the worker:
 
 ```sh
-sudo -u w-acme -i claude auth login
 sudo -u w-acme -i aj init acme/infra    # new dir under the worker's code root, or path to an HTTPS clone
 ```
 
@@ -121,6 +126,11 @@ ajmux acme/infra --worktree             # isolated git worktree when the session
 ajmux acme/infra -p "explain the module layout"
 sudo -u w-acme -i                       # a shell as the worker when you want to poke around
 ```
+
+The worker's first `ajmux` launch asks for a Claude login in the tmux
+window: sign in there with the account for that org's work. The token lands
+in the worker's own `~/.claude`, never in yours. Make that first launch an
+interactive one; `-p` has no prompt and fails until the worker is signed in.
 
 Each terminal gets its own grouped tmux view of the project's windows, so
 multiple VS Code tabs attached to the same project do not follow each other

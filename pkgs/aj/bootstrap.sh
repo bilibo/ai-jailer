@@ -855,11 +855,15 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
   local vs="$HOME/.config/Code/User/settings.json"
   if hm_owned "$vs"; then hm_skip "$vs" "programs.vscode.profiles.default: userSettings (direnv.path.executable) and extensions (mkhl.direnv)"
   elif command -v code >/dev/null 2>&1; then
-    if ! code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then
+    if code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then R_EXT+=(mkhl.direnv)
+    else
       step "code --install-extension mkhl.direnv"
-      run -q code --install-extension mkhl.direnv
+      # A failed install must not end the run before the receipt: on Fedora
+      # 46 Rawhide VS Code's signature checker (vsce-sign) dumped core here
+      # and took bootstrap with it (2026-11-07). doctor reports the gap.
+      if run -q code --install-extension mkhl.direnv; then R_EXT+=(mkhl.direnv)
+      else warn "code --install-extension mkhl.direnv failed: install it from VS Code's extensions view (aj doctor reports it until then)"; fi
     fi
-    R_EXT+=(mkhl.direnv)
     # Under WSL `code` is the Remote-WSL CLI (on PATH in a VS Code terminal):
     # the extension lands in the remote, but this file is a Linux desktop VS
     # Code's and nothing reads it there. The client's settings are on Windows,
@@ -1151,7 +1155,7 @@ report() {
   local cs="$HOME/.claude/settings.json" ms="$MANAGED_DIR/managed-settings.json"
   if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (aj bootstrap removes it)"; fi
   if [ -r "$ms" ]; then ok "managed settings $ms"; hooks_runnable "$ms"
-  else miss "no managed settings at $ms: this host enforces nothing (aj bootstrap --workers ... from the ai-jailer checkout's devenv shell)"; fi
+  else miss "no managed settings at $ms: this host enforces nothing (scripts/install.sh, or aj bootstrap from the ai-jailer checkout's devenv shell)"; fi
   accounts_report
 
   # From inside a session `code` is on PATH but dies before printing (the

@@ -103,11 +103,13 @@ sudo -u w-acme -i aj init acme/infra      # a new directory under the worker's c
 sudo -u w-acme -i aj init <path>          # an existing repo
 ```
 
-A worker needs a login once: `sudo -u w-acme -i claude auth login`, with
-the Claude account for that org's work (each worker has its own login in
-its own `~/.claude`). `claude /login` on a first launch prompts twice, the
-onboarding sign-in and then the command. Clone over HTTPS; the worker holds
-no SSH key.
+A worker signs in once, on its first interactive `ajmux` launch: Claude
+Code's onboarding prompts for the login in the tmux window, and the token
+lands in the worker's own `~/.claude`, one account per org. A `-p` run has
+no prompt, so the first launch of a new worker is interactive. There is no
+separate login step: `claude auth login` would need the CLI on the worker's
+PATH, which a host without a claude of its own only has inside the repo
+shell `aj init` sets up. Clone over HTTPS; the worker holds no SSH key.
 
 `aj init` does steps 1 to 5 and 7, then runs section 5's unit tests on the
 generated file, with the hook test on the managed hook. `--dry-run` shows
@@ -165,16 +167,25 @@ script wrote:
 
 ## 4. Host configuration
 
-One shape on every Linux, run from the ai-jailer checkout's devenv shell
-(`cd ~/code/ai-jailer && devenv shell`), which carries the `aj` CLI built
-from the checkout and sets the ref to it: the managed tree at
-`/etc/claude-code`, a user and group per worker, the `agents` marker group
-holding every worker, the owner in each worker's group, linger on for each
-worker, and the one sudo rule where the host can take one.
+One shape on every Linux, in two runs. First `scripts/install.sh` from a
+fresh checkout: it does what has to happen before `nix run` works (Fedora
+44 or newer: Fedora's `nix` and `nix-daemon` packages, the SELinux label
+and the daemon socket; any other distro: the nix-installer; NixOS:
+nothing), then `aj bootstrap` for the host alone, then `aj init` on the
+checkout so its devenv shell exists. Then, from that shell
+(`cd ~/code/ai-jailer && devenv shell`, which carries the `aj` CLI built
+from the checkout and sets the ref to it), `aj bootstrap --workers ...`
+once the worker names are known, and again for each worker added later.
+What the host ends up with: the managed tree at `/etc/claude-code`, a user
+and group per worker, the `agents` marker group holding every worker, the
+owner in each worker's group, linger on for each worker, and the one sudo
+rule where the host can take one. `install.sh` passes any bootstrap flags
+on, so `scripts/install.sh --workers acme` does both runs in one when the
+names are already known.
 
 | Host | Set |
 | --- | --- |
-| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `aj bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell; on a host without Nix, `scripts/install.sh` with the same flags installs it first (Fedora 44 or newer: Fedora's `nix` and `nix-daemon` packages; any other distro: the nix-installer; NixOS: nothing) and hands over. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/ai-jailer`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#aj -- bootstrap --no-root --yes --jailer <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ajmux, aj), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing. Fedora and Ubuntu in this shape: stubbed-host tests only, not yet run live |
+| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `scripts/install.sh`, then `aj bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/ai-jailer`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#aj -- bootstrap --no-root --yes --jailer <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ajmux, aj), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing. Fedora and Ubuntu in this shape: stubbed-host tests only, not yet run live |
 | NixOS, NixOS-WSL: the differences | `/etc/nix/nix.conf` and the sysctls are the system configuration's (store symlinks): bootstrap prints the `nix.settings` block where flakes or the devenv cache are missing, and the `boot.kernel.sysctl` option where user namespaces are confined, and writes neither. No sudo rule: `/etc/sudoers` has no `@includedir`, so `ajmux` hands over with the owner's own sudo, password or not (`--owner-sudo` is ignored with a note). The workers come from `useradd`, which holds while `users.mutableUsers` is true (the default; nothing here can read the value): a rebuild with it false removes them, and `aj doctor` reports a worker the receipt names but the host lacks. The `/etc/claude-code` link survives rebuilds (NixOS cleans only links into `/etc/static`); a link via `/etc/static` is an older module's and makes bootstrap stop with the fix. Nothing of the jailer goes into the host configuration |
 
 `aj bootstrap` flags: `--no-root`, `--no-profile`, `--trusted-user`,
@@ -274,9 +285,12 @@ receipt it does nothing ("nothing recorded, nothing to reset"):
 
 ```sh
 aj reset                                 # sudo; asks first; reads the receipt; keeps the worker users and prints userdel -r for each
-scripts/install.sh --workers acme        # sudo: dnf, SELinux label, daemon socket; then aj bootstrap (root steps, workers) and aj init on this checkout
+scripts/install.sh                       # sudo: dnf, SELinux label, daemon socket; then aj bootstrap (host root steps) and aj init on this checkout
 # new terminal: PATH and NIX_SSL_CERT_FILE come from profile.d and ~/.bashrc.d
-aj doctor                                # every line ok or info
+aj doctor                                # every line ok or info; no workers yet
+devenv shell                             # in this checkout
+aj bootstrap --workers acme              # the worker user, linger, the sudo rule, the worker's profile
+aj doctor                                # the worker lines too
 sudo -u w-acme -i aj init acme/infra     # files, two allows, the settings checks, the hook cases
 sudo -u w-acme -i aj check ~/code/git/acme/infra
 ajmux acme/infra                         # interactive: trust dialog once, orange window when it waits
@@ -345,8 +359,8 @@ the dangerous direction.
 - **A warning at shell entry that the managed settings are unreadable, or
   `aj doctor` says `this host enforces nothing`.**
   `/etc/claude-code/managed-settings.json` is missing or unreadable:
-  `aj bootstrap --workers ...` has not run its root steps, or `aj reset`
-  removed the link. Until it is back, no rule applies on this host.
+  `scripts/install.sh` (or `aj bootstrap`) has not run its root steps, or
+  `aj reset` removed the link. Until it is back, no rule applies on this host.
 - **A worker gets every tool refused with `worker without a jail: ...
   differs from /etc/claude-code/jail-settings.json`.** The worker's
   `~/.claude/settings.json` lost or changed a jail key (an edit, or an

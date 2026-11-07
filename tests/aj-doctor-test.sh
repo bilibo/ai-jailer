@@ -49,7 +49,7 @@ check "ran to the summary"      'aj doctor: [0-9]+ missing, [0-9]+ warnings'
 refute "no shell error"         'unbound variable|syntax error|line [0-9]+:|command not found'
 refute "no repo part outside a repo" 'repo: '
 # No managed settings: this host enforces nothing, and says so.
-check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(aj bootstrap --workers \.\.\. from the ai-jailer checkout.s devenv shell\)'
+check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(scripts/install\.sh, or aj bootstrap from the ai-jailer checkout.s devenv shell\)'
 check "no getent: no agents group" 'info  no agents group: no worker users on this host'
 refute "no sudoers verdict without the file" 'visudo'
 refute "strictAllowlist is gone"  'strictAllowlist|strict network'
