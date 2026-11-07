@@ -69,8 +69,12 @@ unless marked untested.
    hook is not firing, see troubleshooting.
 6. You commit and push. Agents stage (`git add`), diff and branch; the
    commit is yours (`allowLocalCommits` flips that per host). Read a
-   worker's staged diff from your account through the group (0750 home):
-   `git -C ~w-acme/code/git/acme/infra diff --cached`. How the commit then
+   worker's staged diff as the worker:
+   `sudo -u w-acme -i git -C ~w-acme/code/git/acme/infra diff --cached`.
+   Your own git refuses the repo (`detected dubious ownership`, 2026-11-08):
+   it belongs to another user, and git reads such a repository only after
+   `git config --global --add safe.directory <repo>`, which is the
+   alternative if you want your own git tools on it. How the commit then
    reaches the remote is open (README, "Daily use").
 
 ## 2. What a blocked call looks like
@@ -89,6 +93,12 @@ propose a diff or ask you instead of working around it. If an agent keeps
 hitting a block for something legitimate, the fix is a project allow rule
 in `devenv.nix` (`ai-jail.settings.permissions.allow`), never a looser
 managed rule.
+
+The hook judges the command's text, quotes stripped, so a read-only command
+that only mentions a refused form is refused too: a `grep` whose pattern is
+`sudo -u` or `chmod 444`, a prompt that quotes a blocked command. The
+message is the same (`privilege escalation blocked`, `shell write to config
+file blocked`). Search for another part of the line; never retry the text.
 
 Every rule applies in every session on the host, inside a jail or not, the
 owner's included; there are no enforcement roots and no exempt directory.
@@ -185,7 +195,7 @@ names are already known.
 
 | Host | Set |
 | --- | --- |
-| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `scripts/install.sh`, then `aj bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/ai-jailer`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#aj -- bootstrap --no-root --yes --jailer <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ajmux, aj), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing. Fedora and Ubuntu in this shape: stubbed-host tests only, not yet run live |
+| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `scripts/install.sh`, then `aj bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/ai-jailer`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#aj -- bootstrap --no-root --yes --jailer <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ajmux, aj), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing. Fedora 46 in this shape ran live on 2026-11-07 (section 5); `--worktree` sessions, a staged-diff review through the group and `aj reset` there only in the stubbed-host tests. Ubuntu in this shape: stubbed-host tests only, not yet run live |
 | NixOS, NixOS-WSL: the differences | `/etc/nix/nix.conf` and the sysctls are the system configuration's (store symlinks): bootstrap prints the `nix.settings` block where flakes or the devenv cache are missing, and the `boot.kernel.sysctl` option where user namespaces are confined, and writes neither. No sudo rule: `/etc/sudoers` has no `@includedir`, so `ajmux` hands over with the owner's own sudo, password or not (`--owner-sudo` is ignored with a note). The workers come from `useradd`, which holds while `users.mutableUsers` is true (the default; nothing here can read the value): a rebuild with it false removes them, and `aj doctor` reports a worker the receipt names but the host lacks. The `/etc/claude-code` link survives rebuilds (NixOS cleans only links into `/etc/static`); a link via `/etc/static` is an older module's and makes bootstrap stop with the fix. Nothing of the jailer goes into the host configuration |
 
 `aj bootstrap` flags: `--no-root`, `--no-profile`, `--trusted-user`,
@@ -250,8 +260,13 @@ Live, as the worker, in a worker repo (costs API calls; run it from a
 terminal, never from inside a session):
 
 ```sh
-sudo -u w-acme -i aj check ~/code/git/acme/infra
+sudo -u w-acme -i aj check ~w-acme/code/git/acme/infra
 ```
+
+The path is spelled `~w-acme/...`, never `~/...`: your own shell expands
+`~` before `sudo` runs, so a bare `~` names your home and the check stops
+at `no such directory`. The same goes for every path after
+`sudo -u w-acme -i`.
 
 Around twenty `claude -p` sessions: one more in a fenced repo, one fewer
 outside tmux, one fewer in a repo that keeps its own `.envrc`. One login
@@ -272,14 +287,25 @@ mode off, the jail check locking a drifted worker out) ran on NixOS-WSL on
 2026-10-29; the table with each command and result is `git show
 v0.1.0:docs/verified.md`.
 
+The worker shape ran live on Fedora 46 (Rawhide, SELinux enforcing,
+Fedora's nix packages, Claude Code 2.1.309 from the repo shell) on
+2026-11-07: `aj doctor` clean on both sides, `ajmux acme/<repo> -p` handed
+over through the worker's devenv shell and answered, the Stop hook coloured
+the window, the owner's home closed to the worker, no SELinux denial, `aj
+check` 19 of 20. The one failure was the `repo-write` case tripping over the
+sandbox's residue (section 7), which `aj check` has cleared first since.
+Not yet run there: `--worktree` sessions, a staged-diff review through the
+group, `aj reset`. Transcripts stay under `/tmp/aj-check.*`, from
+interrupted runs too; `rm -r /tmp/aj-check.*` when done with them.
+
 After the checks, on a host: `nix config show | grep trusted-users` names
 no worker; `git push` as the worker finds no credential; `ajmux
 acme/<repo>` from the owner's terminal lands in the worker's tmux and the
 window turns orange on a prompt; `aj reset` leaves the users and prints
 `userdel -r` lines.
 
-From zero on a Fedora host (untested in the worker shape; the one-user
-shape passed on 2026-10-20). `aj reset` reverses what the receipt lists,
+From zero on a Fedora host (the worker shape ran live on Fedora 46 on
+2026-11-07, the one-user shape on 2026-10-20). `aj reset` reverses what the receipt lists,
 the Fedora nix packages included when install.sh put them there; without a
 receipt it does nothing ("nothing recorded, nothing to reset"):
 
@@ -292,7 +318,7 @@ devenv shell                             # in this checkout
 aj bootstrap --workers acme              # the worker user, linger, the sudo rule, the worker's profile
 aj doctor                                # the worker lines too
 sudo -u w-acme -i aj init acme/infra     # files, two allows, the settings checks, the hook cases
-sudo -u w-acme -i aj check ~/code/git/acme/infra
+sudo -u w-acme -i aj check ~w-acme/code/git/acme/infra
 ajmux acme/infra                         # interactive: trust dialog once, orange window when it waits
 ```
 
@@ -463,6 +489,24 @@ the dangerous direction.
   Code writes that file itself at user scope. Keep user-scope settings out
   of a Home Manager `programs.claude-code.settings`: the managed settings
   and the jail carry everything the jailer needs.
+- **`git config` in a worker repo fails with `could not lock config file
+  .git/config: File exists`, and `git status` there lists `.bashrc`,
+  `.gitmodules`, `.claude-plugin`, `.vscode` and other empty files nobody
+  wrote.** A session was interrupted while a sandboxed command ran: Ctrl-C
+  on `aj check`, an aborted tool in an interactive session (Claude Code
+  2.1.309, seen 2026-11-07 on Fedora 46, reproduced 2026-11-08). bubblewrap
+  needs a mount point for every denied path, and for one the repo does not
+  have Claude Code lets it create an empty read-only file in the repo. A
+  command that ends removes them all; an aborted one leaves them all, in
+  the worker's home too (`~/.gitmodules`, `~/.idea`). Remove them, with the
+  `find ... -delete` that `aj check` prints when it sees them or by hand;
+  until then `git config` fails and a real `.vscode/` or `.claude/hooks/`
+  cannot be created. `aj check` clears the two files that would distort its
+  own verdicts and, interrupted, removes what its killed session left.
+  Nothing hides the rest: an ignore rule for `.vscode` or `.claude/skills`
+  would also hide a real directory of that name made later, and the files
+  are not the project's to ignore. The missing cleanup on abort is
+  upstream's (RAU-31).
 - **`aj doctor` or `aj reset` on a host set up before 2026-10-28 misses
   what `harness bootstrap` wrote.** The rename moved the receipt, the
   sudoers file, the sysctl drop-in, the environment.d file and the block

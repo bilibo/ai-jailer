@@ -1158,10 +1158,15 @@ report() {
   else miss "no managed settings at $ms: this host enforces nothing (scripts/install.sh, or aj bootstrap from the ai-jailer checkout's devenv shell)"; fi
   accounts_report
 
-  # From inside a session `code` is on PATH but dies before printing (the
-  # shell's LD_LIBRARY_PATH makes the host binary load a Nix glibc, measured
-  # 2026-10-21), so an extension verdict there would be a false MISSING.
-  if ! command -v code >/dev/null 2>&1; then warn "code not on PATH: VS Code steps skipped"
+  # The extension verdicts are the owner's: a worker never opens VS Code
+  # (the owner's tabs attach to its tmux, the repo shell brings claude), and
+  # judged like the owner a correct worker reported `1 missing` for
+  # mkhl.direnv (Fedora, 2026-11-07). From inside a session `code` is on
+  # PATH but dies before printing (the shell's LD_LIBRARY_PATH makes the
+  # host binary load a Nix glibc, measured 2026-10-21), so an extension
+  # verdict there would be a false MISSING.
+  if group_has agents "${USER:-$(id -un)}"; then info "VS Code steps skipped: a worker never opens VS Code (your tabs attach to its tmux; the repo shell brings claude)"
+  elif ! command -v code >/dev/null 2>&1; then warn "code not on PATH: VS Code steps skipped"
   else
     v=$(code --version 2>/dev/null | head -1 || true)
     if [ -z "$v" ]; then warn "code is on PATH but answers nothing (from inside a session the shell's library path breaks the host binary): VS Code steps skipped, run doctor from your own terminal"

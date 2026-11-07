@@ -90,6 +90,18 @@ dry_run masked
 all_listed "masked file"
 refute "masked file: no warning" 'warn  '
 
+# The sandbox's residue (check.sh: empty 0444 files for denied paths the
+# repo did not have) is named in a warning, in C order; a repo without any
+# draws none (the fake repos above). The dry run removes nothing.
+fake_repo residue '{"sandbox":{"enabled":true}}'
+mkdir -p "$tmp/residue/.git"
+for f in .gitmodules .claude-plugin .git/config.lock .claude/hooks; do : >"$tmp/residue/$f"; chmod 444 "$tmp/residue/$f"; done
+dry_run residue
+all_listed "residue"
+check  "residue: warned, the files named" 'warn  before the run: the sandbox.s mount points for denied paths the repo did not have, empty read-only files: \.claude-plugin \.claude/hooks \.git/config\.lock \.gitmodules'
+check  "residue: the removal named"       "find $tmp/residue -maxdepth 2 -type f -size 0 -perm 444 .* -delete"
+if [ -f "$tmp/residue/.claude-plugin" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: the dry run removed the residue"; fi
+
 # The claude the sessions run, in the header: from the repo's own shell, its
 # PATH's (a store directory included); else `direnv exec <repo>`'s, the
 # repo shell's or the host's beneath it, never another shell's (a claude in

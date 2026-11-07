@@ -137,9 +137,10 @@ multiple VS Code tabs attached to the same project do not follow each other
 around. The window tab turns orange when the agent stops or waits on a
 prompt.
 
-Agents stage, diff and branch; `git -C ~w-acme/code/git/acme/infra diff --cached`
-from your own account shows you what changed, and the commit and push are
-yours. Workers have no SSH keys or tokens, so they cannot push; right now
+Agents stage, diff and branch;
+`sudo -u w-acme -i git -C ~w-acme/code/git/acme/infra diff --cached` shows
+you what changed (your own git refuses another user's repository until you
+add it as a `safe.directory`), and the commit and push are yours. Workers have no SSH keys or tokens, so they cannot push; right now
 you either commit as the worker and fetch the branch from its clone into
 your own to push, or push from its clone using your credentials. Neither is
 tested yet. Since your account is the only one on the box with a push key,
@@ -248,7 +249,7 @@ applied by `aj upgrade`:
 ```
 
 `nix flake check` runs the test suites without Claude Code.
-`sudo -u w-acme -i aj check ~/code/git/acme/infra` runs the live suite as
+`sudo -u w-acme -i aj check ~w-acme/code/git/acme/infra` runs the live suite as
 the worker: around twenty `claude -p` sessions judged on what they actually
 did on disk and in the transcript. It costs API calls; run it after upgrading
 Claude Code.
@@ -290,6 +291,14 @@ Claude Code.
 - claude.ai connectors and account-synced skills/plugins are disabled for
   workers by default. Set `ai-jail.allowConnectors = true` in a repo's
   `devenv.nix` or `allowConnectors = true` in `host.nix` if you need them.
+- A session interrupted while a sandboxed command runs (Ctrl-C on
+  `aj check`, an aborted tool) leaves empty read-only files in the repo and
+  in the worker's home (`.claude-plugin`, `.gitmodules`, `.vscode`,
+  `.git/config.lock`, ...): bubblewrap's mount points for denied paths that
+  did not exist, which Claude Code 2.1.309 removes only when the command
+  ends. They show up in `git status`, and `.git/config.lock` makes
+  `git config` fail for you until you remove it. `aj check` lists them with
+  the command that removes them. Runbook section 7.
 - Settings keys were last checked against Claude Code `2.1.296` and run live
   on `2.1.309`. Unknown or renamed keys are ignored silently by Claude Code,
   so check the settings reference and run `aj check` after upgrading.

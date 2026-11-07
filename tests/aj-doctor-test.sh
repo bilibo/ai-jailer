@@ -205,6 +205,11 @@ refute "no sudoers verdict while the file is absent" 'visudo'
 # Standing: in agents is a worker; in a w-* group an owner; else neither.
 T_USER=w-acme doctor "$tmp/empty" "$tmp/abin"
 check "standing: worker"        'info  standing: worker \(w-acme is in agents\)'
+# The extension verdicts are the owner's: as a worker, with a `code` that
+# lacks mkhl.direnv, an info line and no MISSING.
+T_USER=w-acme doctor "$tmp/empty" "$tmp/abin:$tmp/vbin"
+check "worker: VS Code steps skipped" 'info  VS Code steps skipped: a worker never opens VS Code'
+refute "worker: no extension verdict" 'VS Code extension [a-z]+\.'
 chmod 0755 "$tmp/home"
 T_USER=raul doctor "$tmp/empty" "$tmp/abin"
 check "standing: owner"         'info  standing: owner \(raul is a member of w-acme w-beta\)'

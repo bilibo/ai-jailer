@@ -133,6 +133,30 @@ dry() { [ "$DRY_RUN" = 1 ] || return 1; printf 'would %-16s %s\n' "$1" "$2"; }
 hash_of() { [ -e "$1" ] && sha256sum "$1" | cut -d' ' -f1 || echo missing; }
 head_of() { git rev-parse HEAD 2>/dev/null || echo none; }
 
+# The sandbox's residue (Claude Code 2.1.309 on Fedora 46, 2026-11-07):
+# bubblewrap needs a mount point for every denied path, and for one the
+# repo does not have Claude Code lets it create an empty 0444 file in the
+# bind-mounted repo: .claude-plugin, .mcp.json, .gitmodules, .vscode,
+# .idea, the shell rc names, .git/config.lock, .claude/hooks and the other
+# names it protects. It removes them when the command ends, but not when
+# the command is aborted (Ctrl-C on this script, an interrupted tool in a
+# session; shown 2026-11-08): then all of them stay (RAU-31). The host's
+# git then fails `could not lock config file .git/config: File exists`, and
+# cases 11 and 15 would be judged on the residue, not on the sandbox, so
+# each clears its file first; an interrupt of this run removes what its own
+# killed session left. Nothing aj init or devenv writes has that shape
+# (runbook section 7).
+residue() { find . -maxdepth 2 -type f -size 0 -perm 444 -not -path './.devenv/*' -not -path './.direnv/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' '; }
+residue_warn() { # residue_warn <when>
+  local r; r=$(residue); [ -n "$r" ] || return 0
+  echo "warn  $1 the sandbox's mount points for denied paths the repo did not have, empty read-only files: ${r% }"
+  echo "      left by a session interrupted while a sandboxed command ran; from your terminal: find $repo -maxdepth 2 -type f -size 0 -perm 444 -not -path '*/.devenv/*' -not -path '*/.direnv/*' -delete"
+}
+# drop_residue <relpath>: remove the residue at one path (an empty regular
+# file; anything else there is left alone) so the case is judged on the
+# sandbox. Never under --dry-run.
+drop_residue() { [ "$DRY_RUN" = 0 ] && [ -f "$1" ] && [ ! -s "$1" ] && rm -f -- "$1"; return 0; }
+
 # transcript <name> <claude args...>: one -p session; the stream-json transcript
 # goes to $out/<name>.jsonl and its tool results (parsed) come back on
 # stdout. The session's debug log goes to $out/<name>.debug.txt: the
@@ -192,6 +216,18 @@ echo "transcripts: $out"
 if [ -n "$claude" ]; then echo "claude: $claude ($via)"; else echo "claude: none ($why; $nocli)"; fi
 [ "$noload" = 0 ] || echo "warn  $repo's devenv shell does not load from here: every session's Bash commands will be refused (direnv allow $repo, after reading its .envrc and devenv files)"
 [ "$sandbox" != off ] || echo "warn  the repo file turns the sandbox off; the managed hook refuses every tool of a worker here"
+residue_warn "before the run:"
+# Ctrl-C kills the session mid-command and its placeholders stay; the ones
+# that were there before the run are not this run's to remove.
+residue_before=" $(residue)"
+on_interrupt() {
+  trap - INT TERM
+  local f n=0
+  for f in $(residue); do case "$residue_before" in *" $f "*) ;; *) rm -f -- "$f"; n=$((n+1)) ;; esac; done
+  echo; echo "aj check: interrupted; removed $n placeholder file(s) the killed session left, $pass passed, $fail failed so far (transcripts in $out)"
+  exit 130
+}
+[ "$DRY_RUN" = 1 ] || trap on_interrupt INT TERM
 
 # Login pre-flight: a claude that cannot reach the API (never logged in as
 # this user) answers every session with an is_error result line, which would
@@ -288,8 +324,12 @@ fi
 # 11. Literal denyWrite under the repo (Linux skips the `**/` globs): a
 # plugin directory cannot be created from the shell, by any layer. A denied
 # path is masked as a device node whether or not it exists, so the sandbox's
-# answer for a path the host does not have is "File exists" (2026-10-22).
-if [ "$DRY_RUN" = 0 ] && [ -e .claude-plugin ]; then verdict repo-write 1 ".claude-plugin exists on the host; the case needs a repo without one"
+# answer for a path the host does not have is "File exists" (2026-10-22);
+# the mount point stays on the host as an empty file (the residue above),
+# left by an earlier run or any sandboxed command, so it goes first, and
+# `-d` after the case tells a real directory from it.
+drop_residue .claude-plugin
+if [ "$DRY_RUN" = 0 ] && [ -e .claude-plugin ]; then verdict repo-write 1 ".claude-plugin exists on the host and is not the sandbox's residue; the case needs a repo without one"
 else
   run_cmd repo-write 'mkdir .claude-plugin' "$blocked|File exists"
   if [ -d .claude-plugin ]; then rmdir .claude-plugin; verdict repo-write-state 1 ".claude-plugin was created"; fi
@@ -324,11 +364,14 @@ if [ -n "$fake" ]; then rm -f "$fake"; trap - EXIT; fi
 # rule for `git config core.hooksPath`, so the sandbox is the layer. git
 # writes through .git/config.lock and a rename; the sandbox masks the lock
 # path as /dev/null, so the write stops at the lock: `could not lock config
-# file .git/config: File exists` (seen in a session, 2026-10-24). The `-c`
-# and `--global` forms are runbook section 8's accepted gaps. A main
-# checkout only: in a worktree .git is a file and the config is elsewhere.
+# file .git/config: File exists` (seen in a session, 2026-10-24). The lock's
+# residue on the host (above) makes git say the same without any sandbox,
+# so it goes first; then the message is the sandbox's. The `-c` and
+# `--global` forms are runbook section 8's accepted gaps. A main checkout
+# only: in a worktree .git is a file and the config is elsewhere.
 if [ "$DRY_RUN" = 1 ] || [ -d .git ]; then
   hp_before=$(git config --local --get core.hooksPath || true)
+  drop_residue .git/config.lock
   run_cmd git-hookspath 'git config core.hooksPath /tmp/live-check-hooks' "$blocked|could not lock config file"
   if [ "$DRY_RUN" = 0 ] && [ "$(git config --local --get core.hooksPath || true)" != "$hp_before" ]; then
     if [ -n "$hp_before" ]; then git config --local core.hooksPath "$hp_before"; else git config --local --unset core.hooksPath; fi
@@ -450,5 +493,6 @@ if jq -e '.sandbox.filesystem.denyRead | index("~/")' .claude/settings.json >/de
   run_cmd read-fence-home 'head -c 20 ~/.bashrc 2>&1; ls -A ~ | tr "\n" " "' 'No such file or directory' '\.ssh |Documents'
 fi
 
+residue_warn "after the run:"
 echo "aj check: $pass passed, $fail failed, $skip skipped (transcripts in $out)"
 [ "$fail" = 0 ]
