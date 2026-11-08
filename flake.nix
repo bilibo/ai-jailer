@@ -30,14 +30,11 @@
         pkgs:
         let
           direnvPackage = pkgs.direnv;
-          # Host-wide options for the managed tree (lib/managed-tree.nix's
-          # arguments: allowLocalCommits, allowMemoryEdits, allowConnectors,
-          # extraDeny, extraAllowedDomains, allowManagedHooksOnly,
-          # extraKnownMarketplaces, direnvPackage, platform) from an optional
-          # host.nix at the checkout root: an attrset, or a function of pkgs.
-          # Gitignored: it is one host's policy. A `path:<checkout>` ref, which
-          # bootstrap uses from a checkout, carries it; a `github:` ref never
-          # sees it and builds the defaults. An unknown key fails evaluation.
+          # One host's policy, from an optional gitignored host.nix at the
+          # checkout root: an attrset, or a function of pkgs, of
+          # lib/managed-tree.nix's arguments. A `path:<checkout>` ref carries
+          # it; a `github:` ref never sees it and builds the defaults. An
+          # unknown key fails evaluation.
           hostArgs =
             if builtins.pathExists ./host.nix then
               (
@@ -50,16 +47,13 @@
               { };
         in
         {
-          # Host tools, pinned by this flake's lock:
-          # `nix profile add path:<checkout>#direnv path:<checkout>#devenv`
-          # (`aj bootstrap` does this). The same direnv the hooks
-          # call, the same devenv the devenv module assumes.
+          # Host tools, pinned by this flake's lock (`aj bootstrap` adds them
+          # to the profile): the direnv the hooks call, the devenv the module
+          # assumes.
           direnv = direnvPackage;
           inherit (pkgs) devenv;
-          # The managed tree: the law (managed-settings.json, every user), the
-          # jail (jail-settings.json, the workers' reference body) and the
-          # hooks. Bootstrap links `managed-wsl` where it detects WSL (the
-          # Windows side hidden from the sandbox), `managed` elsewhere.
+          # The tree linked at /etc/claude-code; bootstrap picks `managed-wsl`
+          # where it detects WSL (the Windows side hidden from the sandbox).
           managed = managedTree pkgs hostArgs;
           managed-wsl = managedTree pkgs (hostArgs // { platform = "wsl"; });
           # What the devenv module writes into a repo, with default options;
@@ -69,7 +63,6 @@
               repoRoot = "/repo";
             }
           );
-          # The same with the read fence on (`ai-jail.readFence = true`).
           project-settings-fenced = (pkgs.formats.json { }).generate "claude-settings-fenced.json" (
             (jailerLib pkgs).projectSettings {
               repoRoot = "/repo";
@@ -77,36 +70,32 @@
               extraAllowRead = [ "~/.cargo" ];
             }
           );
-          # The same at a real-looking path: aj init runs the test on the
-          # file devenv wrote for the actual repo, never at /repo.
+          # A root other than /repo: aj init runs the test on the file devenv
+          # wrote for a real checkout.
           project-settings-elsewhere = (pkgs.formats.json { }).generate "claude-settings-elsewhere.json" (
             (jailerLib pkgs).projectSettings {
               repoRoot = "/home/acme/code/git/acme/demo";
             }
           );
           ajmux = import ./pkgs/ajmux.nix { inherit pkgs; };
-          # bin/aj: bootstrap, upgrade, doctor, init, check, reset.
           aj = import ./pkgs/aj.nix {
             inherit pkgs;
             rev = self.rev or self.dirtyRev or "dirty";
           };
           default = self.packages.${pkgs.stdenv.hostPlatform.system}.managed;
         }
-        # claude-code is unfree: exported, like the check below, only when the
-        # evaluator allows it. The devenv module uses the same file.
+        # claude-code is unfree: exported, like its check below, only when the
+        # evaluator allows it.
         // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
-          # pkgs.claude-code without the LD_LIBRARY_PATH its wrapper leaks
-          # into every hook, command and MCP server (pkgs/claude-code.nix),
-          # for a host that installs Claude Code from this flake.
+          # For a host that installs Claude Code from this flake; the devenv
+          # module imports the same file.
           claude-code = import ./pkgs/claude-code.nix { inherit pkgs; };
         }
       );
 
-      # `nix fmt`: nixfmt over every .nix file (treefmt-wrapped).
       formatter = forAll (pkgs: pkgs.nixfmt-tree);
 
-      # `nix run .#aj -- doctor`; `aj check` lives here rather than in
-      # the checks, it needs the API.
+      # `aj check` is an app, not a check: it needs the API.
       apps = forAll (pkgs: {
         aj = {
           type = "app";
@@ -121,9 +110,7 @@
         let
           system = pkgs.stdenv.hostPlatform.system;
           p = self.packages.${system};
-          # The worktree .envrc auto-allow and the pre-command environment check
-          # call direnv; this stand-in logs the calls and answers `status` and
-          # `export` from env vars (hook-test.sh --direnv-stub).
+          # direnv as the hook calls it, for hook-test.sh --direnv-stub.
           direnvStub = pkgs.writeShellScriptBin "direnv" ''
             echo "direnv $*" >> "''${DIRENV_STUB_LOG:-/dev/null}"
             case "$1" in
@@ -139,8 +126,7 @@
             inherit (pkgs) lib;
             direnvPackage = direnvStub;
           };
-          # The managed tree with every host.nix option set, as a host would
-          # set it; managed-host-eval reads the settings it renders.
+          # Every host.nix option set, for managed-host-eval.
           hostTree = managedTree pkgs {
             allowLocalCommits = true;
             allowMemoryEdits = true;
@@ -149,10 +135,10 @@
             extraAllowedDomains = [ "example.com" ];
             extraKnownMarketplaces = [ "example-market" ];
             allowManagedHooksOnly = false;
+            extraInstructions = "Host line.";
           };
-          # The devenv module under lib.evalModules, not devenv: stand-ins
-          # for the devenv options it sets or reads, the checkout at /repo.
-          # The file it would write, its packages and its enterShell as JSON.
+          # The devenv module evaluated without devenv: stand-ins for the
+          # devenv options it sets or reads, the checkout at /repo.
           devenvRender =
             name: jail:
             let
@@ -233,13 +219,11 @@
           host-config-test =
             test "host-config-test" ./tests/host-config-test.sh
               "${./pkgs/direnv.toml} ${./pkgs/tmux.conf}";
-          # The pre-Nix script with its host commands stubbed: installer, Fedora and NixOS routes.
           install-test = test "install-test" ./tests/install-test.sh "${./scripts/install.sh}";
           # No nix, claude or code in the build sandbox: the MISSING case.
           aj-doctor-test =
             test "aj-doctor-test" ./tests/aj-doctor-test.sh
               "${p.aj}/bin/aj ${p.project-settings}";
-          # bootstrap, doctor and reset on a stubbed non-Fedora host.
           aj-bootstrap-test = test "aj-bootstrap-test" ./tests/aj-bootstrap-test.sh "${p.aj}/bin/aj";
           aj-init-dry-run-test =
             test "aj-init-dry-run-test" ./tests/aj-init-test.sh
@@ -248,10 +232,8 @@
           check-parser-test =
             test "check-parser-test" ./tests/check-parser-test.sh
               "${p.aj}/bin/aj ${./tests/fixtures}";
-          # The host.nix options reach the managed tree: a tree with every
-          # option set against the default one, and the WSL variant hides the
-          # Windows side. The rule options land in the jail, the managed-only
-          # keys in the law (roadmap item 14).
+          # The rule options land in the jail, the managed-only keys in the
+          # law, and the WSL variant hides the Windows side.
           managed-host-eval = pkgs.runCommand "managed-host-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
             d=${p.managed}/managed-settings.json
             dj=${p.managed}/jail-settings.json
@@ -271,18 +253,16 @@
             jq -e '.allowManagedHooksOnly == true and .strictKnownMarketplaces == []' "$d"
             grep -q 'ALLOW_MEMORY_EDITS="1"' ${hostTree}/hooks/env-guard.sh
             grep -q 'ALLOW_MEMORY_EDITS="0"' ${p.managed}/hooks/env-guard.sh
+            grep -q '^Host line\.$' ${hostTree}/CLAUDE.md
+            ! grep -q 'Host line' ${p.managed}/CLAUDE.md
+            grep -q '^Comments\.' ${p.managed}/CLAUDE.md
             jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") and index("/run/WSL")' "$wj"
             jq -e '.sandbox.filesystem.denyRead | index("/mnt/c") == null' "$dj"
             echo "managed-host-eval: host options and the wsl variant render as expected" | tee $out
           '';
-          # The devenv module writes the project layer only: no hooks, no deny
-          # rule but extraDeny, the two sandbox belt scalars and never
-          # `sandbox.enabled` (the jail's), the seven literal
-          # denyWrite paths under the checkout (/repo), the project domains,
-          # the read fence when on, `settings` merged in. enterShell checks
-          # for the managed file and exports AI_JAIL_PROJECT, never
-          # AI_JAILER_ROLE. `enable = false`: no file, no AI_JAILER_* export, the
-          # notice instead, the packages kept.
+          # The module writes the project layer only: no hooks, no deny rule
+          # but extraDeny, never `sandbox.enabled`; `enable = false` writes
+          # no file and keeps the packages.
           devenv-module-eval = pkgs.runCommand "devenv-module-eval" { nativeBuildInputs = [ pkgs.jq ]; } ''
             on=${devenvRender "on" { }}
             fenced=${
@@ -320,16 +300,11 @@
             jq -e '.packages == ["ajmux", "claude-code", "tmux", "jq"]' "$tools"
             echo "devenv-module-eval: defaults, read fence, extra rules, claudeCode and enable = false render as expected" | tee $out
           '';
-          # The managed tree: the host-wide rules, runnable hooks, and the mod
-          # policy (no mods shipped, every mod refused).
           managed-tree-test = test "managed-tree-test" ./tests/managed-tree-test.sh "${p.managed}";
         }
-        # claude-code is unfree in nixpkgs: its check exists only when the
-        # evaluator allows it (NIXPKGS_ALLOW_UNFREE=1 with --impure, or
-        # allowUnfree in the nixpkgs config).
+        # claude-code is unfree: its check exists only when the evaluator
+        # allows it (NIXPKGS_ALLOW_UNFREE=1 with --impure).
         // pkgs.lib.optionalAttrs (builtins.tryEval pkgs.claude-code.outPath).success {
-          # pkgs/claude-code.nix: no LD_LIBRARY_PATH in the wrapper, the binary
-          # unpatched, and it still starts.
           claude-code-test =
             pkgs.runCommand "claude-code-test"
               {

@@ -7,8 +7,7 @@ for an agent.
 Words used here: the owner is your own login, the human. A worker is the
 Linux user `w-<org>` that runs one org's sessions. The managed file is
 `/etc/claude-code/managed-settings.json` and the tree next to it, where the
-hard rules live. Everything below ran live on NixOS-WSL (2026-10-29)
-unless marked untested.
+hard rules live.
 
 ## 1. Daily flow
 
@@ -64,18 +63,14 @@ unless marked untested.
    of its turn (`Stop`), at a permission prompt or dialog, and after a
    minute idle (`Notification`); the colour is per user, so the worker's
    server colours its own windows. It clears on your next prompt. If you do
-   not see it: a managed tree built before 2026-10-29 coloured only a
-   window other than the current one (`aj upgrade` fixes it); otherwise the
-   hook is not firing, see troubleshooting.
+   not see it, the hook is not firing: see troubleshooting.
 6. You commit and push. Agents stage (`git add`), diff and branch; the
    commit is yours (`allowLocalCommits` flips that per host). Read a
    worker's staged diff as the worker:
    `sudo -u w-acme -i git -C ~w-acme/code/git/acme/infra diff --cached`.
-   Your own git refuses the repo (`detected dubious ownership`, 2026-11-08):
-   it belongs to another user, and git reads such a repository only after
-   `git config --global --add safe.directory <repo>`, which is the
-   alternative if you want your own git tools on it. How the commit then
-   reaches the remote is open (README, "Daily use").
+   Your own git refuses another user's repository (`detected dubious
+   ownership`) unless you add it with `git config --global --add
+   safe.directory <repo>`. How the commit then reaches the remote: RAU-21.
 
 ## 2. What a blocked call looks like
 
@@ -186,8 +181,9 @@ checkout so its devenv shell exists. Then, from that shell
 (`cd ~/code/ai-jailer && devenv shell`, which carries the `aj` CLI built
 from the checkout and sets the ref to it), `aj bootstrap --workers ...`
 once the worker names are known, and again for each worker added later.
-What the host ends up with: the managed tree at `/etc/claude-code`, a user
-and group per worker, the `agents` marker group holding every worker, the
+What the host ends up with: the managed tree at `/etc/claude-code` (the
+law, the jail, the hooks, and the `CLAUDE.md` every session on the host
+loads before the user's and the project's), a user and group per worker, the `agents` marker group holding every worker, the
 owner in each worker's group, linger on for each worker, and the one sudo
 rule where the host can take one. `install.sh` passes any bootstrap flags
 on, so `scripts/install.sh --workers acme` does both runs in one when the
@@ -195,7 +191,7 @@ names are already known.
 
 | Host | Set |
 | --- | --- |
-| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `scripts/install.sh`, then `aj bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/ai-jailer`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#aj -- bootstrap --no-root --yes --jailer <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ajmux, aj), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing. Fedora 46 in this shape ran live on 2026-11-07 (section 5); `--worktree` sessions, a staged-diff review through the group and `aj reset` there only in the stubbed-host tests. Ubuntu in this shape: stubbed-host tests only, not yet run live |
+| Fedora, Ubuntu, NixOS, NixOS-WSL, other Linux | `scripts/install.sh`, then `aj bootstrap --workers acme,globex [--owner <login>] [--owner-sudo nopasswd\|password\|none]` from the checkout's shell. The root steps: devenv cache in the root-owned `nix.conf` rather than making anyone a trusted Nix user (a trusted user can hand the daemon any option); the bwrap AppArmor profile where AppArmor confines user namespaces (Ubuntu 23.10 and later) or the sysctl on an older Debian kernel; `nix build <ref>#managed --out-link /etc/claude-code` (`#managed-wsl` under WSL); `groupadd agents`; per worker `groupadd`, `useradd -m -g w-<c> -G agents -s /bin/bash`, `chmod 0750`, `usermod -aG w-<c> <owner>`, `loginctl enable-linger`; `/etc/sudoers.d/ai-jailer`, accepted only after `visudo -cf`. Then per worker `sudo -u w-<c> -i nix run <ref>#aj -- bootstrap --no-root --yes --jailer <ref>` (a `path:` ref under the owner's home is first prefetched into the store, which a worker can read): profile packages (direnv, devenv, ajmux, aj), `direnv.toml`, tmux config, `~/.bashrc.d`, the code root, and a git identity (default `Claude (<c>)`, `claude-<c>@<host>.invalid`). `--check` (install.sh) prints the planned worker steps and changes nothing. Which hosts have run live, and what has not: RAU-20 |
 | NixOS, NixOS-WSL: the differences | `/etc/nix/nix.conf` and the sysctls are the system configuration's (store symlinks): bootstrap prints the `nix.settings` block where flakes or the devenv cache are missing, and the `boot.kernel.sysctl` option where user namespaces are confined, and writes neither. No sudo rule: `/etc/sudoers` has no `@includedir`, so `ajmux` hands over with the owner's own sudo, password or not (`--owner-sudo` is ignored with a note). The workers come from `useradd`, which holds while `users.mutableUsers` is true (the default; nothing here can read the value): a rebuild with it false removes them, and `aj doctor` reports a worker the receipt names but the host lacks. The `/etc/claude-code` link survives rebuilds (NixOS cleans only links into `/etc/static`); a link via `/etc/static` is an older module's and makes bootstrap stop with the fix. Nothing of the jailer goes into the host configuration |
 
 `aj bootstrap` flags: `--no-root`, `--no-profile`, `--trusted-user`,
@@ -207,7 +203,8 @@ prefix.
 
 The host-wide options, `allowLocalCommits`, `allowMemoryEdits`,
 `allowConnectors`, `allowManagedHooksOnly`, `extraDeny`,
-`extraAllowedDomains` and `extraKnownMarketplaces` (the arguments of
+`extraAllowedDomains`, `extraKnownMarketplaces` and `extraInstructions`
+(text appended to the host-wide `CLAUDE.md`; the arguments of
 `lib/managed-tree.nix`), go into `host.nix` at the checkout root, an
 attrset the flake merges into `packages.managed`; gitignored, reached only
 through the `path:<checkout>` ref the devenv shell sets (the README's "Make
@@ -279,24 +276,8 @@ the `claude` a terminal in the repo would get: the repo shell's
 (`ai-jail.claudeCode.enable`), else the host's; the `claude:` line of its
 header, `--dry-run` included, says which.
 
-The first-run checks (a worker is sandboxed with no repo file, a cell's
-domains are merged into the sandbox proxy's allowlist and `"*"` opens it,
-the owner attaches with `sudo -u w-acme -i tmux attach`, `XDG_RUNTIME_DIR`
-under linger, 0750 homes, a baseline `aj check`, account sync off, bypass
-mode off, the jail check locking a drifted worker out) ran on NixOS-WSL on
-2026-10-29; the table with each command and result is `git show
-v0.1.0:docs/verified.md`.
-
-The worker shape ran live on Fedora 46 (Rawhide, SELinux enforcing,
-Fedora's nix packages, Claude Code 2.1.309 from the repo shell) on
-2026-11-07: `aj doctor` clean on both sides, `ajmux acme/<repo> -p` handed
-over through the worker's devenv shell and answered, the Stop hook coloured
-the window, the owner's home closed to the worker, no SELinux denial, `aj
-check` 19 of 20. The one failure was the `repo-write` case tripping over the
-sandbox's residue (section 7), which `aj check` has cleared first since.
-Not yet run there: `--worktree` sessions, a staged-diff review through the
-group, `aj reset`. Transcripts stay under `/tmp/aj-check.*`, from
-interrupted runs too; `rm -r /tmp/aj-check.*` when done with them.
+Transcripts stay under `/tmp/aj-check.*`, from interrupted runs too;
+`rm -r /tmp/aj-check.*` when done with them.
 
 After the checks, on a host: `nix config show | grep trusted-users` names
 no worker; `git push` as the worker finds no credential; `ajmux
@@ -304,8 +285,7 @@ acme/<repo>` from the owner's terminal lands in the worker's tmux and the
 window turns orange on a prompt; `aj reset` leaves the users and prints
 `userdel -r` lines.
 
-From zero on a Fedora host (the worker shape ran live on Fedora 46 on
-2026-11-07, the one-user shape on 2026-10-20). `aj reset` reverses what the receipt lists,
+From zero on a Fedora host. `aj reset` reverses what the receipt lists,
 the Fedora nix packages included when install.sh put them there; without a
 receipt it does nothing ("nothing recorded, nothing to reset"):
 
@@ -331,12 +311,6 @@ nix flake check                                     # every suite under tests/, 
 nix shell nixpkgs#jq -c tests/hook-test.sh /etc/claude-code/hooks/env-guard.sh   # the installed hook
 tests/ajmux-test.sh "$(command -v ajmux)"           # inside a repo shell, or after aj bootstrap
 ```
-
-Inside a sandboxed Claude Code session the sandbox masks shell startup
-files and `.gitmodules` in the working directory with device nodes, so Nix
-cannot read that directory as a git flake and a bare `nix flake check`
-there fails. `CLAUDE.md`, "Checks", has the copy-the-regular-files recipe;
-run the flake check from your own terminal before committing anyway.
 
 Live checks by hand, inside a jail, as the worker:
 
@@ -423,6 +397,13 @@ the dangerous direction.
   default; bootstrap prints the `boot.kernel.sysctl` line where a kernel
   confines them) and works nested inside `vscode-fhs`. Inside a container
   it needs `/proc` unmasked.
+- **`az`, `terraform plan` or the app fail in a session for want of a
+  variable that is in `.env`.** The agent never sees `.env`: the sandbox
+  mounts it as `/dev/null` and the hook refuses any command naming it, and
+  the rule covers `.env.*` too (`.env.example` included; name a template
+  `env.example`). Non-secret values (tenant and subscription IDs, regions)
+  go in `env.X` in `devenv.nix`; secrets stay in `.env` for your own shell.
+  There is no switch: the rule is host-wide.
 - **Every sandboxed command dies with `bwrap: execvp /bin/bash: No such
   file`.** A `Read(...)` deny rule on a directory that holds a symlink into
   the store (`.devenv/`, `.terraform/`): Claude Code merges it into the
@@ -456,9 +437,13 @@ the dangerous direction.
 - **`git push` from a session fails with `Permission denied (publickey)`.**
   Expected: workers hold no key, and sessions get no agent socket and no
   `~/.ssh`.
-- **A push went through without asking** from your own account. The key is
-  cached in an agent. `ssh-add -l` lists it; `ssh-add -d <key>` removes it,
-  and the host block needs `IdentityAgent none`.
+- **A push went through without asking** from your own account. Either the
+  key is cached in an agent (`ssh-add -l` lists it; `ssh-add -d <key>`
+  removes it, and the host block needs `IdentityAgent none`), or the remote
+  is HTTPS and a credential helper answered: VS Code's GitHub sign-in when
+  you push from the editor, `gh` when it is git's helper. `git remote -v`
+  shows which; `git remote set-url origin git@github.com:<org>/<repo>.git`
+  puts the key back in the path.
 - **`nix-daemon.socket` fails with `Failed to create listening socket ...
   Permission denied` on Fedora.** SELinux: `/nix` is `default_t` without a
   policy and systemd may not create a socket there; auditd has the AVC,
@@ -492,21 +477,15 @@ the dangerous direction.
 - **`git config` in a worker repo fails with `could not lock config file
   .git/config: File exists`, and `git status` there lists `.bashrc`,
   `.gitmodules`, `.claude-plugin`, `.vscode` and other empty files nobody
-  wrote.** A session was interrupted while a sandboxed command ran: Ctrl-C
-  on `aj check`, an aborted tool in an interactive session (Claude Code
-  2.1.309, seen 2026-11-07 on Fedora 46, reproduced 2026-11-08). bubblewrap
-  needs a mount point for every denied path, and for one the repo does not
-  have Claude Code lets it create an empty read-only file in the repo. A
-  command that ends removes them all; an aborted one leaves them all, in
-  the worker's home too (`~/.gitmodules`, `~/.idea`). Remove them, with the
-  `find ... -delete` that `aj check` prints when it sees them or by hand;
-  until then `git config` fails and a real `.vscode/` or `.claude/hooks/`
-  cannot be created. `aj check` clears the two files that would distort its
-  own verdicts and, interrupted, removes what its killed session left.
-  Nothing hides the rest: an ignore rule for `.vscode` or `.claude/skills`
-  would also hide a real directory of that name made later, and the files
-  are not the project's to ignore. The missing cleanup on abort is
-  upstream's (RAU-31).
+  wrote.** A session was interrupted while a sandboxed command ran (Ctrl-C
+  on `aj check`, an aborted tool). The files are bubblewrap's mount points
+  for denied paths the repo did not have; Claude Code removes them when the
+  command ends, not when it is aborted (RAU-31). Remove them with the
+  `find ... -delete` that `aj check` prints when it sees them; the worker's
+  home has the same (`~/.gitmodules`, `~/.idea`). Until then `git config`
+  fails and a real `.vscode/` or `.claude/hooks/` cannot be created. Nothing
+  hides them: an ignore rule for `.vscode` or `.claude/skills` would hide a
+  real directory of that name made later.
 - **`aj doctor` or `aj reset` on a host set up before 2026-10-28 misses
   what `harness bootstrap` wrote.** The rename moved the receipt, the
   sudoers file, the sysctl drop-in, the environment.d file and the block
@@ -515,7 +494,7 @@ the dangerous direction.
   a311cf4`, then `nix run path:/tmp/old#harness -- reset --yes`, then `aj
   bootstrap` from the current checkout.
 
-## 8. Known gaps, by design
+## 8. Limits of the boundary
 
 - Deny rules and the hook match text. `git -C`, `bash -c`, quoting and
   `env` prefixes are covered by normalisation; a script that opens files
@@ -535,11 +514,10 @@ the dangerous direction.
   project layer, not the managed rules.
 - MCP and LSP servers run outside the sandbox and the law does not restrict
   them (no `allowedMcpServers`): a cell may need one, and Claude Code's own
-  approval of a project `.mcp.json` is the human's gate. Accepted
-  2026-10-29.
+  approval of a project `.mcp.json` is the human's gate (RAU-32).
 
-Sandbox limits, checked against the sandboxing docs and live. The README's
-"What to expect" summarises them; closing them is tracked in Linear:
+Sandbox limits. Closing them is RAU-22 (tmux socket), RAU-23 (keyring
+sockets) and RAU-24 (the read fence):
 
 - tmux is per UID: a worker's server and socket belong to the worker, so a
   sandboxed `send-keys` reaches only that worker's own server. That server
@@ -549,8 +527,7 @@ Sandbox limits, checked against the sandboxing docs and live. The README's
   the owner). Hook rule 6 refuses the same launch flags after `ajmux` as
   after `claude`, and rule 7 refuses every tmux command but the read-only
   ones; both read command text, so a script talking to the socket still
-  gets through. A private socket under a `denyRead` directory is the real
-  fix.
+  gets through. A private socket under a `denyRead` directory is the fix.
 - Reads within the worker's own home are open. A sandboxed command reads
   the whole machine the worker's UID can read, except the `denyRead` paths
   (`~/.claude/.credentials.json`, `~/.claude.json`, `~/.azure`,
@@ -559,8 +536,8 @@ Sandbox limits, checked against the sandboxing docs and live. The README's
   0750, which `aj check` case 18 tests. The Read tool reaches the same
   files (`blockReadsOutsideWorkingDirectories` is unset).
   `ai-jail.readFence = true` turns on a fence (`denyRead ["~/"]` plus
-  `allowRead` for the repo and the shell-entry paths); not yet tried in a
-  real cell. The `Read(**/.env)` deny rules do become sandbox `denyRead`: a
+  `allowRead` for the repo and the shell-entry paths); untried in a real
+  cell. The `Read(**/.env)` deny rules do become sandbox `denyRead`: a
   `.env` under the checkout is bind-mounted as `/dev/null` for every
   command, whatever verb reads it; a `.env` outside the cwd tree is not
   fenced.
@@ -571,14 +548,14 @@ Sandbox limits, checked against the sandboxing docs and live. The README's
   elsewhere under `$HOME` is still creatable, and `~/.claude` plus Claude
   Code's own working-directory protections hold.
 - Network: `allowedDomains` is the base list plus `extraAllowedDomains`,
-  and a cell's list is merged in (checked 2026-10-29); an unlisted host
+  and a cell's list is merged in; an unlisted host
   prompts in an interactive session and is refused in a `-p` one. `"*"`
   opens the network, no prompt.
 - Every unix socket is reachable (`allowAllUnixSockets`, all-or-none on
   Linux): the D-Bus session bus, the secret service behind it, the display
   server, not only the Nix daemon and go-plugin. One more reason to keep
   `trusted-users` off (the daemon socket would be root-equivalent). The SSH
-  agent was the measured case (2026-10-21): `SSH_AUTH_SOCK` is stripped, but
+  agent is the example: `SSH_AUTH_SOCK` is stripped, but
   `/run/user/<uid>/gcr/ssh` is guessable and answers from inside the
   sandbox; a worker holds no key, so there is nothing for it to sign with.
 - The environment: the sandbox's `credentials.envVars` denies the Azure
@@ -594,9 +571,8 @@ Sandbox limits, checked against the sandboxing docs and live. The README's
   input redirection, so `claude -p "why is .env hidden"` is refused too.
   Rephrase.
 
-Accepted for now (2026-10-17), after comparing with Hermes Agent, Codex,
-destructive_command_guard and codex-protect. Each is a text-matching gap the
-other layers are meant to catch; revisit when tightening:
+Text-matching gaps the other layers are meant to catch. Why they are
+accepted, and what would reopen them: RAU-32.
 
 - Shell constructs that compute the command at runtime: `$IFS`, `git\ push`,
   `$(echo git) push`, variable indirection, `base64 -d | sh`, python or node
@@ -605,7 +581,7 @@ other layers are meant to catch; revisit when tightening:
 - GitHub CLI writes (`gh pr merge`, `gh release create`, `gh repo delete`,
   `gh secret set`, `gh gist create`, `gh api -X DELETE`) and package or
   image publishing (`npm publish`, `cargo publish`, `dotnet nuget push`,
-  `docker push`). Same policy as `git push`; not yet encoded.
+  `docker push`). Same policy as `git push`, not encoded.
 - Git config keys that run programs: `-c core.hooksPath=`, `core.sshCommand`,
   `credential.helper`, `--config-env`, `git log --output`. The `.git/hooks`
   write block does not cover a hooksPath pointing elsewhere. Writing one

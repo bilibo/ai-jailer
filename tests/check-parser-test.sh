@@ -70,8 +70,8 @@ if [ "$rc" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: --dr
 all_listed "sandbox on"
 refute "sandbox on: no warning" 'warn  the repo file'
 
-# A repo file without the key is the normal cell since 2026-10-28 (the
-# sandbox is the jail's, roadmap item 14): no warning.
+# A repo file without the key is the normal cell (the sandbox is the
+# jail's): no warning.
 fake_repo cell '{"sandbox":{"failIfUnavailable":true}}'
 dry_run cell
 all_listed "no sandbox key"
@@ -90,9 +90,17 @@ dry_run masked
 all_listed "masked file"
 refute "masked file: no warning" 'warn  '
 
-# The sandbox's residue (check.sh: empty 0444 files for denied paths the
-# repo did not have) is named in a warning, in C order; a repo without any
-# draws none (the fake repos above). The dry run removes nothing.
+# A fenced repo file lists the two read-fence cases as well.
+fake_repo fenced '{"sandbox":{"enabled":true,"filesystem":{"denyRead":["~/"]}}}'
+dry_run fenced
+all_listed "fenced"
+check "fenced: read-fence listed"      'would +read-fence '
+check "fenced: read-fence-home listed" 'would +read-fence-home '
+refute "unfenced: no read-fence case" 'nothing'
+
+# The sandbox's residue (RAU-31: empty 0444 files for denied paths the repo
+# did not have) is named in a warning, in C order; a repo without any draws
+# none (the fake repos above). The dry run removes nothing.
 fake_repo residue '{"sandbox":{"enabled":true}}'
 mkdir -p "$tmp/residue/.git"
 for f in .gitmodules .claude-plugin .git/config.lock .claude/hooks; do : >"$tmp/residue/$f"; chmod 444 "$tmp/residue/$f"; done
@@ -102,15 +110,14 @@ check  "residue: warned, the files named" 'warn  before the run: the sandbox.s m
 check  "residue: the removal named"       "find $tmp/residue -maxdepth 2 -type f -size 0 -perm 444 .* -delete"
 if [ -f "$tmp/residue/.claude-plugin" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: the dry run removed the residue"; fi
 
-# The claude the sessions run, in the header: from the repo's own shell, its
-# PATH's (a store directory included); else `direnv exec <repo>`'s, the
-# repo shell's or the host's beneath it, never another shell's (a claude in
-# a store directory on this PATH); without direnv, or when the repo's shell
-# does not load, a host claude outside the store. None: the dry run says so
-# and still lists; a real run exits 69 before any session. The stub direnv
-# puts <repo>/.shell/bin first on PATH, as a devenv shell with
-# ai-jail.claudeCode.enable does, and fails like an .envrc not yet allowed
-# where <repo>/.blocked exists.
+# Which claude the sessions run, in the header: the repo's own shell's (a
+# store directory included); else `direnv exec <repo>`'s, never another
+# shell's (a claude in a store directory on this PATH); without direnv, or
+# when the repo's shell does not load, a host claude outside the store.
+# None: the dry run says so and still lists; a real run exits 69 before any
+# session. The stub direnv puts <repo>/.shell/bin first on PATH, as a devenv
+# shell with ai-jail.claudeCode.enable does, and fails like an .envrc not
+# yet allowed where <repo>/.blocked exists.
 mkdir -p "$tmp/dbin" "$tmp/hostbin" "$tmp/store/abc-claude-code/bin" "$tmp/cli/.shell/bin"
 fake_repo cli '{"sandbox":{"enabled":true}}'
 fake_repo blocked '{"sandbox":{"enabled":true}}'; : >"$tmp/blocked/.blocked"

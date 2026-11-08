@@ -1,8 +1,6 @@
-# aj <command>: the unmanaged-host tooling behind one entry point.
-# bootstrap, upgrade, doctor and reset are pkgs/aj/bootstrap.sh, init is
-# init.sh, check is check.sh. Each body is its own writeShellApplication, so
-# shellcheck covers it at build time; this wrapper only resolves the ai-jailer
-# ref and dispatches. scripts/install.sh runs it once the root steps are done.
+# aj <command>: one entry point for the host tooling in pkgs/aj/. Each body
+# is its own writeShellApplication, so shellcheck covers it at build time;
+# this wrapper only resolves the ai-jailer ref and dispatches.
 {
   pkgs,
   # The unit tests `aj init` runs on a new repo's generated file and hook.
@@ -87,9 +85,8 @@ pkgs.writeShellApplication {
     EOF
     }
 
-    # The flake `nix profile add` and devenv.yaml name: AI_JAILER_REF, else the
-    # receipt's, else the published repo. --jailer, parsed by the bodies,
-    # wins over all of them.
+    # AI_JAILER_REF, else the receipt's, else the published repo; --jailer,
+    # parsed by the bodies, wins over all of them.
     resolve_ref() {
       local r
       if [ -n "''${AI_JAILER_REF:-}" ]; then AI_JAILER_REF_FROM=AI_JAILER_REF; return; fi

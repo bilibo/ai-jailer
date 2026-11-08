@@ -36,7 +36,7 @@
 # the receipt names but the host lacks. A user file that is a symlink into
 # the Nix store is home-manager's: it is skipped and the option that sets it
 # is printed. What the system configuration already provides is skipped too
-# (2026-10-28, seen on NixOS-WSL with programs.direnv): a direnv.toml under
+# (NixOS with programs.direnv): a direnv.toml under
 # DIRENV_CONFIG makes ~/.config/direnv/direnv.toml unread; the hook in
 # /etc/bashrc makes ~/.bashrc.d pointless while the code root is the default
 # (Nix-built tools find NixOS's CA bundle by themselves); environment.d is
@@ -93,8 +93,7 @@
 #    of the host, the owner's sessions included. A path that exists and is
 #    not a store symlink is never replaced; a link via /etc/static is the
 #    old NixOS module's. On NixOS the link survives rebuilds (setup-etc only
-#    removes links into /etc/static). Untested (2026-10-27): `nix build
-#    --out-link` under sudo on a host where the daemon does the build.
+#    removes links into /etc/static).
 #  - With --workers (or --worker, repeatable): the group `agents`, and per
 #    org c the user w-c (primary group w-c, member of agents, home 0750,
 #    shell bash), the owner added to group w-c so that the owner can read the
@@ -119,10 +118,9 @@
 # Home Manager standalone per worker is the alternative to this step (the
 # runbook describes it); bootstrap does not use Home Manager.
 #
-# --account-sync and --no-account-sync are gone (2026-10-27): the claude.ai
-# sync keys now live in the managed settings, and bootstrap no longer writes a
-# user-scope settings block (strictAllowlist went with it). An old command
-# line fails with "unknown argument".
+# --account-sync and --no-account-sync are gone: the claude.ai sync keys live
+# in the managed settings and bootstrap writes no user-scope settings block.
+# An old command line fails with "unknown argument".
 #
 # The ai-jailer ref (what `nix profile add` installs from): --jailer, else
 # AI_JAILER_REF, else the receipt's, else github:bilibo/ai-jailer. A `path:/nix/store/...` ref warns: an
@@ -137,8 +135,7 @@
 #
 # Never env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in ~/.claude/settings.json: in
 # user scope it turns the sandbox's Bash auto-allow off, so every command
-# prompts (2026-10-22, changelog); a copy an earlier bootstrap wrote is
-# removed.
+# prompts; a copy an earlier bootstrap wrote is removed.
 #
 # The receipt, ~/.local/state/ai-jailer/receipt.json, lists what
 # bootstrap put on the host: profile packages, files (whole files, marker
@@ -236,11 +233,9 @@ SYSTEM_BASHRC="${AI_JAILER_SYSTEM_BASHRC:-/etc/bashrc}"
 WSL_MARKER="${AI_JAILER_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 DEFERRED=()   # declined root steps, printed at the end as commands for later
 
-# Nix-built tools (devenv's fetcher included) look for the CA bundle at the
-# NixOS and Debian path, or where NIX_SSL_CERT_FILE points. Fedora 44 keeps
-# it only here (the legacy /etc/pki/tls/certs/ca-bundle.crt and
-# /etc/ssl/certs/ca-bundle.crt links are gone, which is also why Fedora's
-# own profile.d/nix-daemon.sh fails to set the variable).
+# Nix-built tools look for the CA bundle at the NixOS and Debian path, or
+# where NIX_SSL_CERT_FILE points. Fedora 44 dropped the legacy
+# /etc/pki/tls/certs link, so its own profile.d/nix-daemon.sh sets nothing (RAU-41).
 CA_BUNDLE="${AI_JAILER_CA_BUNDLE:-}"
 for f in /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt; do
   [ -z "$CA_BUNDLE" ] && [ -r "$f" ] && CA_BUNDLE="$f"
@@ -257,11 +252,9 @@ ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }  #
 in_list() { local x="$1"; shift; printf '%s\n' "$@" | grep -q -x -F -e "$x"; }  # in_list <word> <list...>
 json_list() { jq -n '$ARGS.positional' --args "$@"; }
 
-# Fedora's profile.d puts ~/.nix-profile/bin and the default profile on PATH
-# for new shells; this shell may predate install.sh's dnf step. Fedora's package
-# first, then the nix-installer's. The test sets the list empty: on a
-# nix-installer host the default profile's real nix would otherwise outrun
-# the stub (2026-10-22).
+# This shell may predate install.sh's Nix step, so the profile.d hook is
+# sourced here: Fedora's package first, then the nix-installer's. The tests
+# set the list empty, or the default profile's real nix would outrun the stub.
 NIX_PROFILE_D="${AI_JAILER_NIX_PROFILE_D-/etc/profile.d/nix-daemon.sh:/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh}"
 nix_path() {
   local -a files; local f
@@ -286,8 +279,7 @@ run() { # run [-q] <command...>; -q drops the command's stdout
   if [ "$quiet" = 1 ]; then "$@" >/dev/null; else "$@"; fi
 }
 
-# ask <question>: y/N from the terminal. --yes and --dry-run answer y (the
-# dry run then prints what it would run); no terminal at all answers n.
+# ask <question>: y/N. --yes and --dry-run answer y; no terminal answers n.
 ask() {
   local a=""
   [ "$YES" != 1 ] && [ "$DRY_RUN" != 1 ] || return 0
@@ -328,12 +320,9 @@ root_write() { # root_write <path> <content> [<NixOS option> [<mode>]]: a root-o
 }
 
 # root_link <path> <flakeref#attr>: <path> becomes an out-link of the build,
-# through sudo. A path that exists and is not a symlink into the store is
-# someone else's and is never replaced; a link that already resolves to the
-# build's store path is left alone. The nix binary is passed by full path
-# because sudo's secure_path may not list the nix profile (suspected, not
-# checked on a Fedora host). Untested (2026-10-27): `nix build --out-link` as
-# root where the daemon does the build.
+# through sudo. A path that is not a symlink into the store is someone else's
+# and is never replaced. nix goes in by full path: sudo's secure_path may not
+# list the profile (suspected, not confirmed) (RAU-40).
 root_link() {
   local path="$1" ref="$2" want nixbin
   if [ -e "$path" ] || [ -L "$path" ]; then
@@ -367,8 +356,7 @@ $MARK_END"
   record_file block "$1"
 }
 
-# The file tmux reads: ~/.tmux.conf when it exists (tmux stops at the first
-# file it finds), else ~/.config/tmux/tmux.conf.
+# The file tmux reads: it stops at ~/.tmux.conf when that exists.
 tmux_file() { if [ -e "$HOME/.tmux.conf" ]; then echo "$HOME/.tmux.conf"; else echo "$HOME/.config/tmux/tmux.conf"; fi; }
 tilde() { printf '~/%s' "${1#"$HOME/"}"; }   # tilde <path under $HOME>: for messages
 
@@ -380,7 +368,7 @@ hm_skip() { # hm_skip <file> <home-manager option that sets it>
   HM_SKIPPED+=("$1")
   step "$(tilde "$1") is home-manager's (a store symlink): left alone; it is set by $2"
 }
-# How many of the user files the bootstrap writes are home-manager's (the host line).
+# The user files user_steps writes; the host line counts the home-manager ones.
 hm_owned_count() {
   local f n=0
   for f in "$HOME/.config/direnv/direnv.toml" "$(tmux_file)" "$HOME/.bashrc" "$HOME/.zshrc" \
@@ -441,9 +429,8 @@ rq() { jq -r "$1" <<<"$RECEIPT_JSON"; }  # rq <filter>: from the receipt, one va
 # ---------------------------------------------------------------- preflight
 # shellcheck disable=SC1090  # the tests point this at a fake os-release
 [ -r "$OS_RELEASE" ] && . "$OS_RELEASE"
-# Fedora 44 or newer packages Nix itself: the dnf route. Everything else got
-# Nix from the nix-installer (scripts/install.sh, which also did the dnf
-# step); from here on the steps are the same.
+# Fedora 44 or newer packages Nix itself; everything else got it from the
+# nix-installer (scripts/install.sh). From here on the steps are the same.
 HOST=generic; WSL=0
 [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null && HOST=fedora
 { [ -e "$NIXOS_MARKER" ] || [ "${ID:-}" = nixos ]; } && HOST=nixos
@@ -455,10 +442,8 @@ MANAGED_ATTR=managed; [ "$WSL" = 0 ] || MANAGED_ATTR=managed-wsl
 root_steps() {
   local conf="$NIX_CONF" want flakes=""
   if [ "$HOST" = nixos ]; then nixos_nix_conf; userns_steps; managed_step; worker_steps; sudoers_step; return 0; fi
-  # The ai-jailer block in nix.conf: the devenv cache; flakes when nothing else
-  # turns them on (Fedora's package does, the nix-installer leaves them off);
-  # trusted-users only on request (header).
-  # Everything but a previous ai-jailer block, then the block.
+  # Flakes only when nothing else turns them on (Fedora's package does, the
+  # nix-installer leaves them off); trusted-users only on request (header).
   want=$(without_block "$conf")
   grep -q -E '^experimental-features' <<<"$want" || flakes="
 experimental-features = nix-command flakes"
@@ -567,9 +552,8 @@ worker_user_steps() {
       wref="path:$sp"
     fi
   fi
-  # The worker runs this command, not always bootstrap: a plain bootstrap
-  # leaves profile packages where they are, so `upgrade --workers` left every
-  # worker's aj at the snapshot of its first bootstrap (2026-10-28).
+  # $CMD, not always bootstrap: a bootstrap leaves profile packages where they
+  # are, so `upgrade --workers` would leave each worker's aj at its first snapshot.
   for c in "${WORKERS[@]}"; do
     w="$WORKER_PREFIX$c"
     step "$CMD the user side of $w"
@@ -578,14 +562,13 @@ worker_user_steps() {
   done
 }
 
-# The Claude Code sandbox is bubblewrap, which needs unprivileged user
-# namespaces. Ubuntu 23.10 and later confine them through AppArmor, older
-# Debian kernels gate them with unprivileged_userns_clone; with either on,
-# `failIfUnavailable` refuses every Claude command. userns_restricted sets
-# USERNS_KEY and USERNS_VAL (the sysctl and the value that lifts it) and
-# fails when nothing confines them, or when the AppArmor restriction is on
-# but the bwrap profile already lifts it; APPARMOR_ON says the restriction
-# is on either way.
+# bubblewrap (the Claude Code sandbox) needs unprivileged user namespaces.
+# Ubuntu 23.10 and later confine them through AppArmor, older Debian kernels
+# with unprivileged_userns_clone; either way `failIfUnavailable` refuses every
+# Claude command. userns_restricted sets USERNS_KEY and USERNS_VAL (the sysctl
+# and the value that lifts it); it fails when nothing confines them, or when
+# the bwrap profile already lifts the AppArmor restriction, which APPARMOR_ON
+# still reports.
 USERNS_KEY=""; USERNS_VAL=""; APPARMOR_ON=0
 userns_restricted() {
   USERNS_KEY=""; USERNS_VAL=""; APPARMOR_ON=0
@@ -597,9 +580,9 @@ userns_restricted() {
   else return 1; fi
 }
 
-# The profile from the Claude Code sandboxing docs (section "Ubuntu 24.04
-# and later", read 2026-10-23), verbatim after the marker: bwrap alone may
-# create user namespaces, the sysctl stays on for everything else.
+# The profile from the Claude Code sandboxing docs ("Ubuntu 24.04 and
+# later"), verbatim after the marker: bwrap alone may create user namespaces,
+# the sysctl stays on for everything else.
 APPARMOR_TEXT="$MARK_BEGIN
 abi <abi/4.0>,
 include <tunables/global>
@@ -626,10 +609,9 @@ nixos_nix_conf() {
   fi
 }
 
-# A kernel setting, so it is asked for on its own: what runs is shown,
-# --yes answers it, and a decline prints it for later (doctor keeps
-# reporting the restriction). On NixOS the sysctls are the system
-# configuration's: the option is printed, nothing written or deferred.
+# A kernel setting, so it is asked for on its own; a decline prints it for
+# later and doctor keeps reporting the restriction. On NixOS the sysctls are
+# the system configuration's: the option is printed, nothing deferred.
 userns_steps() {
   local key val l deferred
   userns_restricted || return 0
@@ -666,14 +648,11 @@ userns_steps() {
 }
 
 # ---------------------------------------------------------------- user steps
-# After `upgrade` has moved the profile, the user steps belong to the upgraded aj
-# now in the profile, not to the one running: this process is the old build,
-# and its user steps are the old ones. On 2026-10-22 that wrote the scrub key
-# back into ~/.claude/settings.json right after upgrading to the build that
-# removes it. The wrapper exports its own store path as AI_JAILER_SELF; when
-# the profile's differs, the rest of the run is the new wrapper's
-# `bootstrap --no-root --no-profile` with the original flags (the root and
-# profile steps are done). No profile entry, or the same path: carry on.
+# After `upgrade` has moved the profile this process is the old build, and its
+# user steps are the old ones: they belong to the aj now in the profile. The
+# wrapper exports its own store path as AI_JAILER_SELF; when the profile's
+# differs, the rest of the run is the new wrapper's `bootstrap --no-root
+# --no-profile` with the original flags (the root and profile steps are done).
 handover_steps() {
   [ "$CMD" = upgrade ] && [ "$NO_PROFILE" = 0 ] || return 0
   local new
@@ -725,8 +704,7 @@ profile_steps() {
 }
 
 user_steps() {
-  # direnv: the home module's programs.direnv.config.global. direnv reads
-  # $DIRENV_CONFIG/direnv.toml when the variable is set (NixOS
+  # direnv reads $DIRENV_CONFIG/direnv.toml when the variable is set (NixOS
   # programs.direnv points it at /etc/direnv): the user file is then never
   # read, and doctor judges the one direnv does read.
   local f="$HOME/.config/direnv/direnv.toml" direnv_toml dc="${DIRENV_CONFIG:-}"
@@ -741,25 +719,22 @@ $(cat "$DIRENV_TOML")"
     write_if_differs "$f" "$direnv_toml"; record_file file "$f"
   fi
 
-  # tmux: the home module's programs.tmux.extraConfig, a marked block after
-  # whatever else the file tmux reads holds (tmux_file). An older block is
-  # replaced, so a changed pkgs/tmux.conf reaches a bootstrapped host on the
-  # next bootstrap or upgrade.
+  # tmux: a marked block after whatever else the file holds; an older block is
+  # replaced, so a changed pkgs/tmux.conf reaches the host on the next run.
   local tf; tf=$(tmux_file)
   if hm_owned "$tf"; then hm_skip "$tf" "programs.tmux.extraConfig = builtins.readFile pkgs/tmux.conf"
   else put_block "$tf" "$(cat "$TMUX_CONF")"; fi
 
-  # bash: the direnv hook and the code root (home.sessionVariables), in
-  # ~/.bashrc.d, which Fedora's stock ~/.bashrc sources after /etc/bashrc has
-  # run profile.d, so the nix profile is already on PATH here.
+  # bash: the direnv hook and the code root go in ~/.bashrc.d, which Fedora's
+  # stock ~/.bashrc sources after /etc/bashrc has run profile.d, so the nix
+  # profile is already on PATH there.
   local root_expr="$CODE_ROOT" rc="$HOME/.bashrc" zrc="$HOME/.zshrc"
   [[ "$root_expr" == "$HOME/"* ]] && root_expr="\$HOME/${root_expr#"$HOME/"}"
   f="$HOME/.bashrc.d/ai-jailer.sh"
   # NixOS programs.direnv hooks every interactive bash from /etc/bashrc, and
   # Nix-built tools find NixOS's CA bundle without the variable. With the
   # default code root nothing is left for the file, so none is written and a
-  # ~/.bashrc of the person's own is not touched; a code root of their own
-  # still needs the variable, and gets the file as on any host.
+  # ~/.bashrc of the person's own is not touched.
   if [ "$HOST" = nixos ] && grep -q 'direnv hook bash' "$SYSTEM_BASHRC" 2>/dev/null && [ "$CODE_ROOT" = "$HOME/code/git" ]; then
     step "the direnv hook is in $SYSTEM_BASHRC (programs.direnv in the system configuration) and the code root is the default: ~/.bashrc.d and ~/.bashrc left alone"
   else
@@ -770,15 +745,13 @@ export AI_JAILER_CODE_ROOT=\"$root_expr\"
 if command -v direnv >/dev/null 2>&1; then eval \"\$(direnv hook bash)\"; fi"
     record_file file "$f"
 
-    # Another distro's ~/.bashrc does not source ~/.bashrc.d, so it gets one
-    # line (a marked block) to do so. No rc file at all: ~/.bashrc is created,
-    # unless the person runs zsh (a ~/.zshrc and nothing else).
+    # A ~/.bashrc that does not source ~/.bashrc.d gets one line to do so. No
+    # rc file at all: ~/.bashrc is created, unless only a ~/.zshrc exists.
     if hm_owned "$rc"; then hm_skip "$rc" "programs.direnv.enableBashIntegration (the hook) and home.sessionVariables.AI_JAILER_CODE_ROOT"
     elif { [ -e "$rc" ] || [ ! -e "$zrc" ]; } && ! without_block "$rc" | grep -q 'bashrc\.d'; then
       put_block "$rc" '[ -r ~/.bashrc.d/ai-jailer.sh ] && . ~/.bashrc.d/ai-jailer.sh'
     fi
   fi
-  # A ~/.zshrc gets the same three lines as a block of its own.
   if hm_owned "$zrc"; then hm_skip "$zrc" "programs.direnv.enableZshIntegration and home.sessionVariables.AI_JAILER_CODE_ROOT"
   elif [ -e "$zrc" ]; then
     put_block "$zrc" "export AI_JAILER_CODE_ROOT=\"$root_expr\"
@@ -802,9 +775,8 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 
   [ -d "$CODE_ROOT" ] || { step "mkdir $CODE_ROOT"; run mkdir -p "$CODE_ROOT"; }
 
-  # A worker's git identity, so its commits are not made under no name at all.
-  # Only where none is set, and only for a worker account; recorded as keys so
-  # reset removes exactly these defaults (strip_gitkeys).
+  # A worker's git identity, so its commits are not made under no name at all;
+  # recorded as keys so reset removes exactly these defaults (strip_gitkeys).
   local me="${USER:-$(id -un)}" c gf="$HOME/.gitconfig" gk=()
   if [[ "$me" == "$WORKER_PREFIX"* ]]; then
     c="${me#"$WORKER_PREFIX"}"
@@ -819,15 +791,11 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
     [ ${#gk[@]} -eq 0 ] || record_file keys "$gf" "${gk[@]}"
   fi
 
-  # The jail (2026-10-28, roadmap item 14): a worker's Claude Code user
-  # settings carry every top-level key of the managed tree's
-  # jail-settings.json (the full deny set, the sandbox on with its lists,
-  # the account sync off), and the managed hook refuses every tool of a
-  # worker whose file differs from that reference. Merged into the file
-  # Claude Code itself writes (/model), never a store symlink; recorded key
-  # by key so reset strips exactly those. The owner's file is not touched:
-  # the owner is bound by the law alone. The scrub key an earlier bootstrap
-  # wrote is removed for everyone.
+  # The jail: a worker's user settings carry every top-level key of the
+  # managed tree's jail-settings.json, and the managed hook refuses every tool
+  # of a worker whose file differs from it. Merged into the file Claude Code
+  # itself writes (/model); recorded key by key so reset strips exactly those.
+  # The owner's file is not touched: the owner is bound by the law alone.
   local cs="$HOME/.claude/settings.json" jail="$MANAGED_DIR/jail-settings.json" jk=()
   if [[ "$me" == "$WORKER_PREFIX"* ]]; then
     if hm_owned "$cs"; then miss "$cs is a store symlink: the jail cannot be written there"
@@ -843,32 +811,28 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
       record_file keys "$cs" "${jk[@]}"
     fi
   fi
-  # Written by the bootstrap for a few hours on 2026-10-22: with it Claude
-  # Code stops auto-allowing sandboxed Bash commands (header).
+  # An earlier bootstrap wrote this key, so it is removed for everyone (header).
   if ! hm_owned "$cs" && jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
     step "remove env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB from $cs (it turns the sandbox's Bash auto-allow off)"
     jq_edit "$cs" 'del(.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB) | if .env == {} then del(.env) else . end'
   fi
 
-  # VS Code: mkhl.direnv loads the devenv shell into the window (runbook,
-  # daily flow); direnv.path makes it work before the next login too.
+  # VS Code: mkhl.direnv loads the devenv shell into the window; direnv.path
+  # makes it work before the next login too.
   local vs="$HOME/.config/Code/User/settings.json"
   if hm_owned "$vs"; then hm_skip "$vs" "programs.vscode.profiles.default: userSettings (direnv.path.executable) and extensions (mkhl.direnv)"
   elif command -v code >/dev/null 2>&1; then
     if code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then R_EXT+=(mkhl.direnv)
     else
       step "code --install-extension mkhl.direnv"
-      # A failed install must not end the run before the receipt: on Fedora
-      # 46 Rawhide VS Code's signature checker (vsce-sign) dumped core here
-      # and took bootstrap with it (2026-11-07). doctor reports the gap.
+      # A failed install (vsce-sign has dumped core here) must not end the run
+      # before the receipt; doctor reports the gap (RAU-41).
       if run -q code --install-extension mkhl.direnv; then R_EXT+=(mkhl.direnv)
       else warn "code --install-extension mkhl.direnv failed: install it from VS Code's extensions view (aj doctor reports it until then)"; fi
     fi
-    # Under WSL `code` is the Remote-WSL CLI (on PATH in a VS Code terminal):
-    # the extension lands in the remote, but this file is a Linux desktop VS
-    # Code's and nothing reads it there. The client's settings are on Windows,
-    # the remote's are ~/.vscode-server/data/Machine/settings.json, and the
-    # remote finds direnv on its login-shell PATH.
+    # Under WSL `code` is the Remote-WSL CLI: the extension lands in the
+    # remote, which reads ~/.vscode-server/data/Machine/settings.json and finds
+    # direnv on its login-shell PATH; nothing reads this file there.
     if [ "$WSL" = 1 ]; then step "WSL: $(tilde "$vs") is never read (the client is on Windows, the remote reads ~/.vscode-server/data/Machine/settings.json): left alone"
     else
       local direnv_bin
@@ -1138,9 +1102,6 @@ report() {
     else ok "no sysctl confines unprivileged user namespaces"; fi
   fi
   if bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent -- true 2>/dev/null; then ok "bubblewrap works here"; else miss "bubblewrap cannot create a sandbox here"; fi
-  # ajmux carries its own tmux and a repo's ai-jail.claudeCode.enable puts
-  # one in its shell, so a host without tmux still runs sessions; `tmux
-  # attach` or `tmux ls` from a plain terminal does not work there.
   if command -v tmux >/dev/null 2>&1; then v=$(tmux -V | awk '{print $2}'); ver_ge "${v//[a-z]/}" "$MIN_TMUX" && ok "tmux $v" || warn "tmux $v is older than $MIN_TMUX (extended-keys)"
   else warn "tmux not on the host PATH: ajmux brings its own and ai-jail.claudeCode.enable puts one in a repo's shell; tmux attach from a plain terminal needs your distro's package"; fi
   command -v jq >/dev/null 2>&1 && ok "jq" || miss "jq (your distro's package)"
@@ -1149,8 +1110,7 @@ report() {
   if command -v claude >/dev/null 2>&1; then
     v=$(claude --version 2>/dev/null | awk '{print $1}')
     ver_ge "$v" "$MIN_CLAUDE" && ok "claude $v ($(command -v claude), autoUpdates=$(jq -r 'if has("autoUpdates") then .autoUpdates else "default" end' "$HOME/.claude.json" 2>/dev/null))" || miss "claude $v is older than $MIN_CLAUDE (onFailure: block)"
-  # No host-wide claude is a supported shape (the plain WSL host): VS Code's
-  # extension runs its bundled binary, and repos bring the CLI.
+  # No host claude is a supported shape (the plain WSL host): info, not miss.
   else info "claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from ai-jail.claudeCode.enable (aj init turns it on on such a host)"; fi
   local cs="$HOME/.claude/settings.json" ms="$MANAGED_DIR/managed-settings.json"
   if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (aj bootstrap removes it)"; fi
@@ -1158,13 +1118,10 @@ report() {
   else miss "no managed settings at $ms: this host enforces nothing (scripts/install.sh, or aj bootstrap from the ai-jailer checkout's devenv shell)"; fi
   accounts_report
 
-  # The extension verdicts are the owner's: a worker never opens VS Code
-  # (the owner's tabs attach to its tmux, the repo shell brings claude), and
-  # judged like the owner a correct worker reported `1 missing` for
-  # mkhl.direnv (Fedora, 2026-11-07). From inside a session `code` is on
-  # PATH but dies before printing (the shell's LD_LIBRARY_PATH makes the
-  # host binary load a Nix glibc, measured 2026-10-21), so an extension
-  # verdict there would be a false MISSING.
+  # The extension verdicts are the owner's: a worker never opens VS Code.
+  # Inside a session `code` is on PATH but dies before printing (the shell's
+  # LD_LIBRARY_PATH makes the host binary load a Nix glibc), so a verdict
+  # there would be a false MISSING.
   if group_has agents "${USER:-$(id -un)}"; then info "VS Code steps skipped: a worker never opens VS Code (your tabs attach to its tmux; the repo shell brings claude)"
   elif ! command -v code >/dev/null 2>&1; then warn "code not on PATH: VS Code steps skipped"
   else
@@ -1173,11 +1130,9 @@ report() {
     else
       ok "code $v"
       code --list-extensions 2>/dev/null | grep -q -i -x 'anthropic.claude-code' && ok "VS Code extension anthropic.claude-code" || warn "VS Code extension anthropic.claude-code not installed"
-      # On WSL `code` is the Remote-WSL CLI, so this lists the remote's
-      # extensions. A bootstrap run from a VS Code terminal installs
-      # mkhl.direnv there (the CLI is on PATH only in one); from anywhere
-      # else it is a manual install, and on the Windows side it only raises
-      # errors.
+      # On WSL `code` is the Remote-WSL CLI (on PATH only in a VS Code
+      # terminal), so this lists the remote's extensions; from anywhere else
+      # the install is manual, and on the Windows side it only raises errors.
       if code --list-extensions 2>/dev/null | grep -q -i -x 'mkhl.direnv'; then ok "VS Code extension mkhl.direnv"
       elif [ "$WSL" = 1 ]; then info "VS Code extension mkhl.direnv not in the WSL remote: without it the Claude Code extension, language servers and tasks run outside the repo's devenv shell; install it from the Extensions view with \"Install in WSL\", never on Windows"
       else miss "VS Code extension mkhl.direnv (code --install-extension mkhl.direnv)"; fi
@@ -1240,8 +1195,6 @@ accounts_report() {
       else warn "linger is off for $w: its tmux and devenv processes stop at logout (sudo loginctl enable-linger $w)"; fi
     done
   fi
-  # A worker the receipt names but the host lacks: on NixOS, a rebuild with
-  # users.mutableUsers = false removes useradd's users.
   if [ -s "$RECEIPT" ]; then
     for c in $(jq -r '.root.workers[]?' "$RECEIPT" 2>/dev/null); do
       w="$WORKER_PREFIX$c"
@@ -1296,7 +1249,7 @@ repo_report() {
   local s=.claude/settings.json
   echo; echo "repo: $PWD"
   # A session's sandbox masks the repo's own .claude files as character
-  # devices (measured 2026-10-21): nothing about the repo can be read here.
+  # devices: nothing about the repo can be read here (RAU-36).
   if [ -c "$s" ]; then warn "$s is masked by the sandbox (a character device): doctor runs inside a Claude Code session; run it from your own terminal to check the repo"; return 0
   elif [ -L "$s" ] && [ ! -e "$s" ]; then miss "$s is a dangling symlink to $(readlink "$s") (direnv reload rewrites it)"
   elif [ -L "$s" ] && [[ "$(readlink -f "$s")" == /nix/store/* ]]; then ok "$s -> $(readlink "$s")"

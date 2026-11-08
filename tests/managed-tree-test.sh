@@ -2,14 +2,13 @@
 #   managed-tree-test.sh <managed tree>
 #
 # The managed tree (/etc/claude-code on a host): the law in
-# managed-settings.json, which Claude Code reads for every user and so binds
-# the jailer too (credential reads, `git commit`, `git push`, the hooks, the managed-only
-# keys), the jail in jail-settings.json, the reference copy of a worker's
-# rules that `aj bootstrap` writes into the worker's user settings and the
-# hook checks them against (roadmap item 14, 2026-10-28), and the hooks.
-# ai-jailer ships no mods since 2026-10-24, so the tree has no marketplace
-# directory and the law registers no marketplace and enables no plugin; the
-# keys that refuse every mod on a managed host are all there.
+# managed-settings.json binds everyone, the jailer included, and carries
+# nothing beyond the law; the jail in jail-settings.json is a worker's full
+# set; the hooks run. ai-jailer ships no mods, so the tree has no
+# marketplace directory, the law registers no marketplace and enables no
+# plugin, and the keys that refuse every mod on a managed host are all there.
+# CLAUDE.md, the defaults every session loads first, is short and carries
+# its three contracts.
 # shellcheck disable=SC2016  # the filters are jq
 set -uo pipefail
 [ $# -eq 1 ] || { echo "usage: managed-tree-test.sh <managed tree>" >&2; exit 64; }
@@ -23,7 +22,9 @@ ok() { # ok <description> <command...>
 
 echo "== $t"
 ok "law, jail and hooks present"                test -f "$s" -a -f "$j" -a -x "$t/hooks/env-guard.sh"
-ok "nothing else in the tree"                   sh -c "[ \"\$(ls -A '$t' | tr '\n' ' ')\" = 'hooks jail-settings.json managed-settings.json ' ]"
+ok "nothing else in the tree"                   sh -c "[ \"\$(ls -A '$t' | tr '\n' ' ')\" = 'CLAUDE.md hooks jail-settings.json managed-settings.json ' ]"
+ok "defaults: under 60 lines"                   sh -c "[ \"\$(wc -l <'$t/CLAUDE.md')\" -le 60 ]"
+ok "defaults: documentation, comments, delegating" sh -c "grep -q '^Documentation\\.' '$t/CLAUDE.md' && grep -q '^Comments\\.' '$t/CLAUDE.md' && grep -q '^Delegating\\.' '$t/CLAUDE.md'"
 
 # The law: what binds everyone, and nothing more.
 ok "law: git push denied"                       jq -e '.permissions.deny | index("Bash(git push)") and index("Bash(git push *)")' "$s"
@@ -32,7 +33,7 @@ ok "law: own Claude login unreadable by rule"   jq -e '.permissions.deny | index
 ok "law: ssh keys and GitHub tokens unreadable" jq -e '.permissions.deny | index("Read(~/.ssh/**)") and index("Read(~/.config/gh/**)") and index("Read(~/.git-credentials)")' "$s"
 ok "law: in-repo secrets unreadable"            jq -e '.permissions.deny | index("Read(**/.env)") and index("Read(**/*.tfvars)") and index("Read(**/*.tfstate)")' "$s"
 ok "law: no other deny rule"                    jq -e '.permissions.deny | all(startswith("Read(") or startswith("Bash(git push") or startswith("Bash(git commit"))' "$s"
-ok "law: .terraform readable (2026-10-29)"      jq -e '.permissions.deny | index("Read(**/.terraform/**)") == null' "$s"
+ok "law: .terraform readable"                   jq -e '.permissions.deny | index("Read(**/.terraform/**)") == null' "$s"
 ok "law: no sandbox"                            jq -e 'has("sandbox") | not' "$s"
 ok "law: no account keys"                       jq -e '(has("syncClaudeAiSkills") or has("syncClaudeAiPlugins") or has("disableClaudeAiConnectors")) | not' "$s"
 ok "law: bypass mode off"                       jq -e '.permissions.disableBypassPermissionsMode == "disable"' "$s"
@@ -55,8 +56,8 @@ ok "jail: no sealed network variant"            jq -e '.sandbox.network | has("s
 ok "jail: unix sockets open (go-plugin, the daemon)" jq -e '.sandbox.network.allowAllUnixSockets == true' "$j"
 ok "jail: git push and commit denied"           jq -e '.permissions.deny | index("Bash(git push)") and index("Bash(git commit)")' "$j"
 ok "jail: nh os switch denied"                  jq -e '.permissions.deny | index("Bash(nh os switch)") != null' "$j"
-ok "jail: .terraform readable (2026-10-29)"             jq -e '.permissions.deny | index("Read(**/.terraform/**)") == null' "$j"
-ok "jail: no .devenv/.direnv Read deny (it would mask the store through the symlinks, 2026-10-29)" jq -e '.permissions.deny | map(select(test("^Read\\(.*\\.(devenv|direnv)"))) | length == 0' "$j"
+ok "jail: .terraform readable"                  jq -e '.permissions.deny | index("Read(**/.terraform/**)") == null' "$j"
+ok "jail: no .devenv/.direnv Read deny (it would mask the store through the symlinks)" jq -e '.permissions.deny | map(select(test("^Read\\(.*\\.(devenv|direnv)"))) | length == 0' "$j"
 ok "jail: the law's rules are in it too"        jq -e --slurpfile l "$s" '.permissions.deny as $d | all($l[0].permissions.deny[]; . as $r | $d | index($r) != null)' "$j"
 ok "jail: cloud credentials are the sandbox's, not a Read rule" jq -e '.permissions.deny | index("Read(~/.aws/**)") == null' "$j"
 ok "jail: credential paths hidden in the sandbox" jq -e '.sandbox.filesystem.denyRead | index("~/.ssh") and index("~/.claude/.credentials.json") and index("~/.config/gh")' "$j"

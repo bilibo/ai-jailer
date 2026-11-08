@@ -1,5 +1,5 @@
 # The two hook scripts as one store path, for the managed tree
-# (/etc/claude-code/hooks); the repo settings no longer point at it.
+# (/etc/claude-code/hooks).
 {
   pkgs,
   lib,

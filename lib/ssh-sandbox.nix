@@ -1,10 +1,6 @@
-# A sandboxed session in a jail (every work repo) gets no agent and
-# no key files, so it cannot push, clone or ssh as the user, while the
-# user's own shells keep both. The center runs without the sandbox, so its
-# key files stay readable (settings.nix drops `filesystem` there). A
-# project rule, not a universal one: outside the enforcement roots a session
-# keeps the agent, and a hardware key's touch is the gate for the user's
-# own pushes (README, "Git over SSH").
+# A worker's sandbox gets no agent and no key files, so it cannot push,
+# clone or ssh as the user; the user's own shells keep both, and so does the
+# jailer, who runs without the sandbox.
 #
 # Unix sockets are allowed wholesale in the sandbox (go-plugin, Nix daemon),
 # so the agent socket is reachable; what keeps a session from signing is not

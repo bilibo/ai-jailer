@@ -3,9 +3,9 @@
 #
 # pkgs/claude-code.nix: the wrapper no longer sets LD_LIBRARY_PATH (the
 # binary wrapper embeds its own invocation text, so the name must be absent
-# from it), the binary itself is untouched (no RUNPATH: the patch broke
-# 2.1.303, changelog 2026-10-27), and it still starts: `claude --version`
-# names the package version. Needs patchelf and binutils on PATH.
+# from it), the binary itself is untouched (no RUNPATH: that segfaulted
+# 2.1.303), and it still starts: `claude --version` names the package
+# version. Needs patchelf and binutils on PATH.
 set -uo pipefail
 pkg="${1:?usage: claude-code-test.sh <claude-code>}"
 pass=0; fail=0
@@ -27,9 +27,8 @@ export HOME="${TMPDIR:-/tmp}/claude-code-test-home"; mkdir -p "$HOME"
 v=$("$wrapper" --version 2>&1); rc=$?
 want=$(basename "$pkg" | sed 's/^[^-]*-claude-code-//')
 if [ "$rc" = 0 ] && [[ "$v" == "$want"* ]]; then ok; else bad "claude --version: exit $rc, '$v' (want $want)"; fi
-# Inside the wrapper's process the variable is still absent: the binary
-# prints its environment through no flag, so the wrapper's embedded text
-# above is the check; this one guards the test's own premise.
+# The binary has no flag that prints its environment, so the wrapper's
+# embedded text above is the check; this one guards the test's own premise.
 if [ -z "${LD_LIBRARY_PATH:-}" ]; then ok; else bad "LD_LIBRARY_PATH set in the test environment: ${LD_LIBRARY_PATH}"; fi
 
 echo "claude-code-test: $pass passed, $fail failed"

@@ -30,10 +30,8 @@ server, because Terraform's providers and the Nix daemon need them and the
 filter is all or nothing. What it buys you is that an accident or a prompt
 injection ends in a refused tool call instead of a push to `main` or a
 `terraform apply`. Code you do not trust still belongs in a VM. I run this on
-[bilibo/nixos-wsl](https://github.com/bilibo/nixos-wsl) with two workers,
-which is where `v0.1.0` (2026-10-29) was tested end to end. Fedora and
-Ubuntu ran live before the multi-user split; the multi-user setup there is
-covered by stubbed-host tests only so far.
+[bilibo/nixos-wsl](https://github.com/bilibo/nixos-wsl) and on Fedora, with
+two workers.
 
 ## Where things are
 
@@ -41,15 +39,17 @@ covered by stubbed-host tests only so far.
   rules. The Nix files define what everyone is refused, what a worker is
   refused on top, and what the bubblewrap sandbox hides; `env-guard.sh` is
   the PreToolUse hook that runs outside the sandbox before every tool call
-  and actually says no. Read these for the spirit of the project.
+  and actually says no. `lib/claude-defaults.md` is the `CLAUDE.md` every
+  session on the host loads first. Read these for the spirit of the project.
 - `devenv/devenv.nix`: what a governed repo imports. It writes a read-only
   `.claude/settings.json` from the `ai-jail.*` options on every shell entry.
 - `pkgs/`: `aj` (`bootstrap`, `doctor`, `init`, `check`, `upgrade`, `reset`),
   `ajmux` (the tmux launcher that hands over to the worker), and the tmux
   and direnv configs. `scripts/install.sh` puts Nix on a host that lacks it,
   then runs `aj bootstrap` for the host and `aj init` on the checkout.
-- `docs/runbook.md`: operator notes, verification steps, troubleshooting and
-  known gaps. `docs/project-devenv.md`: a practical guide to customizing a
+- `docs/runbook.md`: the operator's reference: host configuration,
+  verifying, upgrades, troubleshooting, the limits of the boundary.
+  `docs/project-devenv.md`: a practical guide to customizing a
   repo's `devenv.nix` (packages, languages, env vars, allow rules) without
   needing to know Nix first.
 
@@ -137,13 +137,10 @@ multiple VS Code tabs attached to the same project do not follow each other
 around. The window tab turns orange when the agent stops or waits on a
 prompt.
 
-Agents stage, diff and branch;
-`sudo -u w-acme -i git -C ~w-acme/code/git/acme/infra diff --cached` shows
-you what changed (your own git refuses another user's repository until you
-add it as a `safe.directory`), and the commit and push are yours. Workers have no SSH keys or tokens, so they cannot push; right now
-you either commit as the worker and fetch the branch from its clone into
-your own to push, or push from its clone using your credentials. Neither is
-tested yet. Since your account is the only one on the box with a push key,
+Agents stage, diff and branch; you review as the worker
+(`sudo -u w-acme -i git -C ~w-acme/code/git/acme/infra diff --cached`), and
+the commit and push are yours. Workers have no SSH keys or tokens, so they
+cannot push. Since your account is the only one on the box with a push key,
 put it on a hardware key (FIDO2) or a passphrase with `IdentityAgent none`
 so nothing caches it in memory.
 
@@ -229,9 +226,8 @@ side effect: an agent that needs your API keys to pass the test suite is
 the channel this tool closes. Per-developer values that are not secrets go
 in a gitignored file with another name, loaded by
 `dotenv.filename = [ ".env" "local.vars" ]`; a name ending in `.env` is
-caught by the hook like `.env` itself. Whether a sandboxed dev server may
-bind a port is untested so far (Claude Code's `allowLocalBinding`, which
-nothing here sets).
+caught by the hook like `.env` itself. A sandboxed dev server that binds a
+port needs Claude Code's `allowLocalBinding`, which nothing here sets.
 
 `docs/project-devenv.md` has more copy-paste examples for someone new to Nix.
 
@@ -248,66 +244,15 @@ applied by `aj upgrade`:
 }
 ```
 
-`nix flake check` runs the test suites without Claude Code.
-`sudo -u w-acme -i aj check ~w-acme/code/git/acme/infra` runs the live suite as
-the worker: around twenty `claude -p` sessions judged on what they actually
-did on disk and in the transcript. It costs API calls; run it after upgrading
-Claude Code.
-
-## Quirks worth knowing
-
-- The agent never sees `.env`. The sandbox mounts it as `/dev/null` and the
-  hook refuses any command that names it. Projects that keep tenant or
-  subscription IDs in `.env` will see `az` and `terraform plan` fail until
-  those non-secret variables move to `devenv.nix`. The rule is `.env.*`
-  too, so `.env.example` and `.env.local` are hidden as well; name a
-  template `env.example` if the agent should read it. There is no switch
-  for this: it is a host-wide rule, and `.env` is where secrets live by
-  convention, so move the variables rather than the rule.
-- Never put a `Read(...)` deny rule on `.devenv/` or `.terraform/`. Claude
-  Code turns Read denies into bubblewrap `denyRead` mounts and follows the
-  symlinks inside the denied directory, so denying `.devenv/` mounted a
-  tmpfs over the store paths it points at, the bash package included, and
-  every sandboxed command died with `bwrap: execvp /bin/bash: No such file`.
-- The hook strips quotes before matching command text, so a prompt that
-  mentions a secret path or launch flag gets refused too (`claude -p "why is
-  .env hidden"`). Rephrase it.
-- `direnv allow` must be run by you as the worker; the agent is refused it.
-  A newly initialized repo needs it twice because the first evaluation writes
-  `devenv.lock`. Any `devenv.local.nix` or `devenv.local.yaml` stops the
-  shell from loading at all, since devenv would import it without
-  `direnv allow`.
-- Choosing "Yes, and don't ask again" in Claude Code writes
-  `.claude/settings.local.json`. The hook blocks the agent from writing it,
-  but Claude Code's own UI process can still write it and it will apply on
-  the next session. Put allow rules in `devenv.nix` instead.
-- Project allow rules wait for the folder trust dialog in interactive
-  sessions; `claude -p` trusts the folder automatically.
-- Claude Code rewrites `~/.claude/settings.json` when you switch `/model` or
-  modes. The hook compares the jail's keys against
-  `/etc/claude-code/jail-settings.json` and ignores `defaultMode`; if any of
-  those keys drifts, every tool call fails with `"worker without a jail"`
-  until you run `sudo -u w-acme -i aj bootstrap --no-root --yes`.
-- claude.ai connectors and account-synced skills/plugins are disabled for
-  workers by default. Set `ai-jail.allowConnectors = true` in a repo's
-  `devenv.nix` or `allowConnectors = true` in `host.nix` if you need them.
-- A session interrupted while a sandboxed command runs (Ctrl-C on
-  `aj check`, an aborted tool) leaves empty read-only files in the repo and
-  in the worker's home (`.claude-plugin`, `.gitmodules`, `.vscode`,
-  `.git/config.lock`, ...): bubblewrap's mount points for denied paths that
-  did not exist, which Claude Code 2.1.309 removes only when the command
-  ends. They show up in `git status`, and `.git/config.lock` makes
-  `git config` fail for you until you remove it. `aj check` lists them with
-  the command that removes them. Runbook section 7.
-- Settings keys were last checked against Claude Code `2.1.296` and run live
-  on `2.1.309`. Unknown or renamed keys are ignored silently by Claude Code,
-  so check the settings reference and run `aj check` after upgrading.
+`nix flake check` runs the test suites without Claude Code; `aj check`, as
+a worker, runs the live suite: twenty-odd `claude -p` sessions judged on
+what they did on disk and in the transcript (runbook section 5).
 
 ## If something goes wrong
 
 Run `aj doctor` as yourself and as the worker; it prints what is missing and
-exits `1`. When a session hits a wall, it will look like one of three things
-(all three are expected): an `env-guard: ... blocked` line from the hook, a
-permission denial naming a rule like `Bash(git push *)`, or a bubblewrap
-sandbox error (`Operation not permitted` or a refused host). See the
-troubleshooting section in `docs/runbook.md` for everything else.
+exits `1`. When a session hits a wall, it looks like one of three things,
+all expected: an `env-guard: ... blocked` line from the hook, a permission
+denial naming a rule like `Bash(git push *)`, or a bubblewrap sandbox error
+(`Operation not permitted` or a refused host). `docs/runbook.md` has the
+rest.

@@ -2,27 +2,24 @@
 #   hook-test.sh <path-to-env-guard.sh> [--direnv-stub]
 #
 # Feeds hook JSON on stdin, no Claude Code needed (0 = allow, 2 = block).
-# Every rule applies in every directory: the hook has no enforcement roots
-# and no command-center mode. Two rule sets (roadmap item 14, 2026-10-28):
-# the jail, every rule, for a worker (a member of WORKER_GROUP whose user
-# settings carry the managed tree's jail-settings.json), and the law,
-# credential reads, `git commit` and `git push`, for everyone else. The cases up to the
-# law section run as a worker: the hook copied with WORKER_GROUP set to this
-# runner's own group and MANAGED_DIR to a stand-in tree, and a user settings
-# file that matches the stand-in jail. The law section at the end runs the
-# hook as given, as the jailer. With --direnv-stub (a hook built against the
-# stub direnv) the worktree .envrc and pre-command environment sections run
-# too. Add a case per hard limit you rely on; a case that stops passing after
-# a regex change is the point of this file.
+# Every rule applies in every directory: the hook has no enforcement roots.
+# Two rule sets: the jail, every rule, for a worker (a member of
+# WORKER_GROUP whose user settings carry the managed tree's
+# jail-settings.json), and the law, credential reads, `git commit` and
+# `git push`, for everyone else. The cases up to the law section run as a
+# worker: the hook copied with WORKER_GROUP set to this runner's own group
+# and MANAGED_DIR to a stand-in tree, and a user settings file that matches
+# the stand-in jail. The law section at the end runs the hook as given, as
+# the jailer. With --direnv-stub (a hook built against the stub direnv) the
+# worktree .envrc and pre-command environment sections run too. Add a case
+# per hard limit you rely on; a case that stops passing after a regex
+# change is the point of this file.
 set -uo pipefail
 law_hook="${1:?usage: hook-test.sh <env-guard.sh>}"
 pass=0; fail=0
 wk=$(mktemp -d); wg=$(id -gn)
 # The cases' cwd: a directory that never exists, so the hook's direnv check
-# stays out of the cases that are not about it. It was the runbook's example
-# repo path under HOME; run by `aj init acme/infra` as the worker, that was
-# the real jail, and with HOME swapped for the scratch home direnv found no
-# allow record and every command was refused (2026-10-28, 106 failures).
+# stays out of the cases that are not about it.
 IN="${HOOK_TEST_IN:-$wk/acme/infra}"
 sed -e "s/^WORKER_GROUP=.*/WORKER_GROUP=\"$wg\"/" -e "s#^MANAGED_DIR=.*#MANAGED_DIR=\"$wk/etc\"#" "$law_hook" >"$wk/env-guard.sh"; chmod +x "$wk/env-guard.sh"
 hook="$wk/env-guard.sh"
@@ -175,8 +172,8 @@ block 'cat ~/.claude/.credentials.json'
 block 'cat ~/.claude.json'
 block 'cat prod.tfvars'
 # Home-directory credential stores the law's Read rules name are matched
-# by text too (roadmap item 14): an unsandboxed jailer session has no
-# denyRead to hide them. ~/.aws is not planned until a host holds it.
+# by text too: an unsandboxed jailer session has no denyRead to hide them.
+# ~/.aws is not in the list: no host holds one.
 block 'cat ~/.azure/msal_token_cache.json'
 block 'cat ~/.ssh/id_ed25519'
 block 'grep -r token ~/.azure/'
@@ -209,7 +206,7 @@ block 'run0 ls'
 block 'nix profile install nixpkgs#hello'
 block 'nix-env -iA nixpkgs.hello'
 block 'nixos-rebuild switch'
-block 'nixos-rebuild build'               # denied as a whole, build included (the owner's call, 2026-10-23)
+block 'nixos-rebuild build'               # denied as a whole, build included
 block 'home-manager switch'
 block 'nh os switch'
 block 'nh os boot .'
@@ -278,7 +275,7 @@ allow 'claude -p "summarise the settings reference"'
 allow 'code --settings-file x'
 allow 'claude --version; echo --settings'
 # ajmux hands everything after its project to claude: the same flags, after
-# a <org>/<repo>, a path or nothing (2026-10-24: these all passed).
+# a <org>/<repo>, a path or nothing.
 block 'ajmux cust/repo --bare'
 block 'ajmux cust/repo --setting-sources user'
 block 'ajmux cust/repo --dangerously-skip-permissions'
@@ -557,7 +554,7 @@ if [ "${2:-}" = --direnv-stub ]; then
   rm -rf "$wt"
 fi
 
-# --- the jail check (2026-10-28, roadmap item 14) ---------------------------
+# --- the jail check ---------------------------------------------------------
 # A worker's tools need its user settings to agree with the managed tree's
 # jail-settings.json on every top-level key of that file, and the sandbox
 # to resolve on over user < project < local settings.

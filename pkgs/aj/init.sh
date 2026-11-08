@@ -97,8 +97,8 @@ if [ -z "${NIX_SSL_CERT_FILE:-}" ]; then
 fi
 
 # put <relpath> <content> [owned]: write a file that does not exist; report
-# one that does. `owned` files are overwritten with --force. One left alone
-# goes in `foreign`, for the approval before the shell step.
+# one that does (--force overwrites an `owned` one). One left alone goes in
+# `foreign`, for the approval before the shell step.
 foreign=()
 put() {
   local f="$repo/$1" content="$2" owned="${3:-}"
@@ -183,22 +183,19 @@ put devenv.nix "# Project tools and ai-jail options. Allow rules for this projec
 $platform_line
 $claude_line
     # extraDeny = [ \"Bash(az devops *)\" ];
-    # extraAllowedDomains = [ \"dev.azure.com\" ];              # project hosts, merged into the sandbox allowlist (live check V2, 2026-10-29); [ \"*\" ] opens the network
+    # extraAllowedDomains = [ \"dev.azure.com\" ];              # project hosts, merged into the sandbox allowlist; [ \"*\" ] opens the network
     # settings.permissions.allow = [ \"Bash(terraform plan *)\" ];
   };
 }"
 
-# The devenv.local.* test first: it needs no devenv, and its error line is
-# the one the hook's preamble shows (env-guard.sh check_env takes the first
-# stderr line matching "error"). require_allowed last: on the first load
-# `use devenv` creates devenv.lock, then the three files are reported as
-# pending and the next `direnv allow` approves them (see the shell step below).
+# The devenv.local.* test comes first: it needs no devenv, and the hook's
+# preamble shows the first stderr line matching "error". require_allowed
+# last: on the first load `use devenv` creates devenv.lock, then the three
+# files are reported pending and the next `direnv allow` approves them.
 put .envrc '# devenv imports devenv.local.nix and devenv.local.yaml with no `direnv allow`,
-# and an interpreter write the jailer hook cannot see could create one; a
-# sandbox deny on them broke every load (changelog 2026-10-22, roadmap 2.7).
-# So the load fails while either exists. direnv keeps no watches from a
-# failed load (direnv 2.38.2, 2026-10-26): after removing the file, `direnv
-# reload`.
+# and an interpreter write the jailer hook cannot see could create one, so
+# the load fails while either exists. direnv keeps no watches from a failed
+# load: after removing the file, `direnv reload`.
 for f in devenv.local.nix devenv.local.yaml; do
   if [ -e "$f" ] || [ -L "$f" ]; then
     echo "error: $f is refused in a jail (devenv loads it without a direnv allow): remove it and direnv reload, or move its content into devenv.nix as a proposed diff" >&2
@@ -231,8 +228,6 @@ contract="## Environment contract (ai-jailer)
   \`git show HEAD:<f> > <f>\`.
 - Cloud and IaC: read and plan only. Scope \`az\` with \`--query\` or
   \`-o table\`/\`-o tsv\`, never unfiltered JSON.
-- A refusal (\`env-guard: ...\`, a deny rule, a sandbox error) is expected:
-  stop and propose, no workarounds.
 - \`~/.ssh\`, \`~/.azure\` and other credential paths are hidden from your
   commands; clone over HTTPS."
 if [ -e "$repo/CLAUDE.md" ]; then
@@ -245,8 +240,7 @@ else
 $contract"
 fi
 
-# Runbook 3.6: a directory with that manifest is a plugin, and the plugin
-# rules refuse it.
+# A directory with that manifest is a plugin, which the plugin rules refuse.
 if find "$repo/.claude" -path '*/.claude-plugin/plugin.json' -print -quit 2>/dev/null | grep -q .; then
   die "a plugin manifest exists under $repo/.claude (.claude-plugin/plugin.json): remove it, plugins do not load from a repo"
 fi
@@ -262,13 +256,12 @@ for t in direnv devenv jq; do command -v "$t" >/dev/null || die "$t not on PATH:
 [ "$VERBOSE" = 0 ] || set -x
 v=$(direnv version); [ "$(printf '%s\n%s\n' 2.38 "$v" | sort -V | head -1)" = 2.38 ] || die "direnv $v is older than 2.38 (require_allowed)" 69
 
-# `direnv allow` below approves the repo's files and the first load runs
-# them as you, outside any sandbox: one this run did not write is read first.
-# A devenv.lock that is here before the first load is the repo's, not the
-# one `use devenv` creates: it pins every input, nixpkgs included, so its
-# inputs are shown (the raw file is not readable) and approved with the rest.
-# A devenv.local.* would fail the template's .envrc at the first load; a
-# .envrc the repo kept may load it, so there it is approved like the rest.
+# `direnv allow` approves the repo's files and the first load runs them as
+# you, outside any sandbox: one this run did not write is shown first. A
+# devenv.lock here before the first load is the repo's, not the one `use
+# devenv` creates, and pins every input, nixpkgs included: shown as its
+# inputs (the raw file is not readable). A devenv.local.* fails the template
+# .envrc; a .envrc the repo kept may load it, so there it is approved too.
 for f in devenv.local.nix devenv.local.yaml; do
   [ -e "$repo/$f" ] || continue
   [[ " ${foreign[*]} " == *" .envrc "* ]] \
@@ -316,8 +309,7 @@ if [ -L "$settings" ] && [ -r "$settings" ] && [[ "$(readlink -f "$settings")" =
 elif [ -L "$settings" ]; then
   die ".claude/settings.json is a dangling symlink (direnv reload rewrites it)"
 elif [ "$(direnv exec "$repo" "$BASH" -c 'printf %s "${DEVENV_ROOT:+loaded}${AI_JAIL_PROJECT:+ jail}"' 2>/dev/null)" = loaded ]; then
-  # The shell loaded and the module exported nothing: the repo owner turned
-  # the guard rails off (ai-jail.enable = false), so there is nothing to check.
+  # DEVENV_ROOT without AI_JAIL_PROJECT: the shell loaded, the module is off.
   note off "the shell loads without the guard rails: ai-jail.enable = false in devenv.nix (or devenv.yaml does not import ai-jailer/devenv)"
   exit 0
 else
@@ -331,8 +323,8 @@ bash "$AI_JAILER_TESTS/project-settings-test.sh" "$settings" "$repo" || die "the
 [ -r "$managed" ] || exit 1
 hook=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$managed")
 bash "$AI_JAILER_TESTS/hook-test.sh" "$hook" || die "the managed hook fails the unit tests: $hook"
-# ajmux -n prints the session line, then where the window's claude comes
-# from: one note. Its error names what is missing.
+# ajmux -n prints two lines, joined into one note; its error names what is
+# missing.
 if res=$(direnv exec "$repo" ajmux -n 2>/dev/null); then note ok "ajmux -n: ${res//$'\n'/; }"
 else note warn "ajmux -n failed: $({ direnv exec "$repo" ajmux -n 2>&1 || true; } | grep -m1 '^ajmux:' || echo 'run it in the repo shell to see why')"; fi
 { set +x; } 2>/dev/null

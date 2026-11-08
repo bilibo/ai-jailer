@@ -7,28 +7,18 @@
 #     - ai-jailer/devenv
 #
 # It writes the repo's .claude/settings.json, the cell, or project layer
-# (`projectSettings` in lib/settings.nix): the allow rules from `settings`,
-# the deny rules from `extraDeny`, the project's domains, the read fence
-# when on, literal `denyWrite` entries for the repo's own settings, hooks
-# and git files under the checkout, and a few scalars repeated as a belt,
-# never `sandbox.enabled`. The law (credential reads, `git push`, the
-# hooks) comes from the host's managed settings (`managedSettingsPath`),
-# and the jail (the full deny set, the sandbox with its credential and
-# network lists) from the worker user's own settings, written by `aj
-# bootstrap` (roadmap item 14, 2026-10-28); on a host without the managed
-# file the repo has none of them, and every shell entry says so.
+# (`projectSettings` in lib/settings.nix). The law comes from the host's
+# managed settings (`managedSettingsPath`) and the jail from the worker
+# user's own settings, written by `aj bootstrap`; on a host without the
+# managed file the repo has neither, and every shell entry says so.
 #
-# `ai-jail.enable = false` is the repo owner's off switch: no settings file
-# (devenv's files cleanup removes the link it wrote before), so none of the
-# project layer, and no AI_JAILER_* exports; a notice at every shell entry
-# says so. The packages stay: they are tools, not rules. A worker's session
-# cannot set it: the jail's deny rules and hook rules refuse its edits to
-# devenv.nix, the same as for every other option here.
+# `ai-jail.enable = false` is the repo owner's off switch. A worker cannot
+# flip it: the jail's deny rules and the hook refuse its edits to devenv.nix.
 #
 # direnv runs `devenv direnv-export` for humans and for every Claude Code
 # Bash command alike, so everything in enterShell happens on both paths.
-# Project tools (az, terraform, ...) belong in the project's own devenv.nix
-# or in devenv-base, not here.
+# Project tools (az, terraform, ...) belong in the project's own devenv.nix,
+# not here.
 {
   pkgs,
   lib,
@@ -41,8 +31,7 @@ let
   projectName = if config.name == null then "project" else config.name;
 
   ajmux = import ../pkgs/ajmux.nix { inherit pkgs; };
-  # nixpkgs' claude-code without the LD_LIBRARY_PATH its wrapper leaks into
-  # every command (pkgs/claude-code.nix).
+  # pkgs.claude-code without its wrapper's LD_LIBRARY_PATH (pkgs/claude-code.nix).
   claudeCode = import ../pkgs/claude-code.nix { inherit pkgs; };
 in
 {
@@ -107,11 +96,10 @@ in
       example = [ "dev.azure.com" ];
       description = ''
         Project domains, written to the repo file's
-        `sandbox.network.allowedDomains`. Whether a managed sandbox honours
-        a project entry (merged, ignored or prompted) is open: live check V2
-        of the 2026-10-27 redesign, pending. Until it passes, a domain the
-        project cannot work without also belongs in the host's list
-        (`extraAllowedDomains` in the ai-jailer checkout's host.nix).
+        `sandbox.network.allowedDomains` and merged into the sandbox's
+        allowlist. A domain every repo on the host needs goes in the host's
+        list instead (`extraAllowedDomains` in the ai-jailer checkout's
+        host.nix).
       '';
     };
 
@@ -145,8 +133,6 @@ in
 
   config = lib.mkMerge [
     # Tools, not rules: in the shell whether or not the guard rails are on.
-    # `ajmux` in the project shell only; aj bootstrap adds it to the
-    # user's profile host-wide.
     {
       packages = [
         ajmux
@@ -191,10 +177,8 @@ in
       '';
     })
 
-    # Off: no file, so devenv's files cleanup removes the settings link from
-    # the last shell entry, and no AI_JAIL_PROJECT, so nothing reads this
-    # repo as governed (a bare `ajmux` still resolves it from the cwd under
-    # the code root). Said at every entry, never silent.
+    # Off: no file, so devenv's files cleanup removes the link it wrote
+    # before, and no AI_JAIL_PROJECT, so nothing reads this repo as governed.
     (lib.mkIf (!cfg.enable) {
       enterShell = ''
         echo "ai-jail: guard rails off for this repo (ai-jail.enable = false in devenv.nix)" >&2

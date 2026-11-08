@@ -3,13 +3,13 @@
 # that open files themselves get past them; the hook and the sandbox exist
 # for that.
 #
-# Two lists (roadmap item 14, 2026-10-28). `law` binds everyone on the host,
-# the jailer's own sessions included: the credential reads, `git commit`
-# (unless the host allows local commits) and `git push`,
-# nothing else; it goes into the managed file. `jail` is the full set for a
-# worker (a member of `agents`); it goes into the worker's user settings,
-# where the managed hook checks it against the managed tree's reference copy.
-# Deny lists merge across scopes, so a worker gets both.
+# Two lists. `law` binds everyone on the host, the jailer's own sessions
+# included: the credential reads, `git commit` (unless the host allows local
+# commits) and `git push`, nothing else; it goes into the managed file.
+# `jail` is the full set for a worker (a member of `agents`); it goes into
+# the worker's user settings, where the managed hook checks it against the
+# managed tree's reference copy. Deny lists merge across scopes, so a worker
+# gets both.
 #
 # Path rules use `**/` or `~/`: in user-scope settings a leading `/` anchors
 # at ~/.claude, not at the project root.
@@ -48,16 +48,13 @@ let
     "Read(~/.claude/.credentials.json)"
     "Read(~/.claude.json)"
   ];
-  # No `Read(**/.devenv/**)` or `Read(**/.direnv/**)` for the workers (tried
-  # and reverted 2026-10-29): Claude Code merges Read(...) deny rules into
-  # the sandbox's denyRead and expands the glob through symlinked
-  # directories, so `.devenv/profile` and `.devenv/bash-bash` put a tmpfs
-  # over the devenv profile and the bash package in the store, and every
-  # sandboxed command died with `bwrap: execvp /bin/bash: No such file`.
-  # `Read(**/.terraform/**)` went the same way (dropped 2026-10-29, roadmap
-  # item 14): it would mask a cell's providers, and the state file inside
-  # that directory is covered by `**/*.tfstate` above; the hook's rule 2
-  # blocks state writes.
+  # No `Read(**/.devenv/**)`, `Read(**/.direnv/**)` or `Read(**/.terraform/**)`:
+  # Claude Code merges Read deny rules into the sandbox's denyRead and expands
+  # the glob through symlinked directories, so `.devenv/profile` and
+  # `.devenv/bash-bash` would put a tmpfs over the store paths they point at
+  # and every sandboxed command would die (`bwrap: execvp /bin/bash`);
+  # `.terraform` would mask a cell's providers, and the state file inside it
+  # is covered by `**/*.tfstate` above (the hook refuses state writes) (RAU-36).
 
   credentials =
     credentialReads

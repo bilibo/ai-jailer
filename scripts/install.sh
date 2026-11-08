@@ -6,40 +6,30 @@
 #
 # The one install route, run once on a plain Linux host: what has to happen
 # before `nix run` works, then `aj bootstrap` for the rest, then, from a
-# checkout, `aj init` on the checkout itself (its shell built, its
-# settings file and hook checked), so `git clone`, `scripts/install.sh`,
-# `ajmux` is the whole sequence.
+# checkout, `aj init` on the checkout itself.
 #
 # Fedora 44 or newer (the first release that packages nix and nix-daemon):
-# `dnf install` of nix, nix-daemon and what the sandbox and ai-jailer
-# call, the SELinux label systemd needs to create the daemon socket in /nix,
-# and the socket itself, which the nix-daemon package leaves disabled. Any
-# other Linux: the nix-installer served at artifacts.nixos.org (multi-user
-# daemon; its uninstaller stays at /nix/nix-installer, which `aj reset`
-# runs), downloaded to a file first so a failed download runs nothing. The
-# installer asks for sudo itself and confirms on the terminal; --yes passes
-# --no-confirm, and is required when the script is piped into bash with no
-# terminal. That installer leaves flakes off, so the script turns them on for
-# its own nix calls and bootstrap writes them into nix.conf. The kernel's
-# user-namespace restriction (Ubuntu 23.10 and later) is bootstrap's: it
-# offers the sysctl and can be declined. NixOS (/etc/NIXOS, or ID=nixos in
-# os-release): Nix is the system's, nothing is downloaded; bootstrap does the
-# rest as on any host (it prints the nix.settings block where the store-owned
-# nix.conf lacks flakes or the devenv cache, and installs no sudo rule).
+# `dnf install`, the SELinux label systemd needs to create the daemon socket
+# in /nix, and the socket itself, which the nix-daemon package leaves
+# disabled. Any other Linux: the nix-installer from artifacts.nixos.org
+# (multi-user daemon; its uninstaller at /nix/nix-installer is what `aj
+# reset` runs), downloaded to a file first so a failed download runs
+# nothing. It asks for sudo itself and confirms on the terminal; --yes
+# passes --no-confirm and is required when piped into bash. It leaves flakes
+# off, so the script turns them on for its own nix calls and bootstrap
+# writes them into nix.conf. NixOS (/etc/NIXOS, or ID=nixos in os-release):
+# Nix is the system's, nothing is downloaded.
 #
-# The ai-jailer ref (`nix run`, and what bootstrap puts in the profile):
-# AI_JAILER_REF, else this checkout when the script runs from one
-# (path:<checkout>), else the published repo. What was done here reaches
-# bootstrap's receipt through AI_JAILER_ROOT_PACKAGES and AI_JAILER_ROOT_STEPS,
-# so `aj reset` reverses it. --check reports the root steps and changes
-# nothing; --dry-run does the same, then hands over to bootstrap's --dry-run
-# when Nix can already run. --no-init skips the checkout's shell. Every other
-# flag goes to bootstrap (--dry-run, --yes and --verbose to init as well),
-# --workers, --worker, --owner and --owner-sudo included: bootstrap creates
-# the worker users, the managed link and the sudo rule (its header lists the
-# commands; on NixOS no sudo rule), and --check prints them as bootstrap
-# would run them. They are not done by this script: they need the ai-jailer
-# ref built, which is Nix's job.
+# The ai-jailer ref: AI_JAILER_REF, else this checkout when the script runs
+# from one (path:<checkout>), else the published repo. The root steps done
+# here reach bootstrap's receipt through AI_JAILER_ROOT_PACKAGES and
+# AI_JAILER_ROOT_STEPS, so `aj reset` reverses them. --check reports the
+# root steps and changes nothing; --dry-run does the same, then hands over
+# to bootstrap's --dry-run when Nix can already run. --no-init skips the
+# checkout's shell. Every other flag goes to bootstrap (--dry-run, --yes and
+# --verbose to init as well). The worker users, the managed link and the
+# sudo rule are bootstrap's, which needs the ai-jailer ref built; --check
+# prints them as bootstrap would run them.
 set -euo pipefail
 
 INSTALLER_URL=https://artifacts.nixos.org/nix-installer
@@ -58,7 +48,6 @@ root() {
   else sudo "$@"; fi
 }
 
-# Fedora: the packages, the SELinux label, the socket.
 fedora_steps() {
   local p
   for p in nix nix-daemon bubblewrap socat tmux jq git-core policycoreutils-python-utils; do
@@ -68,11 +57,10 @@ fedora_steps() {
     printf '\n==> dnf install %s\n' "${need[*]}"
     root dnf install -y "${need[@]}"
   fi
-  # SELinux: /nix gets default_t without a policy, and systemd (init_t) may
-  # not create a socket in a default_t directory ("Failed to create listening
-  # socket: Permission denied", no AVC in the journal when auditd runs). The
-  # Determinate installer's nix.fc labels the socket directory var_run_t, the
-  # type /run has; same here, as a persistent file-context rule.
+  # /nix gets default_t without a policy, and systemd (init_t) may not create
+  # a socket in a default_t directory ("Failed to create listening socket:
+  # Permission denied", no AVC logged). var_run_t is /run's type and what
+  # the Determinate installer's nix.fc gives the socket directory.
   if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ] \
      && ! matchpathcon -n /nix/var/nix/daemon-socket/socket 2>/dev/null | grep -q var_run_t; then
     printf '\n==> SELinux: label /nix/var/nix/daemon-socket as var_run_t so systemd can create the daemon socket\n'
@@ -94,7 +82,6 @@ nixos_steps() {
   printf '\n==> NixOS: nix from the system configuration, no installer; %s is the system'"'"'s\n' "$nix_conf"
 }
 
-# Everything else: the nix-installer, only when there is no nix yet.
 installer_steps() {
   local installer confirm=""
   command -v nix >/dev/null 2>&1 && return 0
@@ -115,9 +102,9 @@ installer_steps() {
   done_steps+=(nix-installer)
 }
 
-# worker_plan <ref>: under --check, the commands `aj bootstrap` runs for
-# --workers, read from the flags in $pass. Printed, never run: bootstrap owns
-# them (pkgs/aj/bootstrap.sh, "Root steps").
+# worker_plan <ref>: the root commands `aj bootstrap` would run for the
+# worker flags in $pass. Printed, never run: bootstrap owns them
+# (pkgs/aj/bootstrap.sh, "Root steps").
 worker_plan() {
   local ref="$1" i c w owner="${USER:-$(id -un)}" mode=nopasswd tag="NOPASSWD: " prefix="${AI_JAILER_WORKER_PREFIX:-w-}"
   local -a workers=() names
@@ -165,9 +152,8 @@ main() {
     pass+=("$a")
   done
 
-  # Run from a checkout (scripts/install.sh next to flake.nix), the checkout
-  # is the ref and gets its shell built at the end; piped into bash, there is
-  # none.
+  # Run from a checkout, the checkout is the ref and gets its shell built at
+  # the end; piped into bash, there is none.
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/../flake.nix" ]; then
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
   fi
@@ -197,10 +183,10 @@ main() {
   [ "$DRY" = 1 ] && done_steps=()
   export AI_JAILER_REF="$ref" AI_JAILER_ROOT_PACKAGES="${need[*]}" AI_JAILER_ROOT_STEPS="${done_steps[*]}"
   printf '\n==> nix run %s#aj -- bootstrap %s\n' "$ref" "${pass[*]}"
-  # Bootstrap exits 1 when its report has a MISSING line. On a host that
-  # gets tmux and claude from the checkout's shell that is the expected
-  # state before init builds it (Ubuntu, 2026-10-21), so init still runs;
-  # the exit code is kept so a real gap is not hidden.
+  # Bootstrap exits 1 when its report has a MISSING line; on a host that gets
+  # tmux and claude from the checkout's shell that is expected before init
+  # builds it, so init still runs. The exit code is kept so a real gap is
+  # not hidden.
   local rc=0
   nix run "$ref#aj" -- bootstrap "${pass[@]}" || rc=$?
   if [ "$INIT" = 1 ] && [ -n "$here" ] && [ -e "$here/.envrc" ]; then

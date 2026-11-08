@@ -1,33 +1,30 @@
-# One function, three destinations (roadmap item 14, 2026-10-28).
+# One function, three destinations.
 #
 # `body = "law"` is the root-owned /etc/claude-code/managed-settings.json.
-# It is host-wide (there is no per-user or per-group managed file) and binds
-# every user, the jailer and each worker alike, so it carries only the law:
-# the credential reads, `git commit` (unless `allowLocalCommits`) and `git
-# push` as deny rules, every hook (the hook
-# itself tells a worker from the jailer by group), and the managed-only keys
-# that have nowhere else to live (bypass mode off, managed hooks only, the
-# mod policy). No sandbox: an unsandboxed jailer session has none, and a
-# worker's comes from the jail.
+# There is no per-user or per-group managed file, so it binds every user,
+# the jailer and each worker alike, and carries only the law: the credential
+# reads, `git commit` (unless `allowLocalCommits`) and `git push` as deny
+# rules, every hook (the hook itself tells a worker from the jailer by
+# group), and the managed-only keys that have nowhere else to live. No
+# sandbox: the jailer runs without one, a worker's comes from the jail.
 #
 # `body = "jail"` is /etc/claude-code/jail-settings.json, the reference copy
-# of a worker's rules: the full deny set, the sandbox on with every
-# credential, filesystem and network list and no unsandboxed fallback, the
-# account sync off. `aj bootstrap` writes every top-level key of it into the
-# worker's own ~/.claude/settings.json, and the managed hook refuses a
-# worker's tools while that file differs from the reference. It binds a
-# worker everywhere, in a cell or outside one, because it lives on the user.
+# of a worker's rules: the full deny set, the sandbox with every credential,
+# filesystem and network list and no unsandboxed fallback, the account sync
+# off. `aj bootstrap` writes its top-level keys into the worker's own
+# ~/.claude/settings.json, and the hook refuses a worker's tools while that
+# file differs from the reference. It lives on the user, so it binds the
+# worker in a cell or outside one.
 #
 # `body = "repo"` is the repo's .claude/settings.json the devenv module
-# writes: the cell, or project layer. Allow rules come from `ai-jail.settings`
-# (merged by the devenv module), deny rules from `extraDeny`, plus literal
-# `denyWrite` paths under the checkout, the project's extra domains, the
-# read fence when on, and a few scalars repeated as a belt. Never
-# `sandbox.enabled`: that is the jail's. It carries no hooks, no base deny
-# list and no credential lists: without the law and the jail a repo
-# enforces only what it adds.
+# writes: the cell, or project layer. Allow rules from `ai-jail.settings`,
+# deny rules from `extraDeny`, literal `denyWrite` paths under the checkout,
+# the project's domains, the read fence when on, and a few scalars repeated
+# as a belt. Never `sandbox.enabled`, no hooks, no base deny list, no
+# credential lists: without the law and the jail a repo enforces only what
+# it adds.
 #
-# Scopes, checked 2026-10-27 against the settings reference: `permissions`
+# Scopes, per the settings reference for Claude Code 2.1.296: `permissions`
 # deny rules, `sandbox.enabled`, `allowUnsandboxedCommands`,
 # `filesystem.denyRead`/`denyWrite`, `credentials` and `allowedDomains` are
 # honoured from any scope, and deny lists merge across scopes;
@@ -36,42 +33,38 @@
 # Re-check after upgrades.
 { lib }:
 {
-  # "law", "jail" or "repo".
   body ? "law",
   # "linux" or "wsl"
   platform,
-  # Law only, required there: where the hooks live (/etc/claude-code/hooks).
+  # Law only: where the hooks live (/etc/claude-code/hooks).
   hookDir ? null,
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
-  # Let the claude.ai account's connectors (Gmail, Drive, Notion, ...) load.
-  # They are MCP servers that run outside the Bash sandbox, so a session with
-  # them can move data out of the repo without any command the hook sees.
+  # claude.ai connectors are MCP servers outside the Bash sandbox: a session
+  # with them can move data out of the repo without a command the hook sees.
   # Jail and repo; the law leaves the jailer's account alone.
   allowConnectors ? false,
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
   # Law only.
   allowManagedHooksOnly ? true,
-  # Jail only. false writes `syncClaudeAiSkills` and `syncClaudeAiPlugins`
-  # as false, so no skill or plugin synced from the worker's claude.ai
-  # account loads. Honoured from user scope, so it binds from the jail.
+  # Jail only: `syncClaudeAiSkills` and `syncClaudeAiPlugins` false, so
+  # nothing synced from the worker's claude.ai account loads.
   syncClaudeAi ? false,
-  # Law only. The whole of `strictKnownMarketplaces` (a list of sources
-  # the user may add); not the settings key of the same name, which
-  # registers marketplaces and is never written. Empty, the default: no
-  # marketplace can be added at all.
+  # Law only. The whole of `strictKnownMarketplaces` (sources the user may
+  # add); not the settings key of the same name, which registers
+  # marketplaces and is never written. Empty: no marketplace can be added.
   extraKnownMarketplaces ? [ ],
-  # Repo only, required there: the checkout's absolute path (devenv's
-  # `config.devenv.root`). Linux skips glob `denyWrite` entries, so the repo
-  # copy lists its own settings, hooks and `.git` files as literal paths. A
-  # worktree has a `.git` file, not a directory; its hooks and config live
-  # under the main checkout, which that checkout's own file covers.
+  # Repo only: the checkout's absolute path (devenv's `config.devenv.root`).
+  # Linux skips glob `denyWrite` entries, so the repo copy lists its own
+  # settings, hooks and `.git` files as literal paths. A worktree has a
+  # `.git` file, not a directory; its hooks and config live under the main
+  # checkout, which that checkout's own file covers.
   repoRoot ? null,
   # Read fence: `denyRead ["~/"]` with `allowRead` for the repo and the paths
   # the devenv shell entry needs (the narrower path wins). Everything else
   # under $HOME, sibling repos included, is unreadable inside the sandbox.
-  # Off by default until the live cases pass (roadmap, sandbox hardening).
+  # Off by default until the live cases pass.
   readFence ? false,
   # Further `allowRead` entries for a fenced repo: a `path:` devenv input,
   # `~/.cargo` for a Rust project, ...
@@ -101,12 +94,10 @@ let
     args = [ "waiting" ];
     timeout = 5;
   };
-  # What a sandboxed command reads under $HOME when the fence is on, from an
-  # strace of `direnv export` in the test repo (2026-10-21): the Nix profile
-  # and its state, the direnv config and allow database, the Nix and devenv
-  # caches and devenv's GC roots, the shell snapshot Claude Code's Bash tool
-  # sources (the credentials file next to it stays hidden), git's global
-  # config.
+  # What `direnv export` reads under $HOME: the Nix profile and its state,
+  # direnv's config and allow database, the Nix and devenv caches and
+  # devenv's GC roots, the shell snapshot Claude Code's Bash tool sources
+  # (the credentials file next to it stays hidden), git's global config.
   fenceAllowRead = [
     (if repoRoot != null then repoRoot else ".")
     "~/.nix-profile"
@@ -153,14 +144,11 @@ let
     disableClaudeAiConnectors = !allowConnectors;
     includeCoAuthoredBy = false;
   };
-  # The sandbox's scalars. `enabled` is the jail's alone: the law has no
-  # sandbox, and the repo never writes it, so a worker's sandbox comes from
-  # its user settings and the jailer runs without one. The hook refuses a
-  # worker's tools unless all three resolve as written here over user,
-  # project, local and managed scope (a project or local file outranks the
-  # user scope for a scalar).
+  # `enabled` is the jail's alone: the law has no sandbox and the repo never
+  # writes it. The hook refuses a worker's tools unless all three resolve as
+  # written here over every scope (a project or local file outranks the user
+  # scope for a scalar).
   sandboxScalars = {
-    # In managed settings a false holds against a repo's true (2.1.285+).
     allowUnsandboxedCommands = false;
     failIfUnavailable = true;
   };
@@ -179,20 +167,16 @@ let
     schema
     // {
       permissions = {
-        # Honoured from any scope; a repo can disable bypass mode, never enable it.
-        # Managed only in effect (a user file cannot hold it against a flag),
-        # so it stays in the law until decided on its own (roadmap item 14).
+        # Any scope may set "disable" and none may undo it, but only the
+        # managed file holds it against a flag, so it lives in the law.
         disableBypassPermissionsMode = "disable";
         deny = denyRules.law;
       };
 
-      # No `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` anywhere (2026-10-22): a repo
-      # file carrying it is ignored ("project-scoped settings can't set this
-      # key"), and with it in user scope Claude Code 2.1.300 stops auto-allowing
-      # sandboxed Bash commands, so every command with a variable, every read
-      # outside the working directory and every write under ~/.claude prompts,
-      # which a -p session cannot answer (changelog). What strips secrets from
-      # the shell is the explicit `credentials.envVars` deny list in the jail.
+      # No `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`: a repo file cannot set it,
+      # and in user scope it stops the auto-allow of sandboxed Bash commands,
+      # so a -p session hangs on prompts it cannot answer. The jail's
+      # `credentials.envVars` strips the secrets instead (RAU-36).
 
       # Registered once, for everyone; the hook applies the law to all and
       # the jail's rules to a member of `agents` only.
@@ -253,14 +237,10 @@ let
         ];
       };
 
-      # The mod policy, managed only. ai-jailer ships no mods (2026-10-24,
-      # docs/sessions.md section 5), so nothing registers a marketplace or
-      # enables a plugin (no `extraKnownMarketplaces` key, no
-      # `enabledPlugins`, no `prependPlugins`) and every mod is refused. The
-      # built-in guard only loads when managed settings exist and reads
-      # `allowManagedModsOnly` from here only; with no organisation mod it
-      # refuses them all. Binds the jailer too; each key is a candidate for
-      # dropping on its own (roadmap item 14).
+      # The mod policy, managed only. ai-jailer ships no mods, so no
+      # marketplace is registered, no plugin enabled, and every mod refused:
+      # the built-in guard loads only when managed settings exist and reads
+      # `allowManagedModsOnly` from here alone. Binds the jailer too.
       pluginConfigs."cc-plugin-sec-default@builtin".options.allowManagedModsOnly = true;
       disableSideloadFlags = true;
       # Which marketplaces a user may add; an empty list adds none.
@@ -272,11 +252,10 @@ let
     common
     // {
       permissions = {
-        # No defaultMode: the TUI's mode switch (shift+tab) writes
-        # permissions.defaultMode into the user file, and pinning it locked
-        # a worker out (2026-10-29). The hook, bootstrap and doctor leave
-        # that key out of the comparison; what a worker does inside the
-        # cell is its own, the rules below bind in every mode.
+        # No defaultMode: the TUI's mode switch (shift+tab) writes it into
+        # the user file, which would then differ from the reference and lock
+        # the worker out; the hook, bootstrap and doctor leave the key out of
+        # the comparison. The rules below bind in every mode (RAU-36).
         disableBypassPermissionsMode = "disable";
         deny = denyRules.jail ++ extraDeny;
       };
@@ -317,14 +296,11 @@ let
             "~/.cache/nix"
             "~/.cache/devenv"
           ];
-          # .claude/worktrees must stay writable, so the settings files are
-          # listed one by one instead of the whole directory.
-          # On Linux and WSL2 only a trailing `/**` works in `allowWrite` and
-          # `denyWrite`; a leading `**/` covers nothing (sandboxing docs,
-          # checked 2026-10-27; the `**/` entries had no effect live,
-          # 2026-10-20). They stay for macOS. On Linux the repo file lists the
-          # same paths literally under its root, and the hook refuses shell
-          # writes to them.
+          # The repo's .claude/worktrees must stay writable, so repoProtected
+          # names the settings files one by one. On Linux and WSL2 a leading
+          # `**/` covers nothing (only a trailing `/**` works); the entries
+          # stay for macOS, the repo file lists the same paths literally, and
+          # the hook refuses shell writes to them (RAU-36).
           denyWrite = [
             "~/.claude"
             "~/.config"
@@ -390,11 +366,10 @@ let
     };
     sandbox = sandboxScalars // {
       filesystem = withFence {
-        # Not devenv.local.*: a literal entry is masked as an unreadable device
-        # node whether or not the file exists, and devenv reads both files
-        # when they exist, so listing them stopped every shell evaluation
-        # inside the sandbox (`aj check` case 2, 2026-10-22). The hook
-        # still refuses shell writes to them by name.
+        # Not devenv.local.*: a literal denyWrite entry is masked as an
+        # unreadable device node whether or not the file exists, and devenv
+        # reads both files when present, so listing them broke every shell
+        # evaluation inside the sandbox. The hook refuses writes to them by name (RAU-36).
         denyWrite = map (p: "${repoRoot}/${p}") (
           lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected
         );

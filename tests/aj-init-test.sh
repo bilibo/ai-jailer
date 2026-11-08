@@ -157,12 +157,12 @@ if grep -q -E '^    # platform = "wsl";' "$tmp/code/acme/plain/devenv.nix"; then
 if [[ "$out" =~ 'platform   wsl' ]]; then fail=$((fail+1)); echo "FAIL: wsl noted off WSL"; else pass=$((pass+1)); fi
 # The off switch is in the template, commented out, first in the ai-jailer block.
 if grep -A1 -x -F '  ai-jail = {' "$tmp/code/acme/plain/devenv.nix" | grep -q -E '^    # enable = false; +# guard rails off'; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: no commented-out enable = false in the template's ai-jail block"; fi
-# Host decisions, no longer project options: no role, memory or local-commit
-# line in the template, not even commented out.
+# Host decisions, not project options: no role, memory or local-commit line
+# in the template, not even commented out.
 lacks "template: no role line"             "$tmp/code/acme/plain/devenv.nix" 'role'
 lacks "template: no allowMemoryEdits"      "$tmp/code/acme/plain/devenv.nix" 'allowMemoryEdits'
 lacks "template: no allowLocalCommits"     "$tmp/code/acme/plain/devenv.nix" 'allowLocalCommits'
-has   "template: extraAllowedDomains note" "$tmp/code/acme/plain/devenv.nix" 'project hosts, merged into the sandbox allowlist \(live check V2, 2026-10-29\); \[ \"\*\" \] opens the network'
+has   "template: extraAllowedDomains note" "$tmp/code/acme/plain/devenv.nix" 'project hosts, merged into the sandbox allowlist; \[ \"\*\" \] opens the network'
 has   "CLAUDE.md: the contract heading"    "$tmp/code/acme/plain/CLAUDE.md" '^## Environment contract \(ai-jailer\)$'
 has   "CLAUDE.md: devenv.nix read first"   "$tmp/code/acme/plain/CLAUDE.md" 'devenv\.nix.: read it first'
 has   "CLAUDE.md: the proposals path"      "$tmp/code/acme/plain/CLAUDE.md" 'proposals/<YYYY-MM-DD>-<topic>\.patch'
@@ -172,10 +172,10 @@ has   "the real run: .gitignore proposals/" "$tmp/code/acme/plain/.gitignore" '^
 has   "the real run: .ignore devenv.lock"  "$tmp/code/acme/plain/.ignore" '^devenv\.lock$'
 
 # The template's .envrc fails the load while devenv.local.nix or
-# devenv.local.yaml exists (roadmap 2.7), before `use devenv`, with an error
-# line the hook's preamble shows (the first stderr line matching "error").
-# No direnv in the build: bash sources the generated file with direnv's
-# functions stubbed, `use` echoing its arguments.
+# devenv.local.yaml exists, before `use devenv`, with an error line the
+# hook's preamble shows (the first stderr line matching "error"). No direnv
+# in the build: bash sources the generated file with direnv's functions
+# stubbed, `use` echoing its arguments.
 envrc_run() { # envrc_run <dir>: sets out and rc
   out=$(cd "$1" && "$BASH" -c 'devenv() { :; }; use() { echo "use $*"; }; require_allowed() { :; }; source ./.envrc' 2>&1); rc=$?
 }
@@ -212,7 +212,7 @@ has   "no host claude: allow_unfree"           "$tmp/code/acme/plain/devenv.yaml
 check "no host claude: reported"               'claude +none on the host PATH: claudeCode\.enable = true in devenv\.nix, allow_unfree: true in devenv\.yaml'
 init --dry-run acme/demo
 check "no host claude: reported in the dry run" 'claude +none on the host PATH: claudeCode\.enable = true'
-# A claude on the host PATH (a native install, a profile, the home module):
+# A claude on the host PATH (a native install, a profile, home-manager):
 # both stay commented out.
 mkdir -p "$tmp/hostbin"; printf '#!/bin/sh\n' >"$tmp/hostbin/claude"; chmod +x "$tmp/hostbin/claude"
 HOST_PATH="$tmp/hostbin" init --no-shell acme/hosted

@@ -4,15 +4,10 @@
 # `aj doctor` on a host that has nothing: an empty HOME, a PATH with no
 # nix, claude, code, direnv or tmux (the Nix build sandbox is such a host).
 # It must report MISSING lines, run to its summary and exit 1, never stop
-# early; no claude is an info line and no tmux a warning, neither MISSING.
-# Then the repo part, in three fake repos: the settings file as a
-# store symlink, as a dangling symlink, as a plain file.
-# The host line for a NixOS and a WSL os-release (fake markers; the build
-# sandbox has no /etc/os-release, so the plain case has no host at all).
-# The managed rules (absent: MISSING; present: ok, and every hook it names
-# runs), the worker accounts (agents group, linger per member, the sudoers
-# file checked with visudo -cf) and the caller's standing (worker, owner,
-# neither), with getent, loginctl, sudo and visudo stubbed.
+# early. Then the repo part in fake repos, the host line from a fake
+# os-release and markers (the build sandbox has no /etc/os-release, so the
+# plain case has no host at all), the managed rules, and the worker accounts
+# and the caller's standing with getent, loginctl, sudo and visudo stubbed.
 set -uo pipefail
 aj="${1:?usage: aj-doctor-test.sh <aj> <project-settings.json>}"
 settings="${2:?usage: aj-doctor-test.sh <aj> <project-settings.json>}"
@@ -48,7 +43,6 @@ check "direnv reported missing" 'MISSING direnv'
 check "ran to the summary"      'aj doctor: [0-9]+ missing, [0-9]+ warnings'
 refute "no shell error"         'unbound variable|syntax error|line [0-9]+:|command not found'
 refute "no repo part outside a repo" 'repo: '
-# No managed settings: this host enforces nothing, and says so.
 check "no managed settings is MISSING" 'MISSING no managed settings at [^ ]*/no-managed/managed-settings\.json: this host enforces nothing \(scripts/install\.sh, or aj bootstrap from the ai-jailer checkout.s devenv shell\)'
 check "no getent: no agents group" 'info  no agents group: no worker users on this host'
 refute "no sudoers verdict without the file" 'visudo'
@@ -56,10 +50,8 @@ refute "strictAllowlist is gone"  'strictAllowlist|strict network'
 refute "account sync verdicts are gone" 'account-synced'
 refute "role and managed-env lines are gone" 'AI_JAILER_ROLE|AI_JAILER_EXPECT_MANAGED'
 refute "no store-wide managed warning" 'this host carries managed settings'
-# No host claude is a supported shape (the plain WSL host: the VS Code
-# extension's binary, the CLI from a repo's ai-jail.claudeCode.enable): an
-# info line, no claude doctor. No host tmux is a warning: ajmux carries its
-# own, attaching by hand needs one.
+# No host claude is a supported shape (the plain WSL host): an info line, no
+# claude doctor. No host tmux is a warning: ajmux carries its own.
 check "no claude is an info line" 'info  claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from ai-jail\.claudeCode\.enable'
 refute "no claude is not missing" 'MISSING claude'
 refute "no claude doctor without claude" 'claude doctor:'

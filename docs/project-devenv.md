@@ -150,8 +150,8 @@ the host. A project that needs more lists them:
   ai-jail.extraAllowedDomains = [ "dev.azure.com" "index.crates.io" "static.crates.io" ];
 ```
 
-The repo's list is merged into the sandbox's base allowlist (checked live
-2026-10-29); a host-wide addition goes into `extraAllowedDomains` in the
+The repo's list is merged into the sandbox's base allowlist; a host-wide
+addition goes into `extraAllowedDomains` in the
 ai-jailer checkout's `host.nix` instead. Hosts on neither list prompt in an
 interactive session and are refused in a `-p` one.
 
@@ -179,9 +179,9 @@ checkout's `host.nix`); a repo no longer sets the first two.
 ## Turning the guard rails off (and on)
 
 A repo that should not run under the guard rails turns them off with one
-line in `devenv.nix`. One that `aj init` wrote since 2026-10-24 has
-it, commented out, first in the `ai-jail = { ... }` block: remove the
-`#`. In an older one, add it there:
+line in `devenv.nix`. One that `aj init` wrote has it, commented out,
+first in the `ai-jail = { ... }` block: remove the `#`. If yours lacks it,
+add it there:
 
 ```nix
   ai-jail = {

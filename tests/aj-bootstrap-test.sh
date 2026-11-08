@@ -1,38 +1,15 @@
 #!/usr/bin/env bash
 #   aj-bootstrap-test.sh <path-to-aj>
 #
-# `aj bootstrap`, `doctor` and `reset` on a generic (non-Fedora) host
-# with every host command stubbed: sudo (runs `install` as a plain copy and
-# logs the rest), nix, sysctl, systemctl and the tools doctor looks for; a
-# fake HOME, and the system files under a scratch directory (AI_JAILER_NIX_CONF,
-# AI_JAILER_SYSCTL_DROPIN, AI_JAILER_NIX_INSTALLER, AI_JAILER_OS_RELEASE,
-# AI_JAILER_CA_BUNDLE; AI_JAILER_NIX_PROFILE_D empty, so the stub nix wins on a
-# nix-installer host). Asserts the root steps (nix.conf with and without a
-# flakes line; the AppArmor bwrap profile offered, declined and accepted
-# where AppArmor confines user namespaces, the sysctl where an older kernel
-# does; never dnf, which is scripts/install.sh's), the managed link, the
-# worker users (--workers: groups, useradd, home mode, owner membership,
-# linger, the sudoers rule and its visudo check, each worker's own bootstrap
-# as that user, with --owner-sudo none and password and a visudo failure; a
-# bare upgrade takes them from the receipt), the
-# user files per rc-file layout (none, Fedora's ~/.bashrc.d, a plain
-# ~/.bashrc, zsh only, an existing ~/.tmux.conf, a foreign direnv.toml),
-# idempotent re-runs, the receipt, reset undoing all of it (and printing, not
-# running, userdel), a receipt from before 2026-10-27 whose user-scope keys
-# reset still strips, --account-sync rejected, upgrade building before it
-# removes and handing the user steps to the upgraded aj, reset doing
-# nothing without a receipt, the store-symlink guard on nix.conf, a NixOS host
-# (the root steps run but nix.conf and the sysctl, which are printed as
-# configuration.nix lines; no sudo rule; home-manager's files left alone),
-# a NixOS whose system configuration provides the user side (programs.direnv:
-# nothing written in HOME but the tmux block, and under WSL the Linux-side
-# VS Code user settings never; a code root of the person's own still gets
-# ~/.bashrc.d),
-# NixOS with workers, a WSL host (its host line, the managed-wsl tree), a
-# worker the receipt names but the host lacks, and a path: ref prefetched into
-# the store for the workers. Assumes no controlling terminal; the stub directory is the whole
-# PATH (aj adds coreutils, jq, git and friends in front, so a stub
-# named like one of those never runs: account checks use getent, not id).
+# `aj bootstrap`, `upgrade`, `doctor` and `reset` on a generic (non-Fedora)
+# host with every host command stubbed: sudo (runs `install` as a plain copy
+# and logs the rest), nix, sysctl, systemctl and the tools doctor looks for; a
+# fake HOME, and the system files under a scratch directory (the AI_JAILER_*
+# path variables; AI_JAILER_NIX_PROFILE_D empty, so the stub nix wins on a
+# nix-installer host). Assumes no controlling terminal. The stub directory is
+# the whole PATH, and aj puts coreutils, jq, git and friends in front of it,
+# so a stub named like one of those never runs: account checks use getent,
+# not id.
 # shellcheck disable=SC2088  # ~ in labels and expected output is aj's literal text
 # shellcheck disable=SC2016  # $ in stub bodies, written files and expected content is literal
 set -uo pipefail
@@ -53,14 +30,12 @@ printf '%s\n' "$jail_json" >"$tmp/store/managed/jail-settings.json"
 printf '#!/bin/sh\n' >"$tmp/nix/nix-installer"; chmod +x "$tmp/nix/nix-installer"
 
 stub() { printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n%s\n' "$1" "$2" >"$tmp/bin/$1"; chmod +x "$tmp/bin/$1"; }
-# sudo: `install SRC DST` lands as a copy under $tmp; a sysctl flips the fake
+# sudo: `install SRC DST` lands as a copy under $tmp; sysctl flips the fake
 # restriction the way the kernel would (RESTRICTED: the AppArmor one,
-# CLONE_RESTRICTED: unprivileged_userns_clone); the rest is logged only.
-#
-# The account commands change a fake host kept in $STUB_GROUPS (lines "group
-# member", or "group -" for an empty group) and $STUB_USERS (one login per
-# line), so a second run finds them. sudo runs them, `nix`, `cat` and, for
-# paths under the scratch directory only, `rm` and `chmod`; `-u <user> -i
+# CLONE_RESTRICTED: unprivileged_userns_clone); rm and chmod run only under
+# the scratch directory. The account commands change a fake host in
+# $STUB_GROUPS (lines "group member", or "group -" for an empty group) and
+# $STUB_USERS (one login per line), so a second run finds them. `-u <user> -i
 # nix run ...` runs aj with that user's HOME, one directory per user.
 stub sudo '[ "$1" != -n ] || shift
 case "$1" in
@@ -169,7 +144,7 @@ in_json()  { if jq -e "$3" "$2" >/dev/null 2>&1; then ok; else bad "$1 ($3 false
 # and user step; the bwrap profile, not the sysctl.
 touch "$tmp/restricted"; profile="$tmp/etc/apparmor-bwrap"
 h="$tmp/home1"; mkdir -p "$h/.claude"; receipt="$h/.local/state/ai-jailer/receipt.json"
-# The scrub key an earlier bootstrap wrote (2026-10-22), next to a key of the user's own.
+# The scrub key an earlier bootstrap wrote, next to a key of the user's own.
 echo '{"theme":"dark","env":{"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB":"1"}}' >"$h/.claude/settings.json"
 aj "$h" bootstrap --yes
 exits "fresh bootstrap" 0
@@ -471,10 +446,9 @@ count_is "~/.bashrc created for it" "$h12b/.bashrc" "$mark" 1
 rm -f "$tmp/bin/code" "$tmp/exts" "$tmp/wsl" "$tmp/etc/nix.conf"
 ubuntu
 
-# 17b. `code --install-extension` fails (VS Code's vsce-sign dumped core on
-# Fedora 46 Rawhide, 2026-11-07, and took bootstrap with it before the
-# receipt): a warning, the run goes on, the receipt is written without the
-# extension, and doctor keeps asking for it.
+# 17c. `code --install-extension` fails (vsce-sign has dumped core and taken
+# bootstrap with it before the receipt): a warning, the run goes on, the
+# receipt is written without the extension, and doctor keeps asking for it.
 stub code 'case "$1" in --version) echo 1.144.0 ;; --list-extensions) : ;; --install-extension) echo "vsce-sign: aborted" >&2; exit 134 ;; esac'
 h12c="$tmp/home12c"; mkdir -p "$h12c"
 aj "$h12c" bootstrap --yes --no-profile
@@ -554,7 +528,7 @@ for w in acme beta; do
   file_has "$w: git email" "$wh/.gitconfig" "^[[:space:]]*email = claude-$w@.+\\.invalid$"
   in_json "$w: git keys in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.gitconfig")) | .keys[]] == [["user","email"],["user","name"]] or [.files[] | select(.path | endswith("/.gitconfig")) | .keys[]] == [["user","name"],["user","email"]]'
   in_json "$w: no root steps of its own" "$wh/.local/state/ai-jailer/receipt.json" '.root.steps == [] and .root.workers == []'
-  # The jail (roadmap item 14): every top-level key of the tree's jail-settings.json, in the worker's own file.
+  # The jail: every top-level key of the tree's jail-settings.json, in the worker's own file.
   in_json "$w: the jail in its user settings" "$wh/.claude/settings.json" '.permissions == ('"$jail_json"' | .permissions) and .sandbox == ('"$jail_json"' | .sandbox)'
   in_json "$w: jail keys in its receipt" "$wh/.local/state/ai-jailer/receipt.json" '[.files[] | select(.path | endswith("/.claude/settings.json")) | .keys[]] | sort == [["permissions"],["sandbox"]]'
 done
@@ -745,7 +719,7 @@ REF="path:$tmp/checkout" ROOT_STEPS="" aj "$h20" bootstrap --dry-run --workers g
 says "dry run names the prefetch"  "would run: nix flake prefetch --json path:$tmp/checkout"
 says "dry run keeps the checkout ref for the worker" "would run: sudo -u w-gamma -i nix run path:$tmp/checkout#aj"
 
-# 25. A receipt from before 2026-10-27 recorded the user-scope keys: reset
+# 25. A receipt from an earlier bootstrap that recorded user-scope keys: reset
 # still strips them, the user's own keys stay.
 h19="$tmp/home19"; mkdir -p "$h19/.claude" "$h19/.local/state/ai-jailer"
 echo '{"theme":"dark","sandbox":{"network":{"strictAllowlist":true}},"syncClaudeAiSkills":false,"syncClaudeAiPlugins":false}' >"$h19/.claude/settings.json"

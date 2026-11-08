@@ -9,7 +9,8 @@ host.nix
 proposals/
 .direnv/
 .devenv/
-.claude/
+.claude/*
+!.claude/rules/
 # Covered by .claude/ above; listed so `aj init` on this checkout
 # (scripts/install.sh runs it) finds the lines it ensures.
 .claude/settings.json

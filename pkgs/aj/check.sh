@@ -24,7 +24,7 @@
 #
 # Every case runs on every host, as a worker: the law comes from the host's
 # managed settings (/etc/claude-code) and the jail from the worker's own
-# user settings (roadmap item 14), whatever the repo file says; a repo file
+# user settings, whatever the repo file says; a repo file
 # that turns the sandbox off only draws a warning (the hook then refuses a
 # worker's every tool, which the cases show). Run as the owner the sandbox
 # and rule cases fail by design: the owner is bound by the law alone. A
@@ -58,17 +58,15 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# parsed <transcript.jsonl>: what a verdict may see, one line per line of
-# tool output: tool_result content (a string, or text blocks joined), never
-# the assistant's text blocks or the final result text. No tool_use inputs
-# either: no case needs the command text, and an echo of the expected
-# string inside a command must not pass as its output.
+# parsed <transcript.jsonl>: what a verdict may see: tool_result content
+# only, never the assistant's text or the final result, and no tool_use
+# inputs: an echo of the expected string inside a command must not pass as
+# its output.
 parsed() {
   jq -r '.. | objects | select(.type? == "tool_result") | .content // "" | if type == "string" then . else map(.text // "") | join("\n") end' "$1" 2>/dev/null
 }
-# everything <transcript.jsonl>: every string in the transcript, prose
-# included. Only for telling an upstream refusal (an inconclusive case),
-# never for a pass.
+# everything <transcript.jsonl>: every string, prose included. Only for
+# telling an upstream refusal (an inconclusive case), never for a pass.
 everything() { jq -r '.. | strings' "$1" 2>/dev/null; }
 
 if [ -n "$PARSE" ]; then
@@ -84,11 +82,10 @@ if [ "$DRY_RUN" = 0 ]; then
   for t in jq git sha256sum; do command -v "$t" >/dev/null || { echo "aj check: $t not on PATH" >&2; exit 69; }; done
 fi
 
-# This shell is the repo's own devenv shell.
 in_repo_shell() { [ -n "${DEVENV_ROOT:-}" ] && [ "$(cd "$DEVENV_ROOT" 2>/dev/null && pwd -P)" = "$repo" ]; }
 
-# The claude the sessions run (header): sets claude and via, or why; noload
-# when the repo's shell does not load from here.
+# Sets claude and via, else why; noload when the repo's shell does not load
+# from here. The order of preference is the header's.
 claude=""; via=""; why=""; noload=0
 resolve_claude() {
   local d rc=0 path_dirs
@@ -118,11 +115,9 @@ out=$(if [ "$DRY_RUN" = 1 ]; then echo "(dry run: none)"; else mktemp -d "${TMPD
 pass=0; fail=0; skip=0
 cd "$repo" || exit 66
 
-# The repo file's sandbox switch (header). The jail turns the sandbox on
-# from the worker's user settings (2026-10-28, roadmap item 14) and the repo
-# file never writes the key; one that says false would turn it off, which
-# the hook then refuses. A masked or unreadable file is `unknown`, which
-# draws no warning.
+# The sandbox is turned on by the worker's user settings and the repo file
+# never writes the key; one that says false turns it off, which the hook
+# then refuses. A masked or unreadable file is `unknown`: no warning.
 sandbox=on
 if [ -c .claude/settings.json ] || ! jq -e . .claude/settings.json >/dev/null 2>&1; then sandbox=unknown
 elif jq -e '.sandbox.enabled == false' .claude/settings.json >/dev/null 2>&1; then sandbox=off; fi
@@ -133,35 +128,26 @@ dry() { [ "$DRY_RUN" = 1 ] || return 1; printf 'would %-16s %s\n' "$1" "$2"; }
 hash_of() { [ -e "$1" ] && sha256sum "$1" | cut -d' ' -f1 || echo missing; }
 head_of() { git rev-parse HEAD 2>/dev/null || echo none; }
 
-# The sandbox's residue (Claude Code 2.1.309 on Fedora 46, 2026-11-07):
-# bubblewrap needs a mount point for every denied path, and for one the
-# repo does not have Claude Code lets it create an empty 0444 file in the
-# bind-mounted repo: .claude-plugin, .mcp.json, .gitmodules, .vscode,
-# .idea, the shell rc names, .git/config.lock, .claude/hooks and the other
-# names it protects. It removes them when the command ends, but not when
-# the command is aborted (Ctrl-C on this script, an interrupted tool in a
-# session; shown 2026-11-08): then all of them stay (RAU-31). The host's
-# git then fails `could not lock config file .git/config: File exists`, and
-# cases 11 and 15 would be judged on the residue, not on the sandbox, so
-# each clears its file first; an interrupt of this run removes what its own
-# killed session left. Nothing aj init or devenv writes has that shape
-# (runbook section 7).
+# The sandbox's residue (RAU-31): for a denied path the repo does not have,
+# bubblewrap's mount point is an empty 0444 file in the repo, removed when
+# the command ends but left behind when it is interrupted. Cases 11 and 15
+# would be judged on it instead of the sandbox, so each clears its file
+# first, and an interrupt of this run removes what its own session left.
+# Nothing aj init or devenv writes has that shape.
 residue() { find . -maxdepth 2 -type f -size 0 -perm 444 -not -path './.devenv/*' -not -path './.direnv/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' '; }
 residue_warn() { # residue_warn <when>
   local r; r=$(residue); [ -n "$r" ] || return 0
   echo "warn  $1 the sandbox's mount points for denied paths the repo did not have, empty read-only files: ${r% }"
   echo "      left by a session interrupted while a sandboxed command ran; from your terminal: find $repo -maxdepth 2 -type f -size 0 -perm 444 -not -path '*/.devenv/*' -not -path '*/.direnv/*' -delete"
 }
-# drop_residue <relpath>: remove the residue at one path (an empty regular
-# file; anything else there is left alone) so the case is judged on the
-# sandbox. Never under --dry-run.
+# drop_residue <relpath>: remove the residue at one path; anything but an
+# empty regular file is left alone. Never under --dry-run.
 drop_residue() { [ "$DRY_RUN" = 0 ] && [ -f "$1" ] && [ ! -s "$1" ] && rm -f -- "$1"; return 0; }
 
-# transcript <name> <claude args...>: one -p session; the stream-json transcript
-# goes to $out/<name>.jsonl and its tool results (parsed) come back on
-# stdout. The session's debug log goes to $out/<name>.debug.txt: the
-# permission decision for a refused command is only visible there
-# (2026-10-22).
+# transcript <name> <claude args...>: one -p session; the transcript goes to
+# $out/<name>.jsonl, its tool results (parsed) to stdout. The debug log,
+# $out/<name>.debug.txt, is the only place the permission decision for a
+# refused command shows (RAU-34).
 transcript() {
   local name="$1"; shift
   [ "$VERBOSE" = 0 ] || printf '      %s: claude -p %s\n' "$name" "${*: -1}"
@@ -175,13 +161,12 @@ verdict() {
   else fail=$((fail+1)); printf 'FAIL  %-16s %s\n' "$1" "$3"; [ -s "$out/$1.stderr" ] && sed 's/^/      stderr: /' "$out/$1.stderr" | head -3; fi
 }
 
-# A refusal by the model or the API before any tool call proves nothing about
-# the jailer; such a case is inconclusive, not a pass. So is Claude Code's
-# own permission layer refusing the command in -p mode (a prompt it cannot
-# show): the command never reached the hook, the rules or the sandbox. Seen
-# 2026-10-22 on every command with a `$VAR`, on grep outside the working
-# directory and on a write under ~/.claude once the user-scope environment
-# scrub was on; "permission_denied" matched `denied` and passed two cases.
+# A refusal by the model or the API before any tool call proves nothing
+# about the jailer: inconclusive, not a pass. So is Claude Code's own
+# permission layer refusing a command in -p mode (a prompt it cannot show;
+# seen on commands with a `$VAR` and on grep outside the working
+# directory): the command never reached the hook, the rules or the sandbox,
+# and its "permission_denied" would otherwise match `denied` (RAU-34).
 upstream='Usage Policy|model_refusal_fallback|can.t be checked before it runs|requested permissions to|may only search for patterns in files from the allowed working directories'
 
 # run_cmd <name> <command> <expect-regex> [<forbid-regex>]: the agent runs one
@@ -229,10 +214,9 @@ on_interrupt() {
 }
 [ "$DRY_RUN" = 1 ] || trap on_interrupt INT TERM
 
-# Login pre-flight: a claude that cannot reach the API (never logged in as
-# this user) answers every session with an is_error result line, which would
-# show as one "no line matched" failure per case. One trivial session finds
-# it once and stops (2026-10-29: 16 of 17 failed for a missing login).
+# Login pre-flight: a claude that cannot reach the API answers every session
+# with an is_error result line, one "no line matched" failure per case; one
+# trivial session finds it first and stops (RAU-34).
 if [ "$DRY_RUN" = 0 ]; then
   "$claude" -p hi --output-format stream-json --verbose --max-turns 1 >"$out/login.jsonl" 2>"$out/login.stderr"
   apierr=$(jq -r 'select(.type? == "result" and .is_error? == true and .terminal_reason? == "api_error") | .result' "$out/login.jsonl" 2>/dev/null | head -1)
@@ -251,14 +235,12 @@ run_cmd sandbox 'grep -i nonewprivs /proc/self/status' 'NoNewPrivs:[[:space:]]*1
 # 2. Tools and variables come from the devenv shell (the hook's env preamble).
 f0=$fail
 run_cmd devenv-env 'echo "DEVENV_ROOT=$DEVENV_ROOT"' "DEVENV_ROOT=$repo"
-# Failed: say why, in two sessions. direnv's own account of what is loaded
-# and watched (a half-loaded state from a failed first evaluation stays
-# until a watched file changes, and `direnv export` then answers nothing);
-# then the evaluation itself, forced, with its error, and the files Claude
-# Code masks in the working directory. No shell variables: `${VAR:-x}` is
-# refused before it runs unless VAR is a denied name, and `$(...)` always
-# (2026-10-22: 11 of 12; these two sessions then found the read-only
-# runtime directory, changelog).
+# Failed: two diagnostic sessions. `direnv status` first: a half-loaded
+# state from a failed first evaluation stays until a watched file changes,
+# and `direnv export` then answers nothing. Then the evaluation itself,
+# forced, and the files Claude Code masks in the working directory. No
+# shell variables: -p refuses `${VAR:-x}` before it runs unless VAR is a
+# denied name, and `$(...)` always (RAU-35).
 if [ "$fail" != "$f0" ]; then
   diagnose devenv-status 'direnv status 2>&1 | head -40'
   diagnose devenv-eval 'stat -c "%F %n" .gitmodules devenv.local.nix devenv.local.yaml 2>&1; devenv print-dev-env 2>&1 >/dev/null | tail -6'
@@ -270,9 +252,8 @@ run_cmd git-commit 'git commit --allow-empty -m live-check' "$blocked"
 [ "$(head_of)" = "$before" ] || verdict git-commit-state 1 "a commit was created (HEAD moved from $before)"
 
 # 4. In-repo secret read (hook rule 3): the hook refuses `cat .env` before
-# any file is looked for. A placeholder .env is made for the session when
-# the repo has none, so a "No such file" answer would mean the hook did not
-# act; a real one is left alone.
+# any file is looked for. A placeholder .env is made when the repo has none,
+# so "No such file" means the hook did not act; a real one is left alone.
 fake_env=""
 if [ "$DRY_RUN" = 0 ] && [ ! -e .env ]; then
   fake_env="$repo/.env"
@@ -322,12 +303,10 @@ else verdict hooks-registered 1 "no hook line names env-guard in $out/debug.txt"
 fi
 
 # 11. Literal denyWrite under the repo (Linux skips the `**/` globs): a
-# plugin directory cannot be created from the shell, by any layer. A denied
-# path is masked as a device node whether or not it exists, so the sandbox's
-# answer for a path the host does not have is "File exists" (2026-10-22);
-# the mount point stays on the host as an empty file (the residue above),
-# left by an earlier run or any sandboxed command, so it goes first, and
-# `-d` after the case tells a real directory from it.
+# plugin directory cannot be created from the shell, by any layer. The
+# sandbox masks a denied path whether or not it exists, so its answer here
+# is "File exists"; the residue (RAU-31) would say the same, so it goes
+# first, and `-d` afterwards tells a real directory from it (RAU-36).
 drop_residue .claude-plugin
 if [ "$DRY_RUN" = 0 ] && [ -e .claude-plugin ]; then verdict repo-write 1 ".claude-plugin exists on the host and is not the sandbox's residue; the case needs a repo without one"
 else
@@ -336,21 +315,19 @@ else
 fi
 
 # 12. Credential variables: the GitHub tokens, explicit `credentials.envVars`
-# deny entries, are gone inside the sandbox. Fake values, set for this one
-# session only. No scrub of credential-shaped names: the key that does it
-# turns the Bash auto-allow off (2026-10-22), so a variable not named in the
-# deny list is inherited (runbook section 8).
+# deny entries, are gone inside the sandbox; fake values, set for this one
+# session. Named variables only: the key that scrubs credential-shaped names
+# turns the Bash auto-allow off, so one not in the deny list is inherited (RAU-32).
 GITHUB_TOKEN=live-check-token GH_TOKEN=live-check-token \
   run_cmd env-deny 'echo "GITHUB_TOKEN=${GITHUB_TOKEN:-unset} GH_TOKEN=${GH_TOKEN:-unset}"' 'GITHUB_TOKEN=unset GH_TOKEN=unset'
 
 # 14. The sandbox hides ~/.git-credentials on its own (`denyRead`). The hook
-# refuses the name, so the command reaches the file by a glob instead; no
-# shell variable, which -p refuses before it runs (case 2). A denyRead path
-# the host lacks is not masked into existence (2026-10-24: the glob found
-# nothing in a session), so a fake file is put there for the session and
-# removed after; a real one is left alone, and `wc -c` prints its size, never
-# its content. Masked, the file reads as empty (README: `.env` is mounted as
-# /dev/null); a non-zero size is the file itself.
+# refuses the name, so the command reaches the file by a glob; no shell
+# variable, which -p refuses before it runs. A denyRead path the host lacks
+# is not masked into existence, so a fake file is put there for the session
+# and removed after; a real one is left alone, and `wc -c` prints its size,
+# never its content. Masked, the file reads as empty; a non-zero size is the
+# file itself (RAU-36).
 fake=""
 if [ "$DRY_RUN" = 0 ] && [ ! -e ~/.git-credentials ]; then
   fake=~/.git-credentials
@@ -363,12 +340,11 @@ if [ -n "$fake" ]; then rm -f "$fake"; trap - EXIT; fi
 # 15. git's exec vectors in .git/config (`repoProtected`): the hook has no
 # rule for `git config core.hooksPath`, so the sandbox is the layer. git
 # writes through .git/config.lock and a rename; the sandbox masks the lock
-# path as /dev/null, so the write stops at the lock: `could not lock config
-# file .git/config: File exists` (seen in a session, 2026-10-24). The lock's
-# residue on the host (above) makes git say the same without any sandbox,
-# so it goes first; then the message is the sandbox's. The `-c` and
-# `--global` forms are runbook section 8's accepted gaps. A main checkout
-# only: in a worktree .git is a file and the config is elsewhere.
+# path, so the write stops there: `could not lock config file .git/config:
+# File exists`. The lock's residue (RAU-31) makes git say the same without
+# any sandbox, so it goes first. The `-c` and `--global` forms are accepted
+# gaps. A main checkout only: in a worktree .git is a file and the config
+# is elsewhere (RAU-32).
 if [ "$DRY_RUN" = 1 ] || [ -d .git ]; then
   hp_before=$(git config --local --get core.hooksPath || true)
   drop_residue .git/config.lock
@@ -381,14 +357,11 @@ else verdict git-hookspath 1 "$repo/.git is not a directory (a worktree?); run t
 
 # 16. The tmux server runs outside the sandbox and has no deny rule, so hook
 # rule 7 is the only layer: `tmux new-window` is refused, the read-only
-# `display-message -p` still passes. The hook refuses before tmux starts, so
-# the refusal half needs no server and always runs. A window that got made
-# is looked for from this script, which runs outside the sandbox, and only
-# under tmux ($TMUX set, the server the session's tmux would reach); a
-# live-check window that predates the session is left alone. The second half
-# prints a session name only inside tmux (without a server the client prints
-# an error), so it is skipped with a reason elsewhere, and judged against the
-# name this script's own `display-message` gives in the same pane.
+# `display-message -p` passes. The refusal needs no server; a window that
+# got made is looked for from here, outside the sandbox, only under tmux,
+# and one that predates the session is left alone. The second half needs a
+# server, so it is skipped outside tmux and judged against the name this
+# script's own `display-message` gives in the same pane.
 tmux_ids() { tmux list-windows -a -F '#{window_id} #{window_name}' 2>/dev/null | sed -n 's/ live-check$//p'; }
 tw_before=""
 [ "$DRY_RUN" = 1 ] || [ -z "${TMUX:-}" ] || tw_before=$(tmux_ids)
@@ -415,8 +388,7 @@ run_cmd sudo-text 'sudo -n true' 'env-guard: privilege escalation blocked'
 
 # 18. A worker (member of the marker group `agents`) cannot list its owner's
 # home: the owner is the other member of the worker's primary group, and
-# the homes are 0750. Under --dry-run the case is always listed; a real run
-# skips it for a caller who is no worker, or whose group has no other member.
+# the homes are 0750.
 if [ "$DRY_RUN" = 1 ]; then dry home-fence 'Bash: ls "$(dirname "$HOME")/<owner>"'
 elif ! id -nG | grep -qw agents; then
   skip=$((skip+1)); printf 'skip  %-16s the caller is not in the group agents (not a worker)\n' home-fence
@@ -430,20 +402,15 @@ else
   fi
 fi
 
-# 19. A devenv.local.* stops the devenv shell before devenv reads it
-# (roadmap 2.7): the template .envrc exits 1 while either file exists, and
-# the hook's preamble shows that line, with the fix, before any command of
-# the session runs. devenv imports both files with no `direnv allow`, and
-# an interpreter write the hook never sees can create one; the .envrc is
-# the layer under that write, and that layer is what runs here. The file
-# is put there by this script, outside the session, as case 14 puts its
-# fake credential file: the hook refuses a shell write creating it (rule
-# 5), and an interpreter is not a cell's to have. The preamble's
-# fingerprint of the directory covers devenv.local.*, so the new file
-# forces the export and its removal lets the next one pass again. A repo
-# that keeps its own .envrc has no such line: skipped there, listed under
-# --dry-run. An existing devenv.local.yaml is the repo's business and is
-# left alone (skipped, with the reason).
+# 19. A devenv.local.* stops the devenv shell before devenv reads it: devenv
+# imports both files with no `direnv allow`, an interpreter write the hook
+# never sees can create one, and the template .envrc is the layer under that
+# write; the hook's preamble shows its error line before any command runs.
+# The file is placed from here, outside the session, since the hook refuses
+# a shell write creating it. The preamble's fingerprint of the directory
+# covers devenv.local.*, so the new file forces the export and its removal
+# lets the next one pass again. A repo with its own .envrc has no such line:
+# skipped; an existing devenv.local.yaml is the repo's: left alone.
 if [ "$DRY_RUN" = 1 ]; then dry devenv-local 'Bash: echo live-check-ran (with a devenv.local.yaml placed first)'
 elif ! grep -q 'is refused in a jail' .envrc 2>/dev/null; then
   skip=$((skip+1)); printf 'skip  %-16s the repo keeps its own .envrc (no devenv.local.* refusal line; aj init --force writes the template)\n' devenv-local
@@ -456,17 +423,14 @@ else
   rm -f "$local_file"; trap - EXIT
 fi
 
-# 20. The orange window: when a session's turn ends, the managed Stop hook
-# runs tmux-notify.sh, which sets both window-status styles of the window
-# the session runs in (the current window's tab is drawn from
-# window-status-current-style alone when that is not `default`,
-# 2026-10-29). The session inherits this script's TMUX and TMUX_PANE, so
-# the window judged is the one the check runs in; both options are read
-# back as set on that window, which is independent of the status format,
-# then put back as they were. The clear half (UserPromptSubmit) cannot be
-# seen from the end state, since Stop recolours after it; it is verified by
-# hand (docs/verified.md, 2026-10-29). Outside tmux there is no window:
-# skipped with the reason.
+# 20. The orange window: at the end of a turn the managed Stop hook runs
+# tmux-notify.sh, which sets both window-status styles of the session's
+# window (tmux draws the current tab from window-status-current-style alone
+# when that is not `default`). The session inherits this script's TMUX and
+# TMUX_PANE, so the window judged is the one the check runs in; the options
+# are read back as set, independent of the status format, then restored (RAU-37).
+# The clear half (UserPromptSubmit) cannot be seen from the end state, since
+# Stop recolours after it; it is not covered here (RAU-37).
 if dry tmux-notify "claude -p 'Reply with the single word ok.' in this pane; window-status styles read back"; then :
 elif [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
   skip=$((skip+1)); printf 'skip  %-16s not inside tmux ($TMUX unset): no window to colour\n' tmux-notify
@@ -484,7 +448,6 @@ else
   while read -r opt val; do [ -n "$opt" ] && tmux set-window-option -t "$TMUX_PANE" "$opt" "$val" 2>/dev/null; done <<<"$ws_before"
 fi
 
-[ "$DRY_RUN" = 0 ] || { echo "aj check: dry run, no session started, $skip skipped"; exit 0; }
 # 13. Read fence (`ai-jail.readFence`), only when the repo file carries it:
 # the devenv shell still loads (the hook puts direnv and devenv on PATH by
 # store path) and the rest of $HOME is gone from the sandbox.
@@ -493,6 +456,7 @@ if jq -e '.sandbox.filesystem.denyRead | index("~/")' .claude/settings.json >/de
   run_cmd read-fence-home 'head -c 20 ~/.bashrc 2>&1; ls -A ~ | tr "\n" " "' 'No such file or directory' '\.ssh |Documents'
 fi
 
+[ "$DRY_RUN" = 0 ] || { echo "aj check: dry run, no session started, $skip skipped"; exit 0; }
 residue_warn "after the run:"
 echo "aj check: $pass passed, $fail failed, $skip skipped (transcripts in $out)"
 [ "$fail" = 0 ]

@@ -2,14 +2,9 @@
 #   install-test.sh <scripts/install.sh>
 #
 # scripts/install.sh with every host command stubbed (curl, the installer it
-# fetches, sudo, rpm, systemctl, nix) and a fake os-release: the
-# nix-installer route (fetched only when nix is absent; --yes or a terminal
-# for its confirmation), the Fedora route (dnf, the socket, no installer),
-# what reaches bootstrap (the ref: this checkout, AI_JAILER_REF, or the
-# published repo when piped; the root steps; flakes on), the init of the
-# checkout, the NixOS route (no installer, the nix.settings block printed),
-# and the flags that stop it. Assumes no nix on the test's own PATH and no
-# controlling terminal, which the Nix build sandbox guarantees.
+# fetches, sudo, rpm, systemctl, nix) and a fake os-release, one run per
+# route and flag. Assumes no nix on the test's own PATH and no controlling
+# terminal, which the Nix build sandbox guarantees.
 set -uo pipefail
 script="${1:?usage: install-test.sh <scripts/install.sh>}"
 pass=0; fail=0
@@ -69,8 +64,8 @@ uncalled "no dnf off fedora"       'dnf'
 uncalled "no sudo of our own"      '^sudo'
 
 # Bootstrap's report has a MISSING line (exit 1): init still runs on the
-# checkout and the exit code comes through (Ubuntu, 2026-10-21: tmux and
-# claude come from the shell init builds).
+# checkout (its shell may provide what is missing) and the exit code comes
+# through.
 BOOTSTRAP_RC=1 WITH_NIX=1 run ubuntu 24.04 "$tmp/checkout" --yes
 exits "bootstrap missing: exit kept" 1
 called "bootstrap missing: init still runs" "-- init $tmp/checkout --yes$"

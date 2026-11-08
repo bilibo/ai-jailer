@@ -1,27 +1,23 @@
 # ajmux [-n] [<org>/<repo> | <path>] [claude args...]
 # Starts or attaches the project's tmux session and runs claude in a window
-# named `claude`. AI_JAIL_PROJECT is exported by the jail's devenv shell, so
-# inside a repo (or its worktree) the project argument is optional; for a
-# clone outside the code root the shell also exports AI_JAIL_PROJECT_DIR.
+# named `claude`. The jail's devenv shell exports AI_JAIL_PROJECT, so inside
+# a repo (or its worktree) the project argument is optional; for a clone
+# outside the code root it also exports AI_JAIL_PROJECT_DIR.
 #
-# Each org is a Linux user, ${AI_JAILER_WORKER_PREFIX:-w-}<org>, with
-# its own tmux server. Run by anyone else, ajmux hands over with
-# `sudo -u <worker> -i ajmux <org>/<repo> [claude args]` and does not
-# touch tmux itself; run by that worker, it starts the session. A worker
-# naming another org's project is refused (exit 66). With no such user
-# on the host, ajmux runs directly for the caller.
+# Each org is a Linux user, ${AI_JAILER_WORKER_PREFIX:-w-}<org>, with its
+# own tmux server. Run by anyone else, ajmux hands over with
+# `sudo -u <worker> -i ajmux <org>/<repo> [claude args]` and does not touch
+# tmux itself; a worker naming another org's project is refused. With no
+# such user on the host, ajmux runs directly for the caller.
 #
-# The handover always passes the name, never a path: a path under the
-# caller's own home resolves against the caller's code root, and the worker
-# resolves the name under its own AI_JAILER_CODE_ROOT, which comes from its
-# login shell (hence `-i`). A name the caller's root does not hold is
-# handed over unresolved; it is an error only on a direct run.
+# The handover passes the name, never a path: a path under the caller's
+# home resolves against the caller's code root, and the worker resolves the
+# name under its own AI_JAILER_CODE_ROOT, from its login shell (hence `-i`).
+# A name the caller's root does not hold is handed over unresolved; it is an
+# error only on a direct run.
 #
-# claude is the one on PATH, else the target repo's devenv shell's
-# (`direnv exec`), else an error naming ai-jail.claudeCode.enable.
-# `-n` prints the resolution (or the handover) and exits, for
-# tests/ajmux-test.sh. Exit codes: 64 usage, 66 no such repo or refused,
-# 69 no claude.
+# `-n` prints the resolution (or the handover) and exits. Exit codes: 64
+# usage, 66 no such repo or refused, 69 no claude.
 {
   pkgs,
   codeRoot ? "$HOME/code/git",
@@ -95,13 +91,11 @@ pkgs.writeShellApplication {
     fi
     [ -d "$repo" ] || die "no such repo: $repo"
 
-    # The window's claude. The launching PATH's first (a host-wide install,
-    # or the repo shell ajmux runs in), by absolute path: the one `-n`
-    # reports. Else the target repo's devenv shell
-    # (ai-jail.claudeCode.enable): the window runs `direnv exec <repo>
-    # claude`, so claude starts in that shell's environment. On a host whose
-    # Claude Code is the VS Code extension's bundled binary, that is the only
-    # CLI there is.
+    # The window's claude: the launching PATH's, by absolute path (the window
+    # gets the tmux server's PATH, not this one); else the target repo's
+    # devenv shell's (ai-jail.claudeCode.enable), run as `direnv exec <repo>
+    # claude` so it starts in that shell's environment: the only CLI on a
+    # host whose Claude Code is the VS Code extension's bundled binary.
     nocli() { echo "ajmux: $1; ai-jail.claudeCode.enable = true in $repo/devenv.nix puts claude in its shell (with allow_unfree: true in devenv.yaml), then direnv allow" >&2; exit 69; }
     direnv=$(type -P direnv || true)
     if claude=$(type -P claude); then
@@ -126,8 +120,7 @@ pkgs.writeShellApplication {
     fi
 
     # `sudo -i` does not carry XDG_RUNTIME_DIR; linger keeps the worker's
-    # /run/user/<uid>, and devenv and tmux look there. Assumed from the plan
-    # (check V5), not yet verified live, 2026-10-27.
+    # /run/user/<uid>, where devenv and tmux look. Not verified live (RAU-20).
     uid=$(id -u)
     if [ -z "''${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$uid" ]; then
       export XDG_RUNTIME_DIR="/run/user/$uid"
@@ -146,23 +139,14 @@ pkgs.writeShellApplication {
       wid=$(tmux new-session -d -P -F '#{window_id}' -s "$session" -n claude -c "$repo" "$window")
     fi
 
-    # Which terminal shows the new window. A terminal is one tmux client,
-    # and a session has one current window for all its clients, so two
-    # terminals attached to the same session always show the same window
-    # (seen 2026-10-29: two VS Code tabs following each other). So each
-    # terminal gets a session of its own over the project's windows, a
-    # session group: the first terminal the project's session itself,
-    # each later one a view named <session>-<pid> that is destroyed when
-    # it detaches (destroy-unattached, set only once the client is on the
-    # view: set on a session with no client it destroys it at once, and
-    # option commands do not take the `=name` target, 2026-10-29). The new
-    # window is made with -d and selected for this client alone, so the
-    # other terminals keep their window. The window colour from
-    # tmux-notify.sh is the window's, so it shows in every view's status
-    # line. From inside tmux a client already on the project's session or
-    # one of its views just moves to the new window; one on another
-    # project's session switches to the project's session, or to a fresh
-    # view when that session is shown elsewhere.
+    # A session has one current window for all its clients, so two terminals
+    # attached to it would follow each other. Each later terminal therefore
+    # gets a grouped view, <session>-<pid>, over the project's windows; the
+    # new window is made with -d and selected for this client alone. The view
+    # is destroyed when it detaches: destroy-unattached is set only once the
+    # client is on it (set on a session with no client it destroys it at
+    # once), and option commands do not take the `=name` target. The colour
+    # tmux-notify.sh sets is the window's, so it shows in every view (RAU-37).
     showing() { [ -n "$(tmux list-clients -t "=$session" 2>/dev/null)" ]; }
     view="$session-$$"
     if [ -n "''${TMUX:-}" ]; then

@@ -1,30 +1,27 @@
 #!/usr/bin/env bash
-# env-guard: the guard hook. Registered for SessionStart, CwdChanged,
-# FileChanged, ConfigChange and PreToolUse from managed settings only; the
-# repo's .claude/settings.json carries no hook since 2026-10-27. The Setup
-# branch below is ready but not registered. Every rule applies in every
-# directory: per-org isolation comes from the Linux users (decided
-# 2026-10-27), not from this hook.
+# env-guard: the guard hook, registered from managed settings for
+# SessionStart, CwdChanged, FileChanged, ConfigChange and PreToolUse (the
+# Setup branch below is not registered). Every rule applies in every
+# directory: per-org isolation comes from the Linux users, not from this
+# hook.
 #
-# Two rule sets (roadmap item 14, 2026-10-28). The law binds every user,
-# the jailer included: a credential read, `git commit` (unless the host
-# allows local commits) and `git push`. The jail binds a
-# worker, a member of WORKER_GROUP: every other rule below, and before any
-# tool, that the worker's user settings carry the jail body the managed
-# tree ships (jail-settings.json) and that the sandbox resolves on. A
-# session as anyone else gets the law and the environment preamble, nothing
-# more.
+# Two rule sets. The law binds every user, the jailer included: a
+# credential read, `git commit` (unless the host allows local commits) and
+# `git push`. The jail binds a worker, a member of WORKER_GROUP: every
+# other rule below, and before any tool, that the worker's user settings
+# carry the jail body the managed tree ships (jail-settings.json) and that
+# the sandbox resolves on. Anyone else gets the law and the environment
+# preamble, nothing more.
 #
 # Fail closed: any unexpected error exits 2, which blocks on PreToolUse and
-# ConfigChange (together with onFailure = "block" in the hook registration).
-# The trap needs set -E to fire inside functions, where the checks run.
-# An unset variable under set -u exits non-zero without the trap.
-# The same for the environment: the env-file preamble below discards what
-# `direnv export` says, so before every Bash command the hook checks that
-# the nearest .envrc can load (check_env) and refuses the command with the
-# reason when it cannot. Needs Claude Code >= 2.1.295. lib/hooks.nix puts
-# jq, direnv, grep, sed, coreutils, diffutils and findutils from the store
-# first on PATH, so the guard never runs the user's copies of them.
+# ConfigChange (with onFailure = "block" in the registration, Claude Code
+# >= 2.1.295). The trap needs set -E to fire inside functions, where the
+# checks run; an unset variable under set -u exits non-zero without the
+# trap. The env-file preamble below discards what `direnv export` says, so
+# before every Bash command check_env refuses the command, with the reason,
+# when the nearest .envrc cannot load. lib/hooks.nix puts jq, direnv, grep,
+# sed, coreutils, diffutils and findutils from the store first on PATH, so
+# the guard never runs the user's copies of them.
 #
 # Every regex lives in a variable: bash word-splits an inline `=~` pattern
 # on spaces, so `[[ x =~ a b ]]` is a syntax error.
@@ -47,22 +44,21 @@ cwd=$(jq -r '.cwd // empty' <<<"$input")
 
 deny() { printf 'env-guard: %s\n' "$1" >&2; exit 2; }
 
-# Worker or not, once. No pipeline: under pipefail an early exit could fail
-# it open.
+# No pipeline: under pipefail an early exit could fail it open.
 my_groups=" $(id -nG 2>/dev/null || true) "
 jail=0; [[ "$my_groups" != *" $WORKER_GROUP "* ]] || jail=1
 
 # jail_check: a worker's tools are refused unless (1) its user settings
 # (CLAUDE_CONFIG_DIR, else ~/.claude) agree with the managed tree's
-# jail-settings.json on every top-level key of that file (Claude Code
-# rewrites the file for /model and the like, so the keys are compared, not
-# the file; permissions.defaultMode, which the TUI's mode switch writes, is
-# left out on both sides), and (2) the sandbox resolves as the jail writes it, since a
-# project or local file outranks the user scope for a scalar: enabled true,
-# allowUnsandboxedCommands false, failIfUnavailable true over user, project,
-# local and managed settings. A file that does not parse refuses too. Not
-# seen: a `claude --settings <file>` launch, which ajmux never passes and
-# rule 6 refuses inside a session.
+# jail-settings.json on every top-level key of that file (keys, not bytes:
+# Claude Code rewrites the file for /model and the like; permissions.defaultMode,
+# which the TUI's mode switch writes, is left out on both sides), and (2)
+# the sandbox resolves as the jail writes it, since a project or local file
+# outranks the user scope for a scalar: enabled true, allowUnsandboxedCommands
+# false, failIfUnavailable true over user, project, local and managed
+# settings. A file that does not parse refuses too. A `claude --settings
+# <file>` launch is not checked: ajmux never passes one and rule 6 refuses
+# it inside a session.
 jail_check() {
   local ref="$MANAGED_DIR/jail-settings.json" us="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" root diff s sfiles res
   [ -r "$ref" ] || deny "worker without a jail: $ref is missing or unreadable (aj bootstrap links the managed tree)"
@@ -82,15 +78,14 @@ jail_check() {
 }
 
 # check_env <cwd>: refuse the command unless direnv can load the .envrc
-# nearest to <cwd>; a directory without one passes. `direnv status` (3 ms)
-# says whether that .envrc is allowed without loading it, which covers an
-# edit since the last `direnv allow`. The export itself (0.2 s warm, seconds
-# after a change, measured 2026-10-23) runs only when the files direnv
-# watches in a jail, or the direnv and devenv binaries, differ from
-# the last good run, or when that run's DEVENV_PROFILE is gone from the
-# store; the record lives under ~/.cache/ai-jailer (no record, or
-# an unwritable cache, means the export runs every time). A refusal names
-# the first error line and what fixes it.
+# nearest to <cwd>; a directory without one passes. `direnv status` says
+# whether that .envrc is allowed without loading it, which covers an edit
+# since the last `direnv allow`. The export can take seconds after a
+# change, so it runs only when the files direnv watches in a jail, or the
+# direnv and devenv binaries, differ from the last good run, or when that
+# run's DEVENV_PROFILE is gone from the store; the record lives under
+# ~/.cache/ai-jailer (no record, or an unwritable cache, means the export
+# runs every time). A refusal names the first error line and what fixes it.
 check_env() {
   local st rcpath dir fp cache key profile stored out err rc first fix
   [ -d "$1" ] || return 0
@@ -115,8 +110,8 @@ check_env() {
   if [ "$rc" != 0 ] || grep -q 'is blocked' <<<"$err"; then
     rm -f "$out"
     first=$(grep -i -m1 'error' <<<"$err" || grep -v '^$' <<<"$err" | tail -n 1 || true)
-    # The template .envrc refuses to load while a devenv.local.* exists
-    # (2026-10-26); `devenv shell` skips the .envrc and would import it.
+    # The template .envrc refuses to load while a devenv.local.* exists;
+    # `devenv shell` skips the .envrc and would import it.
     if grep -q 'is blocked' <<<"$err"; then fix="direnv allow $dir"
     elif grep -q 'is refused in a jail' <<<"$err"; then fix="remove the devenv.local file from your own terminal; it is not the agent's to remove"
     else fix="the devenv error (devenv shell in $dir shows it)"; fi
@@ -145,20 +140,19 @@ case "$event" in
         (cd "$cwd" && direnv allow) || true
       fi
     fi
-    # Executed by Claude Code as a preamble before every Bash command, in that
-    # command's cwd. Per-command evaluation is robust to EnterWorktree and to
-    # devenv.nix edits; the find line cleans the .devenv/shell-*.sh files that
-    # every `devenv direnv-export` leaves behind (decision 7.3 of a design
-    # brief not kept in this repo; changelog 2026-10-22 refers to it).
+    # Claude Code runs this preamble before every Bash command, in that
+    # command's cwd, which follows EnterWorktree and devenv.nix edits; the
+    # find line cleans the .devenv/shell-*.sh files that every `devenv
+    # direnv-export` leaves behind (RAU-35).
     # direnv and devenv by store path, resolved here outside the sandbox (the
     # user's devenv, the hook's direnv): with the read fence on,
     # `~/.nix-profile` (a symlink) is not mounted back into the sandbox, so
-    # the profile's bin directory is off PATH there (live, 2026-10-21).
+    # the profile's bin directory is off PATH there (RAU-35).
     # devenv creates `$XDG_RUNTIME_DIR/devenv-<hash>` before it evaluates and
     # the sandbox mounts /run/user/<uid> read-only, so the export runs with
     # the sandbox's TMPDIR as its runtime directory (devenv ignores
     # DEVENV_RUNTIME). The command's own XDG_RUNTIME_DIR is untouched: direnv
-    # exports only what the devenv shell changed (live, 2026-10-22).
+    # exports only what the devenv shell changed (RAU-35).
     tool_path=""
     for t in direnv devenv; do
       if p=$(command -v "$t"); then tool_path="$tool_path${tool_path:+:}$(dirname "$(readlink -f "$p")")"; fi
@@ -204,12 +198,10 @@ ENV
         # allowMemoryEdits off. Claude Code names the directory after the
         # path with every character outside [a-zA-Z0-9] made `-`, case kept;
         # past 200 characters it truncates and appends a hash this hook does
-        # not compute (code.claude.com/docs/en/sessions, "Where transcripts
-        # are stored"; read in the 2.1.308 binary, 2026-10-26). No
-        # CLAUDE_PROJECT_DIR, or a slug past 200, means no carve-out. A
-        # session started in a subdirectory or a worktree keeps its memory
-        # under the repository's main root (docs/en/memory), which this
-        # does not match: refused, not widened.
+        # not compute, so no CLAUDE_PROJECT_DIR, or a slug past 200, means no
+        # carve-out. A session started in a subdirectory or a worktree keeps
+        # its memory under the repository's main root, which this does not
+        # match: refused, not widened (RAU-39).
         own_memory=
         if [ "$ALLOW_MEMORY_EDITS" = 1 ] && [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
           slug="${CLAUDE_PROJECT_DIR//[^a-zA-Z0-9]/-}"
@@ -327,9 +319,9 @@ ENV
         # `direnv allow` approves an .envrc, and the env-file preamble then
         # loads it, with the devenv.nix it uses, before every later Bash
         # command. The sandbox keeps direnv's allow list read-only; without
-        # the sandbox only this rule stops a session approving its own edit
-        # (changelog 2026-10-26). `grant` is a third name for allow, and
-        # `edit` allows once the editor exits (`direnv help`, 2.38.2).
+        # the sandbox only this rule stops a session approving its own edit.
+        # `grant` is a third name for allow, and `edit` allows once the
+        # editor exits.
         re="$b"'direnv +(allow|permit|grant|edit)'"$e"
         [[ "$n" =~ $re ]] && deny "direnv allow blocked: the human approves .envrc changes"
         # Shell-side writes to the project setup files the Edit tool refuses.
@@ -370,26 +362,23 @@ ENV
         re="(^|[^a-z])($launcher)( +[^ ;&|]+)* +--(bare|setting-sources|settings|permission-mode|dangerously-skip-permissions|allow-dangerously-skip-permissions|add-dir)( |=|$)"
         [[ "${q,,}" =~ $re ]] && deny "claude launch flag blocked"
 
-        # 7. the tmux server (roadmap 2.8a). It runs outside
-        # the sandbox and allowAllUnixSockets reaches its socket, so most
-        # tmux commands run something there with no sandbox and no hook
-        # (`run-shell`, `new-window`, `send-keys` into another session's
-        # pane). Allowed: the read-only commands in tmux_ro by full name or
-        # alias (tmux also takes unique prefixes; those are refused), and
-        # display-message only with -p and without -I (-I writes stdin into
-        # a pane). A word after `tmux` that cannot be a tmux command name
-        # (`grep tmux docs/`) is not a tmux call; one that could become one
-        # by expansion is refused. Bare `tmux` (new-session) passes: without
-        # a terminal it exits before creating anything (tmux 3.8, live
-        # 2026-10-26). Refused in a call: -C (control mode reads commands
-        # from stdin); an argument ending in `;`, tmux's own command
-        # separator (`tmux has -t s ';' display -p hi` ran both, live
-        # 2026-10-26), which reaches tmux only quoted or escaped, so this
-        # rule reads a quoted or escaped separator as \x01; `#(`, a format
-        # job the server runs (not seen to run from `display-message -p` on
-        # tmux 3.8, refused anyway); and `$`, backticks and globs in the
-        # arguments, which can expand to a `;`. Text only: a script or
-        # `python` on the socket gets past this; roadmap 2.8b is the socket.
+        # 7. the tmux server. It runs outside the sandbox and
+        # allowAllUnixSockets reaches its socket, so most tmux commands run
+        # something there with no sandbox and no hook (`run-shell`,
+        # `new-window`, `send-keys` into another session's pane). Allowed:
+        # the read-only commands in tmux_ro by full name or alias (tmux also
+        # takes unique prefixes; those are refused), and display-message only
+        # with -p and without -I (-I writes stdin into a pane). A word after
+        # `tmux` that cannot be a tmux command name (`grep tmux docs/`) is
+        # not a tmux call; one that could become one by expansion is refused.
+        # Bare `tmux` (new-session) passes: without a terminal it exits
+        # before creating anything. Refused in a call: -C (control mode reads
+        # commands from stdin); an argument ending in `;`, tmux's own command
+        # separator, which reaches tmux only quoted or escaped, so this rule
+        # reads a quoted or escaped separator as \x01; `#(`, a format job the
+        # server runs; and `$`, backticks and globs in the arguments, which
+        # can expand to a `;`. Text only: a script or `python` on the socket
+        # gets past this.
         tm=$(printf '%s' "$cmd" | jq -Rsj 'gsub("(?<q>\"(\\\\.|[^\"\\\\])*\"|\\x27[^\\x27]*\\x27|\\\\.|>&|&>)"; .q | if test("^[\"\\x27\\\\]") then gsub("[;&|]"; "\u0001") else gsub("&"; "_") end)' | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"" | tr '<>' '  ')
         tmux_ro='^(ls|list-(sessions|windows|panes|clients|buffers|keys|commands)|lsw|lsp|lsc|lsb|lsk|lscm|has|has-session|show|show-(options|window-options|environment|buffer|messages|hooks)|showw|showenv|showb|showmsgs|display|display-message)$'
         call='(^|[^a-zA-Z0-9_.-])tmux( |$)(.*)'
