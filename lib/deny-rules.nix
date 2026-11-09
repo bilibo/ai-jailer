@@ -75,6 +75,7 @@ let
       "az account get-access-token"
       "az ad sp credential"
       "az ad app credential"
+      "az ad sp create-for-rbac"
       "az keyvault secret"
       "az keyvault key"
       "az keyvault certificate"
@@ -219,12 +220,17 @@ let
     "Edit(~/.config/**)"
     "Edit(~/.bashrc.d/**)"
     "Edit(~/.local/bin/**)"
+    # direnv sources the first on every load and keeps its approvals in the
+    # second.
+    "Edit(~/.direnvrc)"
+    "Edit(~/.local/share/direnv/**)"
   ];
 
   gitHistory = bash (
     lib.optionals (!allowLocalCommits) [ "git commit" ]
     ++ [
       "git push"
+      "git pull"
       "git reset"
       "git rebase"
       "git merge"
@@ -244,6 +250,7 @@ let
       # Deny patterns keep case: these are not the harmless -c / -b.
       "git switch -C"
       "git checkout -B"
+      "git worktree add -B"
       "git clean"
       "git stash drop"
       "git stash clear"
@@ -256,6 +263,10 @@ let
       "git filter-repo"
       "git update-ref"
       "git symbolic-ref"
+      "git read-tree"
+      "git checkout-index"
+      "git fast-import"
+      "git replace"
       "git gc"
       "git prune"
       "git am"
@@ -316,6 +327,12 @@ let
     # Drop this one only if agents must author skills; enable
     # `allowManagedHooksOnly` or `strictPluginOnlyCustomization` first.
     ".claude/skills/**"
+    # A command file takes a skill's frontmatter; an agent file and
+    # `.mcp.json` can each declare an MCP server, which runs outside the
+    # sandbox (RAU-50).
+    ".claude/commands/**"
+    ".claude/agents/**"
+    ".mcp.json"
     ".claude-plugin/**"
   ];
   projectConfig = map (p: "Edit(**/${p})") projectConfigPaths;

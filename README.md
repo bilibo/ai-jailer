@@ -103,9 +103,9 @@ the sandbox.
 
 `git pull && aj upgrade` moves the host and workers to the new revision.
 `aj reset` reverses what bootstrap recorded: the `/etc/claude-code` link, the
-sudoers rule, linger and the jail keys in each worker's settings. It leaves
-the worker users and their homes alone and prints the `userdel -r` commands
-if you want them gone too.
+sudoers rule and linger. It leaves the worker users, their homes and their
+settings alone and prints the `userdel -r` commands if you want them gone
+too.
 
 ## Using it
 

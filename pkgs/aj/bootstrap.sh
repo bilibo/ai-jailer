@@ -565,6 +565,9 @@ handover_steps() {
   new=$(readlink -f "$HOME/.nix-profile/bin/aj" 2>/dev/null || true)
   if [ "$DRY_RUN" = 1 ]; then echo "    would hand the user steps to the upgraded aj (${new:-$HOME/.nix-profile/bin/aj})"; return 0; fi
   [ -n "$new" ] && [ "$new" != "${AI_JAILER_SELF:-}" ] || return 0
+  # exec drops what this run recorded (root steps, workers, profile), so
+  # the receipt takes it first; the new aj adds its user files.
+  write_receipt
   step "hand the user steps to the upgraded aj ($new)"
   exec "$new" bootstrap --no-root --no-profile "${ORIG_ARGS[@]}"
 }
@@ -1021,7 +1024,7 @@ report() {
   else info "claude not on the host PATH: the VS Code extension brings its own; repos get the CLI from ai-jail.claudeCode.enable (aj init turns it on on such a host)"; fi
   local cs="$HOME/.claude/settings.json" ms="$MANAGED_DIR/managed-settings.json"
   if jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then miss "env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in $cs: Claude Code stops auto-allowing sandboxed Bash commands, every command prompts (aj bootstrap removes it)"; fi
-  if [ -r "$ms" ]; then ok "managed settings $ms"; hooks_runnable "$ms"
+  if [ -r "$ms" ]; then ok "managed settings $ms"; hooks_runnable "$ms"; managed_current
   else miss "no managed settings at $ms: this host enforces nothing (scripts/install.sh, or aj bootstrap from the ai-jailer checkout's devenv shell)"; fi
   accounts_report
 
@@ -1086,6 +1089,20 @@ hooks_runnable() {
     else miss "hook not runnable: $h"; fi
   done < <(jq -r '[.hooks[][].hooks[].command] | unique[]' "$s" 2>/dev/null)
   [ "$n" -gt 0 ] && ok "$n hooks in $s runnable" || miss "no runnable hook in $s"
+}
+
+# managed_current: whether the managed link is what the ref builds today. A
+# working-tree change reaches a session only through the link, and a path:
+# ref has no revision to compare, so the store paths are. Evaluated, not
+# built; no verdict when the ref does not evaluate from here.
+managed_current() {
+  local have want
+  command -v nix >/dev/null 2>&1 || return 0
+  have=$(readlink -f "$MANAGED_DIR" 2>/dev/null || true)
+  want=$(timeout 60 nix eval --raw "$AI_JAILER_REF#$MANAGED_ATTR.outPath" 2>/dev/null || true)
+  [ -n "$have" ] && [ -n "$want" ] || return 0
+  if [ "$have" = "$want" ]; then ok "$MANAGED_DIR is what $AI_JAILER_REF builds now"
+  else warn "$MANAGED_DIR is not what $AI_JAILER_REF builds now: the rules and hook in force are another revision's (aj upgrade)"; fi
 }
 
 # The worker accounts (the agents group and its members' linger), the sudo
@@ -1165,6 +1182,13 @@ repo_report() {
   if ! command -v direnv >/dev/null 2>&1; then miss "direnv not on PATH: the repo shell cannot load"
   elif direnv status 2>/dev/null | grep -q -E '^Found RC allowed (0|true)$'; then ok "direnv: .envrc allowed"
   else miss "direnv: .envrc not allowed (read it, then direnv allow)"; fi
+  # A changed devenv.nix waits for a `direnv allow` only where require_allowed
+  # stands before `use devenv` (RAU-49).
+  local ra ud
+  ra=$(grep -n -m1 -E '^[[:space:]]*require_allowed[[:space:]]' .envrc 2>/dev/null | cut -d: -f1)
+  ud=$(grep -n -m1 -E '^[[:space:]]*use devenv' .envrc 2>/dev/null | cut -d: -f1)
+  if [ -z "$ra" ]; then warn ".envrc has no require_allowed line: a changed devenv.nix, devenv.yaml or devenv.lock loads with no direnv allow (docs/runbook.md section 3 has the lines)"
+  elif [ -n "$ud" ] && [ "$ud" -lt "$ra" ]; then warn ".envrc calls require_allowed after use devenv: your own shell evaluates a changed devenv.nix before it asks (move the lines above it as in docs/runbook.md section 3, then direnv allow)"; fi
 }
 
 summary() { echo; echo "aj $CMD: $nmiss missing, $nwarn warnings"; }

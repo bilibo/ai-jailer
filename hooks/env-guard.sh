@@ -56,9 +56,10 @@ jail=0; [[ "$my_groups" != *" $WORKER_GROUP "* ]] || jail=1
 # the sandbox resolves as the jail writes it, since a project or local file
 # outranks the user scope for a scalar: enabled true, allowUnsandboxedCommands
 # false, failIfUnavailable true over user, project, local and managed
-# settings. A file that does not parse refuses too. A `claude --settings
-# <file>` launch is not checked: ajmux never passes one and rule 6 refuses
-# it inside a session.
+# settings, and no file names an `excludedCommands` entry, which runs that
+# command outside the sandbox (RAU-51). A file that does not parse refuses
+# too. A `claude --settings <file>` launch is not checked: ajmux never
+# passes one and rule 6 refuses it inside a session.
 jail_check() {
   local ref="$MANAGED_DIR/jail-settings.json" us="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" root diff s sfiles res
   [ -r "$ref" ] || deny "worker without a jail: $ref is missing or unreadable (aj bootstrap links the managed tree)"
@@ -71,10 +72,11 @@ jail_check() {
     [ ! -e "$s" ] || sfiles+=("$s")
   done
   res=$(jq -r -n '[inputs | (try .sandbox catch null) | if type == "object" then . else {} end]
-    | [ ([.[].enabled | select(. != null)] | last), ([.[].allowUnsandboxedCommands | select(. != null)] | last), ([.[].failIfUnavailable | select(. != null)] | last) ]
+    | [ ([.[].enabled | select(. != null)] | last), ([.[].allowUnsandboxedCommands | select(. != null)] | last), ([.[].failIfUnavailable | select(. != null)] | last),
+        ([.[].excludedCommands | select(. != null) | length] | add // 0) ]
     | map(tostring) | join(" ")' "${sfiles[@]}" 2>/dev/null) \
     || deny "worker without a sandbox: a settings file does not parse (${sfiles[*]})"
-  [ "$res" = "true false true" ] || deny "worker without a sandbox: enabled, allowUnsandboxedCommands and failIfUnavailable resolve to ($res), not (true false true); the jail in ~/.claude/settings.json sets them and a project or local file must not change them"
+  [ "$res" = "true false true 0" ] || deny "worker without a sandbox: enabled, allowUnsandboxedCommands, failIfUnavailable and the count of excludedCommands resolve to ($res), not (true false true 0); the jail in ~/.claude/settings.json sets them and a project or local file must not change them"
 }
 
 # check_env <cwd>: refuse the command unless direnv can load the .envrc
@@ -86,8 +88,15 @@ jail_check() {
 # run's DEVENV_PROFILE is gone from the store; the record lives under
 # ~/.cache/ai-jailer (no record, or an unwritable cache, means the export
 # runs every time). A refusal names the first error line and what fixes it.
+#
+# The export runs here, outside the sandbox, so where the .envrc calls
+# require_allowed the devenv files are checked before it: one that changed
+# since the last `direnv allow` refuses the command and nothing evaluates
+# it. direnv's own check ends the .envrc with `exit 0`, which stops only
+# what comes after that line (RAU-49).
 check_env() {
-  local st rcpath dir fp cache key profile stored out err rc first fix
+  local st rcpath dir fp cache key profile stored out err rc first fix f pending
+  local -a req=()
   [ -d "$1" ] || return 0
   st=$(cd "$1" && direnv status --json 2>/dev/null) || deny "direnv status failed in $1 (run: direnv status)"
   rcpath=$(jq -r '.state.foundRC.path // empty' <<<"$st")
@@ -102,11 +111,21 @@ check_env() {
     profile=$(head -n 1 "$cache/$key"); stored=$(tail -n +2 "$cache/$key")
     if [ "$stored" = "$fp" ] && { [ -z "$profile" ] || [ -e "$profile" ]; }; then return 0; fi
   fi
+  # check-required prints nothing when every file is approved, and reports a
+  # file that does not exist as pending.
+  if grep -q -E '^[[:space:]]*require_allowed[[:space:]]' "$rcpath" 2>/dev/null; then
+    for f in devenv.nix devenv.yaml devenv.lock; do [ ! -e "$dir/$f" ] || req+=("$f"); done
+    if [ "${#req[@]}" -gt 0 ]; then
+      pending=$(cd "$dir" && direnv check-required bash "$rcpath" "${req[@]}" 2>/dev/null) \
+        || deny "direnv check-required failed in $dir (run: direnv status)"
+      [ -z "$pending" ] || deny "direnv export failed in $dir: devenv.nix, devenv.yaml or devenv.lock changed since the last direnv allow (fix: cd $dir, then direnv allow)"
+    fi
+  fi
   # direnv skips the load when its state variables say this .envrc is
   # loaded and unchanged (a session started inside the devenv shell), so
   # they are unset: the export then evaluates every time it runs.
   out=$(mktemp)
-  if err=$(cd "$dir" && env -u DIRENV_DIR -u DIRENV_FILE -u DIRENV_DIFF -u DIRENV_WATCHES direnv export json 2>&1 >"$out"); then rc=0; else rc=$?; fi
+  if err=$(cd "$dir" && env -u DIRENV_DIR -u DIRENV_FILE -u DIRENV_DIFF -u DIRENV_WATCHES -u DIRENV_REQUIRED direnv export json 2>&1 >"$out"); then rc=0; else rc=$?; fi
   if [ "$rc" != 0 ] || grep -q 'is blocked' <<<"$err"; then
     rm -f "$out"
     first=$(grep -i -m1 'error' <<<"$err" || grep -v '^$' <<<"$err" | tail -n 1 || true)
@@ -116,6 +135,14 @@ check_env() {
     elif grep -q 'is refused in a jail' <<<"$err"; then fix="remove the devenv.local file from your own terminal; it is not the agent's to remove"
     else fix="the devenv error (devenv shell in $dir shows it)"; fi
     deny "direnv export failed in $dir: ${first:-exit $rc} (fix: $fix)"
+  fi
+  # A load that require_allowed ended exits 0 with the pending files in
+  # DIRENV_REQUIRED: a file the .envrc names beyond the three above, or the
+  # lock this export created.
+  pending=$(jq -r '.DIRENV_REQUIRED // empty' "$out" 2>/dev/null) || pending=""
+  if [ -n "$pending" ]; then
+    rm -f "$out"
+    deny "direnv export failed in $dir: ${pending//:/, } changed since the last direnv allow (fix: cd $dir, then direnv allow)"
   fi
   # The export lists what differs from this environment: a profile already
   # in it (the session's own devenv shell) is the current one.
@@ -137,7 +164,20 @@ case "$event" in
       if cmp -s "$main/.envrc" "$cwd/.envrc" \
          && (cd "$main" && direnv status --json 2>/dev/null) \
             | jq -e --arg p "$main/.envrc" '.state.foundRC.path==$p and .state.foundRC.allowed==0' >/dev/null; then
-        (cd "$cwd" && direnv allow) || true
+        # Without DIRENV_REQUIRED: one inherited from the launching shell
+        # would approve the files it names.
+        (cd "$cwd" && env -u DIRENV_REQUIRED direnv allow) || true
+        # The devenv files by the same rule: every one byte-identical to
+        # the main checkout's, and those approved there (RAU-49).
+        req=() same=1
+        for f in devenv.nix devenv.yaml devenv.lock; do
+          [ -e "$main/$f" ] || [ -e "$cwd/$f" ] || continue
+          req+=("$f"); cmp -s "$main/$f" "$cwd/$f" || same=0
+        done
+        if [ "${#req[@]}" -gt 0 ] && [ "$same" = 1 ] \
+           && pending=$(cd "$main" && direnv check-required bash "$main/.envrc" "${req[@]}" 2>/dev/null) && [ -z "$pending" ]; then
+          (cd "$cwd" && DIRENV_REQUIRED=$(IFS=:; printf '%s' "${req[*]}") direnv allow) || true
+        fi
       fi
     fi
     # Claude Code runs this preamble before every Bash command, in that
@@ -211,18 +251,23 @@ ENV
               "$own_memory"/*) return 0 ;;
             esac
           fi
-          # The user's own Claude and Nix config, and the files listed below
-          # that run code at their next shell, git or tmux start, outside the
-          # sandbox. The same list as userConfig in lib/deny-rules.nix; change both.
+          # The user's own Claude and Nix config, the files listed below
+          # that run code at their next shell, git, tmux or direnv start,
+          # outside the sandbox, and direnv's record of what was approved.
+          # The same list as userConfig in lib/deny-rules.nix; change both.
           case "$1" in
             "$HOME"/.claude/*|"$HOME"/.claude.json|"$HOME"/.config/*|"$HOME"/.ssh/*|\
             "$HOME"/.bashrc|"$HOME"/.bash_profile|"$HOME"/.bash_login|"$HOME"/.profile|\
             "$HOME"/.zshrc|"$HOME"/.zprofile|"$HOME"/.zshenv|"$HOME"/.zlogin|\
-            "$HOME"/.gitconfig|"$HOME"/.tmux.conf|"$HOME"/.bashrc.d/*|"$HOME"/.local/bin/*)
+            "$HOME"/.gitconfig|"$HOME"/.tmux.conf|"$HOME"/.bashrc.d/*|"$HOME"/.local/bin/*|\
+            "$HOME"/.direnvrc|"$HOME"/.local/share/direnv/*)
               deny "edit of $1 is forbidden (user config)" ;;
           esac
+          # Project setup and credentials, and what a later session loads as
+          # its own: `.mcp.json` and an agent file can each declare an MCP
+          # server, which runs outside the sandbox (RAU-50).
           case "$1" in
-            */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude-plugin/*|\
+            */.claude/settings*.json|*/.claude/hooks/*|*/.claude/skills/*|*/.claude/agents/*|*/.claude/commands/*|*/.claude-plugin/*|*/.mcp.json|\
             */devenv.nix|*/devenv.yaml|*/devenv.lock|*/devenv.local.*|*/.envrc|*/.env|*/.env.*|*.tfvars|*.tfvars.json|*.tfstate|\
             */.git/hooks/*|*/.git/config)
               deny "edit of $1 is forbidden (config/env/credentials/plugin)" ;;
@@ -235,10 +280,11 @@ ENV
       Bash)
         cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
         # Normalise: lowercase, strip backslashes, collapse whitespace, strip
-        # quotes. Catches `bash -c '...'`, `env X=1 git push`, `git 'push'`,
-        # `git -C . push`, `git pu\sh` and a backslash-newline continuation.
-        # `nc` keeps case, for the few flags where case is the meaning.
-        nc=$(printf '%s' "$cmd" | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
+        # quotes and the `$` of `$'...'` and `$"..."`. Catches `bash -c
+        # '...'`, `env X=1 git push`, `git 'push'`, `git $'push'`, `git -C .
+        # push`, `git pu\sh` and a backslash-newline continuation. `nc`
+        # keeps case, for the few flags where case is the meaning.
+        nc=$(printf '%s' "$cmd" | sed -E "s/[$](['\"])/\1/g" | tr -d '\\' | tr -s '[:space:]' ' ' | tr -d "'\"")
         n="${nc,,}"
         b='(^|[ ;&|(])'       # start of a (sub)command
         e='( |$)'             # end of a word
@@ -262,11 +308,16 @@ ENV
         # -f`, `--files0-from`, `--pathspec-from-file`). A reader list
         # cannot be completed (dd, tr, perl, `git show <ref>:.env`, a bare
         # `< .env`).
-        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json|\.ssh/|\.git-credentials|\.config/gh/|\.azure/|\.aws/|\.config/gcloud/)'
+        # The stores are directories, named with or without a trailing
+        # slash (`grep -r . ~/.ssh`) and matched as a path component, so
+        # `dev.azure.com` and `.aws-sam/` are not them.
+        cred_dirs='(^|[^a-z0-9_.-])(\.ssh|\.azure|\.aws|\.config/gh|\.config/gcloud)([^a-z0-9_.-]|$)'
+        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json|\.git-credentials|'"$cred_dirs"')'
         # `ssh -i ~/.ssh/<key> host` uses a key without showing it (scp and
-        # rsync would copy it, so they are not here).
+        # rsync would copy it, so they are not here); an `-o ...Command`
+        # option runs a local program, which could.
         harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch|ssh)( [^;&|<$`(]*)?$'
-        list_opts='--files0-from|--files-from|--pathspec-from-file|(^| )file( +-[a-z]+)* +-[a-z]*f'
+        list_opts='--files0-from|--files-from|--pathspec-from-file|(^| )file( +-[a-z]+)* +-[a-z]*f|(^| )-o *[a-z]*command'
         if [[ "$n" =~ $cred_files ]]; then
           safe=0
           [[ "$cmd" != *$'\n'* ]] && [[ "$n" =~ $harmless ]] && ! [[ "$n" =~ $list_opts ]] && safe=1
@@ -277,13 +328,13 @@ ENV
 
         # --- the jail: a worker ----------------------------------------------
         # 1. git history and index writes
-        git_ops='push|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|branch +(-f|--force)|tag +-d|tag +(-f|--force)|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|checkout +(-f|--force|\.[^ ]*)|switch +(-f|--force|--discard-changes)|worktree +remove( +[^ ;&|]+)* +(-f|--force)|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree'
+        git_ops='push|pull|reset|rebase|merge|cherry-pick|revert|am|filter-branch|filter-repo|reflog +(expire|delete)|branch +-[dm]|branch +(-f|--force)|tag +-d|tag +(-f|--force)|stash +(drop|clear|pop)|checkout( +[^ ;&|]+)* +--|checkout +(-f|--force|\.[^ ]*)|switch +(-f|--force|--discard-changes)|worktree +remove( +[^ ;&|]+)* +(-f|--force)|restore|clean|gc|prune|update-ref|symbolic-ref|notes|commit-tree|read-tree|checkout-index|fast-import|replace'
         [ "$ALLOW_LOCAL_COMMITS" = 1 ] || git_ops="commit|$git_ops"
         # `/usr/bin/git`, `git -C . push`, `git --git-dir=.git push`.
         re="(^|[^a-z0-9_.-])git( +-[-a-z]+(=[^ ]*| +[^ ]+)?)* +($git_ops)$e"
         [[ "$n" =~ $re ]] && deny "git history/index write blocked: stage with git add, branch with git switch -c; revert a file with git show HEAD:<path> > <path>"
         # `-C`/`-B` reset an existing branch; lowercased they read as the harmless `-c`/`-b`.
-        re='(^|[^a-zA-Z0-9_.-])git( +[^ ;&|]+)* +(switch +-C|checkout +-B)( |$)'
+        re='(^|[^a-zA-Z0-9_.-])git( +[^ ;&|]+)* +(switch +-C|checkout +-B|worktree +add( +[^ ;&|]+)* +-B)( |$)'
         [[ "$nc" =~ $re ]] && deny "git history/index write blocked: stage with git add, branch with git switch -c; revert a file with git show HEAD:<path> > <path>"
         # `git checkout <ref> <path>...` discards edits to those paths; the
         # branch-creating forms take a start point and are the exception.
@@ -308,7 +359,7 @@ ENV
         # that print a stored secret. The well-known ones per CLI, the same
         # as `credentials` in lib/deny-rules.nix (change both); a login whose
         # role cannot read secrets is what holds for the rest.
-        re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +(sp|app) +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
+        re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +(sp|app) +credential|ad +sp +create-for-rbac|keyvault +(secret|key|certificate) +(show|download|list|backup))'
         [[ "$n" =~ $re ]] && deny "credential operation blocked"
         # az spells its command in bare words before the first option, so
         # only those are read: `--role "Key Vault Secrets User"` is no match.
@@ -326,20 +377,20 @@ ENV
         [[ "$n" =~ $re ]] && deny "privilege escalation blocked"
         re='(^|[^a-z])(nix +(profile|upgrade-nix|registry|store +(gc|delete|optimise))|nix-env|nix-collect-garbage|nixos-rebuild|nh +(os +(switch|boot|test)|home +switch)|nix-channel|home-manager +switch|systemctl|journalctl +--vacuum|wsl\.exe|wslconfig)'
         [[ "$n" =~ $re ]] && deny "system change blocked"
-        re="$b(powershell|pwsh|cmd)(\.exe)?( |$)|$b[^ ]*\.exe( |$)|/mnt/c/"
+        re="$b(powershell|pwsh|cmd)(\.exe)?( |$)|${b}[^ ]*\.exe( |$)|/mnt/c/"
         [[ "$n" =~ $re ]] && deny "Windows executable blocked"
         # `direnv allow` approves an .envrc, and the env-file preamble then
         # loads it, with the devenv.nix it uses, before every later Bash
         # command. The sandbox keeps direnv's allow list read-only; without
         # the sandbox only this rule stops a session approving its own edit.
         # `grant` is a third name for allow, and `edit` allows once the
-        # editor exits.
-        re="$b"'direnv +(allow|permit|grant|edit)'"$e"
+        # editor exits. By path too: `/usr/bin/direnv allow`.
+        re='(^|[^a-z0-9_.-])direnv +(allow|permit|grant|edit)'"$e"
         [[ "$n" =~ $re ]] && deny "direnv allow blocked: the human approves .envrc changes"
         # Shell-side writes to the project setup files the Edit tool refuses.
         # The user-config files the Edit check refuses are not matched here;
         # in a work repo the sandbox's write confinement covers them.
-        config_files='(devenv\.(nix|yaml|lock|local)|\.envrc|\.claude/|\.claude-plugin|\.git/hooks|\.git/config|\.config/nix|\.config/direnv)'
+        config_files='(devenv\.(nix|yaml|lock|local)|\.envrc|\.claude/|\.claude-plugin|\.mcp\.json|\.git/hooks|\.git/config|\.config/nix|\.config/direnv)'
         # `2>/dev/null`, `>&2` and friends write no file, so they are dropped;
         # every `>` left counts as a write (`1>`, `2>`, `&>`, `>>` included).
         # Only `>/dev/null` with no space is dropped: `> /dev/null` counts.

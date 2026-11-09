@@ -182,8 +182,7 @@ $claude_line
 
 # The devenv.local.* test comes first: it needs no devenv, and the hook's
 # preamble shows the first stderr line matching "error". require_allowed
-# last: on the first load `use devenv` creates devenv.lock, then the three
-# files are reported pending and the next `direnv allow` approves them.
+# comes before `use devenv`, or it gates nothing (RAU-49).
 put .envrc '# devenv imports devenv.local.nix and devenv.local.yaml with no `direnv allow`,
 # and an interpreter write the jailer hook cannot see could create one, so
 # the load fails while either exists. direnv keeps no watches from a failed
@@ -194,9 +193,15 @@ for f in devenv.local.nix devenv.local.yaml; do
     exit 1
   fi
 done
+# require_allowed ends the load at a file that changed since the last
+# `direnv allow`, so it stands before `use devenv`: devenv never evaluates an
+# unapproved file. The lock is named again at the end because the first
+# load creates it.
+require_allowed devenv.nix devenv.yaml
+if [ -e devenv.lock ]; then require_allowed devenv.lock; fi
 eval "$(devenv direnvrc)"
 use devenv
-require_allowed devenv.nix devenv.yaml devenv.lock' owned
+require_allowed devenv.lock' owned
 
 ensure_lines .gitignore '.devenv/' '.direnv/' '.claude/settings.json' '.claude/settings.local.json' '.claude/worktrees/' 'proposals/'
 # ripgrep (Grep) honours .ignore; .gitignore does not hide a tracked file.
@@ -211,13 +216,14 @@ contract="## Environment contract (ai-jailer)
   \`devenv.nix\`: read it first, not \`which\`/\`--version\` probes or the
   dotenv file.
 - Never read the dotenv files, tfvars, tfstate, \`.devenv/\` or \`.direnv/\`.
-- Never edit \`devenv.nix\`, \`devenv.yaml\`, \`devenv.lock\`, \`.envrc\` or
-  \`.claude/\` (a project allow rule is \`ai-jail.settings.permissions.allow\`
-  in \`devenv.nix\`): a change to them goes as a unified diff to
-  \`proposals/<YYYY-MM-DD>-<topic>.patch\` (gitignored) or into the reply.
-- Stage with \`git add\`, branch with \`git switch -c\`; commit, push,
-  restore, \`checkout --\` and reset are blocked. Revert a file with
-  \`git show HEAD:<f> > <f>\`.
+- Never edit \`devenv.nix\`, \`devenv.yaml\`, \`devenv.lock\`, \`.envrc\`,
+  \`.mcp.json\` or \`.claude/\` (a project allow rule is
+  \`ai-jail.settings.permissions.allow\` in \`devenv.nix\`): a change to
+  them goes as a unified diff to \`proposals/<YYYY-MM-DD>-<topic>.patch\`
+  (gitignored) or into the reply.
+- Stage with \`git add\`, branch with \`git switch -c\`, fetch with
+  \`git fetch\`; commit, push, pull, restore, \`checkout --\` and reset
+  are blocked. Revert a file with \`git show HEAD:<f> > <f>\`.
 - Cloud and IaC: read and plan only. Scope \`az\` with \`--query\` or
   \`-o table\`/\`-o tsv\`, never unfiltered JSON.
 - \`~/.ssh\`, \`~/.azure\` and other credential paths are hidden from your
@@ -278,20 +284,24 @@ if [ ${#foreign[@]} -gt 0 ]; then
 fi
 
 echo
-echo "==> direnv allow (the .envrc), then the first load: devenv fetches its inputs and writes .claude/settings.json"
+echo "==> direnv allow (the .envrc), then the loads: devenv fetches its inputs and writes .claude/settings.json once devenv.nix and devenv.yaml are approved"
 direnv allow "$repo"
-# The first load exports DIRENV_REQUIRED with the files require_allowed
-# found unapproved; `direnv allow` in that environment approves them.
-(
-  cd "$repo"
-  eval "$(direnv export bash)"
-  if [ -n "${DIRENV_REQUIRED:-}" ]; then
-    echo "==> direnv allow (${DIRENV_REQUIRED//:/, })"
-    direnv allow
-  fi
-)
+# A load exports DIRENV_REQUIRED with the files require_allowed found
+# unapproved, and `direnv allow` in that environment approves them: the
+# first stops at devenv.nix and devenv.yaml, the second runs devenv and
+# stops at the lock it created.
+for _ in 1 2; do
+  (
+    cd "$repo"
+    eval "$(direnv export bash)"
+    if [ -n "${DIRENV_REQUIRED:-}" ]; then
+      echo "==> direnv allow (${DIRENV_REQUIRED//:/, })"
+      direnv allow
+    fi
+  )
+done
 pending=$(direnv exec "$repo" bash -c 'printf %s "${DIRENV_REQUIRED:-}"' 2>/dev/null || true)
-[ -z "$pending" ] || die "files still pending approval after two allows: $pending"
+[ -z "$pending" ] || die "files still pending approval after three allows: $pending"
 
 # ---------------------------------------------------------------- checks
 echo

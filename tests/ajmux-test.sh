@@ -73,6 +73,10 @@ ok "session=acme-infra repo=$root/acme/infra" "$tmp/elsewhere" "$root/acme/infra
 ok "session=acme-infra repo=$root/acme/infra" "$root/acme" infra
 ok "session=acme-infra repo=$root/acme/infra" "$root/acme/infra" .
 ok "session=acme-app repo=$root/acme/app" "$root/acme/infra" ../app
+# A dot in the repo name is not one in the session name: tmux would read it
+# as a pane separator in every `-t` target.
+mkdir -p "$root/acme/my.app"
+ok "session=acme-my_app repo=$root/acme/my\.app" "$tmp/elsewhere" acme/my.app
 # A name with more than two segments is the repo containing it, like a path.
 ok "session=acme-infra repo=$root/acme/infra" "$tmp/elsewhere" acme/infra/modules/net
 # The code root may be a symlink.

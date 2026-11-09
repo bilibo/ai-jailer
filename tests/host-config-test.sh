@@ -4,6 +4,7 @@
 # The two host settings files pkgs/ ships: aj bootstrap writes them
 # into the user's config on every host, so the settings the sandbox and
 # ajmux rely on are asserted here once.
+# shellcheck disable=SC2034  # toml and tmux are read by the tests check evals
 set -uo pipefail
 toml="${1:?usage: host-config-test.sh <direnv.toml> <tmux.conf>}"
 tmux="${2:?usage: host-config-test.sh <direnv.toml> <tmux.conf>}"

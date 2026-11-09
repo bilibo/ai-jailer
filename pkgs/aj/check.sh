@@ -305,7 +305,7 @@ fi
 # 12. Credential variables: the GitHub tokens, explicit `credentials.envVars`
 # deny entries, are gone inside the sandbox; fake values, set for this one
 # session. Named variables only: the key that scrubs credential-shaped names
-# turns the Bash auto-allow off, so one not in the deny list is inherited (RAU-32).
+# turns the Bash auto-allow off, so one not in the deny list is inherited (RAU-36).
 GITHUB_TOKEN=live-check-token GH_TOKEN=live-check-token \
   run_cmd env-deny 'echo "GITHUB_TOKEN=${GITHUB_TOKEN:-unset} GH_TOKEN=${GH_TOKEN:-unset}"' 'GITHUB_TOKEN=unset GH_TOKEN=unset'
 
@@ -409,6 +409,25 @@ else
   : >"$local_file"; trap 'rm -f "$local_file"' EXIT
   run_cmd devenv-local 'echo live-check-ran' 'devenv.local.yaml is refused in a jail' '^live-check-ran'
   rm -f "$local_file"; trap - EXIT
+fi
+
+# 21. A devenv file that changed since the last `direnv allow` refuses the
+# command before anything evaluates it: an interpreter write the hook's
+# text rules never see can change devenv.nix, and the hook's own export
+# runs outside the sandbox (RAU-49). The line is appended from here, as
+# case 19's file is placed. Approval is by content and `cp -p` keeps the
+# modification time, so putting the bytes back restores both the approval
+# and the hook's record of the last good load. A repo whose .envrc has no
+# require_allowed line is not gated: skipped.
+if [ "$DRY_RUN" = 1 ]; then dry devenv-approval 'Bash: echo live-check-ran (with a line appended to devenv.nix first)'
+elif [ ! -f devenv.nix ] || ! grep -q -E '^[[:space:]]*require_allowed[[:space:]]' .envrc 2>/dev/null; then
+  skip=$((skip+1)); printf 'skip  %-16s the .envrc has no require_allowed line (docs/runbook.md section 3 has the lines)\n' devenv-approval
+else
+  saved="$out/devenv.nix.saved"; cp -p devenv.nix "$saved"
+  trap 'cp -p "$saved" devenv.nix' EXIT
+  printf '# live-check\n' >>devenv.nix
+  run_cmd devenv-approval 'echo live-check-ran' 'changed since the last direnv allow' '^live-check-ran'
+  cp -p "$saved" devenv.nix; trap - EXIT
 fi
 
 # 20. The orange window: at the end of a turn the managed Stop hook runs

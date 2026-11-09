@@ -112,9 +112,10 @@
           p = self.packages.${system};
           # direnv as the hook calls it, for hook-test.sh --direnv-stub.
           direnvStub = pkgs.writeShellScriptBin "direnv" ''
-            echo "direnv $*" >> "''${DIRENV_STUB_LOG:-/dev/null}"
+            echo "direnv $*''${DIRENV_REQUIRED:+ [required $DIRENV_REQUIRED]}" >> "''${DIRENV_STUB_LOG:-/dev/null}"
             case "$1" in
               status) printf '%s' "''${DIRENV_STUB_STATUS:-}" ;;
+              check-required) printf '%s' "''${DIRENV_STUB_REQUIRED:-}" ;;
               export)
                 if [ -n "''${DIRENV_STUB_EXPORT:-}" ]; then printf '%s' "$DIRENV_STUB_EXPORT"; else printf '{}'; fi
                 [ -z "''${DIRENV_STUB_EXPORT_ERR:-}" ] || echo "''${DIRENV_STUB_EXPORT_ERR}" >&2
@@ -309,6 +310,13 @@
             echo "devenv-module-eval: defaults, read fence, extra rules, claudeCode and enable = false render as expected" | tee $out
           '';
           managed-tree-test = test "managed-tree-test" ./tests/managed-tree-test.sh "${p.managed}";
+          # The scripts no package build checks: the aj bodies get shellcheck
+          # from writeShellApplication, the hooks, install.sh and the tests
+          # get it here.
+          shellcheck = pkgs.runCommand "shellcheck" { nativeBuildInputs = [ pkgs.shellcheck-minimal ]; } ''
+            shellcheck -S warning ${./hooks}/*.sh ${./scripts}/*.sh ${./tests}/*.sh
+            echo "shellcheck: hooks, scripts and tests clean at warning level" | tee $out
+          '';
         }
         # claude-code is unfree: its check exists only when the evaluator
         # allows it (NIXPKGS_ALLOW_UNFREE=1 with --impure).

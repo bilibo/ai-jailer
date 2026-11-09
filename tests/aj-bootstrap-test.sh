@@ -576,6 +576,14 @@ uncalled "existing worker not recreated" '^sudo useradd .* w-acme$'
 file_is "sudo rule kept on a bare upgrade" "$tmp/etc/sudoers-claude" 'tester ALL=(%agents) ALL'
 ROOT_STEPS="" aj "$h15" upgrade --yes --no-root
 uncalled "no worker upgrade with --no-root" '^sudo -u w-'
+# An upgrade that hands its user steps to the profile's aj writes the
+# receipt before the exec: a worker that run added is in it.
+mkdir -p "$h15/.nix-profile/bin"
+printf '#!/bin/sh\necho "new-aj $*" >>"$CALLS"\n' >"$h15/.nix-profile/bin/aj"; chmod +x "$h15/.nix-profile/bin/aj"
+ROOT_STEPS="" aj "$h15" upgrade --yes --workers omega
+called "handover after a workers upgrade" '^new-aj bootstrap --no-root --no-profile --yes --workers omega$'
+in_json "receipt: the worker a handed-over upgrade added" "$receipt15" '.root.workers == ["acme","beta","omega"]'
+rm -rf "$h15/.nix-profile"
 
 # reset: the sudoers file, the link, linger; the users are only named.
 aj "$h15" reset --yes

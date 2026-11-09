@@ -58,8 +58,9 @@ hard rules live.
    full rules.
 4. Several objectives at once: one `ajmux` call each. Sessions that edit
    files get `--worktree`; the worktree lives under `.claude/worktrees/<name>`,
-   has its own `.devenv/`, and its `.envrc` is auto-allowed only if it is
-   byte-identical to the main checkout's (the env hook checks).
+   has its own `.devenv/`, and its `.envrc`, `devenv.nix`, `devenv.yaml`
+   and `devenv.lock` are approved only if they are byte-identical to the
+   main checkout's (the env hook checks).
 5. When a session waits for you, its tmux window turns orange: at the end
    of its turn (`Stop`), at a permission prompt or dialog, and after a
    minute idle (`Notification`); the colour is per user, so the worker's
@@ -96,8 +97,9 @@ that only mentions a refused form is refused too: a `grep` whose pattern is
 message is the same (`privilege escalation blocked`, `shell write to config
 file blocked`). Search for another part of the line; never retry the text.
 
-Every rule applies in every session on the host, inside a jail or not, the
-owner's included; there are no enforcement roots and no exempt directory.
+No rule depends on the directory: there are no enforcement roots and no
+exempt repo. Which rules apply depends on the user: the law for everyone,
+the owner included, and the jail's on top for a worker.
 
 ## 3. Onboarding a repo
 
@@ -145,15 +147,21 @@ script wrote:
 3. `.envrc`:
 
    ```sh
+   require_allowed devenv.nix devenv.yaml
+   if [ -e devenv.lock ]; then require_allowed devenv.lock; fi
    eval "$(devenv direnvrc)"
    use devenv
-   require_allowed devenv.nix devenv.yaml devenv.lock
+   require_allowed devenv.lock
    ```
 
-   The file `aj init` writes puts a check above these lines that fails
-   the load while `devenv.local.nix` or `devenv.local.yaml` exists
-   (`pkgs/aj/init.sh` has the text). Never `source_env`, `source_up`,
-   or a `whitelist.prefix` in direnv.toml.
+   `require_allowed` ends the load at a file that changed since the last
+   `direnv allow`, so it stands before `use devenv`: placed after it, the
+   changed file is evaluated first and only reported. The lock is named
+   again at the end because the first load creates it. The file `aj init`
+   writes puts a check above these lines that fails the load while
+   `devenv.local.nix` or `devenv.local.yaml` exists (`pkgs/aj/init.sh`
+   has the text). Never `source_env`, `source_up`, or a
+   `whitelist.prefix` in direnv.toml.
 4. `.gitignore`: `.devenv/`, `.direnv/`, `.claude/settings.json`,
    `.claude/settings.local.json`, `.claude/worktrees/`, `proposals/`.
    `.ignore`: `devenv.lock`, so a ripgrep-backed search skips the
@@ -164,9 +172,10 @@ script wrote:
    `aj init --dry-run` to see it named) plus project notes.
 6. No `.claude/skills/<x>/.claude-plugin/plugin.json` anywhere. A directory
    with that manifest is a plugin.
-7. `direnv allow`, twice in a new repo (the first load creates
-   `devenv.lock`, the second approves it; troubleshooting has the detail).
-   Run it yourself as the worker (`sudo -u w-acme -i`, then `cd` into the
+7. `direnv allow`, three times in a new repo: the `.envrc`, then
+   `devenv.nix` and `devenv.yaml`, then the `devenv.lock` the first devenv
+   run creates (twice where the lock exists already; `aj init` does them
+   all). Run it yourself as the worker (`sudo -u w-acme -i`, then `cd` into the
    repo): the hook refuses `direnv allow`, `permit`, `grant` and `edit` to
    a session by text. Then `ajmux acme/infra -p "list the tools on PATH"`
    from your account as a smoke test.
@@ -259,7 +268,9 @@ sudo -u w-acme -i aj doctor            # as a worker: the same, plus the repo re
 ```
 
 Exit 1 when something the jailer needs is missing. A missing managed file
-is `MISSING: this host enforces nothing`. The `info` lines
+is `MISSING: this host enforces nothing`. A `warn` that `/etc/claude-code`
+is not what the ref builds now means the checkout moved since the last
+`aj upgrade`: the rules in force are the older revision's. The `info` lines
 `AI_JAILER_CODE_ROOT`, `AI_JAIL_PROJECT` and the caller's standing show which
 repo and user the shell is in. `claude doctor` is the Claude Code side:
 install health and settings-file validation, without a session.
@@ -277,7 +288,7 @@ at `no such directory`. The same goes for every path after
 `sudo -u w-acme -i`.
 
 Around twenty `claude -p` sessions: one more in a fenced repo, one fewer
-outside tmux, one fewer in a repo that keeps its own `.envrc`. One login
+outside tmux, two fewer in a repo that keeps its own `.envrc`. One login
 pre-flight call first, so a worker that never logged in gets one `FAIL
 login` naming the fix instead of twenty failures. Judged on the stream-json
 transcripts and on the files afterwards, not on the model's prose;
@@ -308,7 +319,7 @@ aj doctor                                # every line ok or info; no workers yet
 devenv shell                             # in this checkout
 aj bootstrap --workers acme              # the worker user, linger, the sudo rule, the worker's profile
 aj doctor                                # the worker lines too
-sudo -u w-acme -i aj init acme/infra     # files, two allows, the settings checks, the hook cases
+sudo -u w-acme -i aj init acme/infra     # files, three allows, the settings checks, the hook cases
 sudo -u w-acme -i aj check ~w-acme/code/git/acme/infra
 ajmux acme/infra                         # interactive: trust dialog once, orange window when it waits
 ```
@@ -395,8 +406,17 @@ the dangerous direction.
   `direnv status` in the repo, as the worker. The preamble runs
   `direnv export bash` per command. The hook refuses the command instead
   when that export would fail (`env-guard: direnv export failed in <dir>:
-  ...`), with the fix in the message; an edited `devenv.nix` that is not
-  yet approved loads anyway (`require_allowed` only flags it).
+  ...`), with the fix in the message. A `devenv.nix`, `devenv.yaml` or
+  `devenv.lock` that changed since the last `direnv allow` is refused the
+  same way, before anything evaluates it (`... changed since the last
+  direnv allow`): `cd` into the repo as the worker, read the change, then
+  `direnv allow`.
+- **`aj doctor` warns that `.envrc` calls `require_allowed` after `use
+  devenv`, or not at all.** The repo has an older `.envrc`. The hook
+  still refuses a session's commands after a change to the three files,
+  but your own shell evaluates the changed `devenv.nix` before it asks.
+  Put the lines of section 3, step 3 in place of the old ones, then
+  `direnv allow`.
 - **`env-guard` refuses `direnv allow`, and its message says `fix: direnv
   allow <repo>`.** The hook refuses `direnv allow|permit|grant|edit` by
   text ("the human approves .envrc changes"), and the `fix:` advice in the
@@ -443,8 +463,11 @@ the dangerous direction.
 - **`.claude/settings.json` is a dangling symlink.** The store path was
   garbage collected; enter the shell again (`direnv reload`) and devenv
   rewrites it.
-- **Worktree `.envrc` blocked.** It differs from the main checkout's. That
-  is the point; make them identical or allow it yourself after reading it.
+- **Worktree `.envrc` blocked, or its devenv files `changed since the last
+  direnv allow`.** One of them differs from the main checkout's, which
+  happens when the main checkout has an approved change that is not
+  committed yet. That is the point; make them identical or allow it
+  yourself after reading it.
 - **`git push` from a session fails with `Permission denied (publickey)`.**
   Expected: workers hold no key, and sessions get no agent socket and no
   `~/.ssh`.
@@ -468,9 +491,11 @@ the dangerous direction.
   it only at `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`.
   Bootstrap exports the variable in `~/.bashrc.d` (per worker too); a
   terminal opened before it ran lacks it.
-- **First `direnv allow` in a new repo ends with `devenv.nix and
-  devenv.yaml and devenv.lock require approval`.** Expected: the first
-  load created `devenv.lock`. `direnv allow` once more, in the same shell.
+- **`direnv allow` in a new repo ends with `devenv.nix and devenv.yaml
+  require approval`, and the next one with `devenv.lock requires
+  approval`.** Expected: nothing evaluates the two files before they are
+  approved, and the first devenv run then creates the lock. `direnv allow`
+  again each time, in the same shell.
 - **mkhl.direnv reports that direnv is not found.** VS Code started from
   the menu has the login session's PATH, which lacks the nix profile until
   the next login (`~/.config/environment.d`, written by bootstrap). It also
@@ -507,7 +532,7 @@ the dangerous direction.
   hidden from agents in jails is hidden in every other repo too.
 - Settings files reload live, so a repo converted while a session is open
   picks up the project layer; restart the session.
-- The hook refuses `.claude/settings.local.json` changes everywhere, which
+- The hook refuses a worker's `.claude/settings.local.json` changes, which
   is also where "Yes, and don't ask again" writes. The file is still
   written; the new allow rule applies from the next session. Allow rules
   for a project belong in `devenv.nix` (`ai-jail.settings`).
@@ -517,8 +542,11 @@ the dangerous direction.
   user`, `--settings` and a session started above the repo skip the repo's
   project layer, not the managed rules.
 - MCP and LSP servers run outside the sandbox and the law does not restrict
-  them (no `allowedMcpServers`): a cell may need one, and Claude Code's own
-  approval of a project `.mcp.json` is the human's gate (RAU-32).
+  them (no `allowedMcpServers`): a cell may need one. The hook and the deny
+  rules refuse a worker's edits to `.mcp.json`, `.claude/agents/` and
+  `.claude/commands/`; a server that arrives with the repo is Claude
+  Code's to approve. Its docs say an interactive session asks first and a
+  `-p` run does not; untested here (RAU-50).
 - `allowCloudCli = true` hands a session the worker's cloud login. The hook
   refuses the logins, the token exports and the well-known secret reads
   (`az account get-access-token`, `az keyvault secret show`, `az storage
@@ -608,6 +636,8 @@ accepted, and what would reopen them: RAU-32.
   path is masked: `could not lock config file .git/config: File exists`,
   `aj check` case 15); the `-c` form, `--global` and a worktree's config
   are the accepted gaps.
+- `git fetch . +x:main`, which moves a local branch: a refspec cannot be
+  told from a URL by its colon (RAU-51).
 - `git checkout <path>` with one word (a path cannot be told from a branch
   name) and `git -c alias.x=reset x`, which runs through the `-c` keys. A
   ref followed by paths is refused.

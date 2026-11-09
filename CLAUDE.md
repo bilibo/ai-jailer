@@ -39,12 +39,11 @@ nix flake check path:<dir>
 - `docs/runbook.md`: the operator's reference. What to do and the one-line
   why.
 - `docs/project-devenv.md`: a project's `devenv.nix`, for someone new to Nix.
-- Linear (the connector loads while this checkout's `devenv.nix` sets
-  `ai-jail.allowConnectors = true`): tasks, open questions, decisions,
-  upstream quirks with their investigation, test journals. A closed
-  decision is reopened by a new issue that links the old one (`RAU-nn` in
-  a comment points at one). History before 2026-11-01 is at commit
-  `30603b1`.
+- Linear (the session's `linear` MCP server): tasks, open questions,
+  decisions, upstream quirks with their investigation, test journals. A
+  closed decision is reopened by a new issue that links the old one
+  (`RAU-nn` in a comment points at one). History before 2026-11-01 is at
+  commit `30603b1^`; `30603b1` removes it.
 
 High effort for a subagent is for `hooks/env-guard.sh` and
 `lib/settings.nix` only.

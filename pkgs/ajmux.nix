@@ -68,7 +68,9 @@ pkgs.writeShellApplication {
     else
       usage
     fi
-    session="''${project//\//-}"
+    # tmux reads `.` and `:` in a target as its window and pane separators,
+    # so `has-session -t =acme-my.app` never finds the session it made.
+    session="''${project//\//-}"; session="''${session//[.:]/_}"
 
     prefix="''${AI_JAILER_WORKER_PREFIX:-w-}"
     worker="$prefix''${project%%/*}"

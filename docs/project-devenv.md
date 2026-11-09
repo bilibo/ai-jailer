@@ -35,15 +35,16 @@ The same four steps, whatever the change:
    next shell entry. Edit it as yourself through the worker's group or as
    the worker (`sudo -u w-<org> -i`).
 3. `direnv allow` in the repo, as the worker: the hook refuses `direnv
-   allow` to a session, so it is yours to run. `.envrc` ends with `require_allowed
-   devenv.nix devenv.yaml devenv.lock`, so after a change to any of the
-   three direnv says they `require approval` until you do. It flags, it
-   does not block: the shell loads the new content either way (runbook,
-   troubleshooting), so read a change before you allow it, one a `git
-   pull` brought included. In VS Code, mkhl.direnv asks the same
-   question. A changed `.envrc` is different: it does not load at all
-   until `direnv allow`, and every Bash command a session runs is refused
-   with `fix: direnv allow <repo>` until then.
+   allow` to a session, so it is yours to run. `.envrc` calls
+   `require_allowed` on `devenv.nix`, `devenv.yaml` and `devenv.lock`
+   before it loads devenv, so after a change to any of the three nothing
+   loads: direnv says they `require approval`, and every Bash command a
+   session runs is refused (`... changed since the last direnv allow`)
+   until you `cd` into the repo and run `direnv allow`. Read the change
+   first, one a `git pull` brought included. In VS Code, mkhl.direnv asks
+   the same question. A changed `.envrc` is held back the same way. A
+   file that `devenv.nix` imports is not: name it on the first
+   `require_allowed` line of `.envrc` to have it held back too.
 4. Commit `devenv.nix` (and `devenv.lock` when it moved). The agent never
    commits.
 
@@ -214,8 +215,8 @@ An agent cannot flip the switch. It is a line in `devenv.nix`, and the
 deny rules and the hook refuse an agent's edits to that file (step 1
 above), as for every other line in it; one that could write the file
 could already loosen the rules through `ai-jail.settings`, so the switch
-opens nothing new. A change to `devenv.nix` you did not make still shows
-up as `require approval` at the next `cd`.
+opens nothing new. A change to `devenv.nix` that got past both does not
+load: it waits for your `direnv allow` (step 3).
 
 To turn them back on, delete the line (or write `enable = true;`, the
 default) and `direnv allow`. The next shell entry writes
@@ -232,7 +233,8 @@ nothing applies at all, and the shell warns at every entry.
 
 ## When the shell does not load
 
-- `require approval` is not this: the shell loaded; step 3.
+- `require approval`: a devenv file changed and nothing loaded until you
+  approve it; step 3.
 - `.envrc is blocked`: `direnv allow`, after reading the `.envrc`.
 - An evaluation error after an edit: `devenv shell` in the repo prints it
   with the line. A missing `;` or `]` is the usual one.
