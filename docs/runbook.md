@@ -50,8 +50,9 @@ hard rules live.
    root, the project name is optional: `ajmux`, `ajmux --worktree`.
 3. Your own session in a repo of your own, or in this checkout, is the
    jailer's: bound by the law alone. The hook refuses a credential read
-   (`.env`, `~/.ssh`, the GitHub tokens on disk, your Claude login), `git
-   commit` and `git push`; nothing else, and no sandbox. Commit and push
+   (`.env`, `~/.ssh`, the GitHub tokens on disk, your Claude login, your
+   `az`, `aws` and `gcloud` logins), `git commit` and `git push`; nothing
+   else, and no sandbox. Commit and push
    from your own terminal. It edits `devenv.nix`, `.envrc` and `.claude/`
    like any file. The jail is the workers': a session as `w-<org>` gets the
    full rules.
@@ -202,7 +203,7 @@ names are already known.
 prefix.
 
 The host-wide options, `allowLocalCommits`, `allowMemoryEdits`,
-`allowConnectors`, `allowManagedHooksOnly`, `extraDeny`,
+`allowConnectors`, `allowCloudCli`, `allowManagedHooksOnly`, `extraDeny`,
 `extraAllowedDomains`, `extraKnownMarketplaces` and `extraInstructions`
 (text appended to the host-wide `CLAUDE.md`; the arguments of
 `lib/managed-tree.nix`), go into `host.nix` at the checkout root, an
@@ -213,6 +214,16 @@ memory under `~/.claude/projects/<slug>/memory/` is text that every later
 session of that user reads as context, so it is a persistence channel for
 anything an agent picked up from a repo. With it on, only that directory
 opens; the rest of `~/.claude` stays read-only.
+
+`allowCloudCli` is off by default too: the sandbox hides `~/.azure`,
+`~/.aws` and `~/.config/gcloud`, so `az`, `aws`, `gcloud`, and Terraform
+through them, find no login in a session. With it on, sandboxed commands
+run as the login you gave the worker (`sudo -u w-acme -i az login`; a
+session cannot log in itself). The Read tool and any command that names one
+of the three directories stay refused either way. Give that login a
+read-only role before turning it on: section 8 lists what the rules do not
+cover. Untried with a logged-in worker (RAU-46); run `az account show` in a
+session after `aj upgrade` to see that it took.
 
 In a repo, `devenv.nix` sets `ai-jail.settings` for allow rules,
 `ai-jail.extraAllowedDomains`, `ai-jail.extraDeny` and
@@ -486,13 +497,6 @@ the dangerous direction.
   fails and a real `.vscode/` or `.claude/hooks/` cannot be created. Nothing
   hides them: an ignore rule for `.vscode` or `.claude/skills` would hide a
   real directory of that name made later.
-- **`aj doctor` or `aj reset` on a host set up before 2026-10-28 misses
-  what `harness bootstrap` wrote.** The rename moved the receipt, the
-  sudoers file, the sysctl drop-in, the environment.d file and the block
-  markers from `claude-nix-harness` to `ai-jailer`; nothing reads the old
-  paths. Reset with the old tooling first: `git worktree add /tmp/old
-  a311cf4`, then `nix run path:/tmp/old#harness -- reset --yes`, then `aj
-  bootstrap` from the current checkout.
 
 ## 8. Limits of the boundary
 
@@ -515,6 +519,20 @@ the dangerous direction.
 - MCP and LSP servers run outside the sandbox and the law does not restrict
   them (no `allowedMcpServers`): a cell may need one, and Claude Code's own
   approval of a project `.mcp.json` is the human's gate (RAU-32).
+- `allowCloudCli = true` hands a session the worker's cloud login. The hook
+  refuses the logins, the token exports and the well-known secret reads
+  (`az account get-access-token`, `az keyvault secret show`, `az storage
+  account keys list`, app settings and connection strings; `aws
+  secretsmanager get-secret-value`, `aws sts assume-role`; `gcloud auth
+  print-access-token`, `gcloud secrets versions access`; hook rule 3 has
+  the list) and `az` writes (rule 2). `aws` and `gcloud` writes have no
+  rule beyond Terraform's (RAU-47), and a script that calls the API or
+  opens the token cache itself passes every text rule. The role on the login is the
+  limit: read-only and without secret access (on Azure `Reader`, with no
+  Key Vault data role or access policy). A session can also write
+  `~/.azure` and `~/.aws`, which the CLIs need to renew a token and which
+  hold their configuration; gcloud's directory stays read-only, under
+  `~/.config`.
 
 Sandbox limits. Closing them is RAU-22 (tmux socket), RAU-23 (keyring
 sockets) and RAU-24 (the read fence):
@@ -530,8 +548,9 @@ sockets) and RAU-24 (the read fence):
   gets through. A private socket under a `denyRead` directory is the fix.
 - Reads within the worker's own home are open. A sandboxed command reads
   the whole machine the worker's UID can read, except the `denyRead` paths
-  (`~/.claude/.credentials.json`, `~/.claude.json`, `~/.azure`,
-  `~/.config/gh`, `~/.git-credentials`, `~/.ssh`; `lib/settings.nix` has
+  (`~/.claude/.credentials.json`, `~/.claude.json`, `~/.config/gh`,
+  `~/.git-credentials`, `~/.ssh`, and `~/.azure`, `~/.aws` and
+  `~/.config/gcloud` unless `allowCloudCli` is on; `lib/settings.nix` has
   the full list, WSL entries included). Another user's home is closed by
   0750, which `aj check` case 18 tests. The Read tool reaches the same
   files (`blockReadsOutsideWorkingDirectories` is unset).
@@ -558,8 +577,8 @@ sockets) and RAU-24 (the read fence):
   agent is the example: `SSH_AUTH_SOCK` is stripped, but
   `/run/user/<uid>/gcr/ssh` is guessable and answers from inside the
   sandbox; a worker holds no key, so there is nothing for it to sign with.
-- The environment: the sandbox's `credentials.envVars` denies the Azure
-  secrets, the SSH agent and the GitHub tokens; every other variable of the
+- The environment: the sandbox's `credentials.envVars` denies the Azure,
+  AWS and Google secrets, the SSH agent and the GitHub tokens; every other variable of the
   launching shell is inherited. Name a secret in
   `sandbox.credentials.envVars` through `ai-jail.settings` instead.
 - The hook strips quotes before matching, so a quoted string that mentions

@@ -2,48 +2,33 @@
 #   aj check [<repo>] [--dry-run] [--verbose] [--yes]   (default: the current directory)
 #   aj check --parse <transcript.jsonl>
 #
-# The runbook's live checks (section 5) as a subcommand: one `claude -p` per
-# case inside a jail, judged on the tool results in the stream-json
-# transcript (what the tools returned) and on the filesystem afterwards,
-# never on the model's prose: an assistant sentence saying "permission
-# denied" is not a denial. Each case is one hard limit the repo's
-# managed tree and the repo's .claude/settings.json hold; a case that stops passing
-# after a Claude Code upgrade is the point of this file. --parse prints what
-# the verdicts see in a saved transcript (tests/check-parser-test.sh).
+# The live checks: one short `claude -p` session per case inside a jail, each
+# case one hard limit that the host's managed rules, the worker's jail or the
+# repo's settings hold. A case is judged on what the tools returned (the
+# stream-json transcript) and on the files afterwards, never on the model's
+# prose. Run it after a Claude Code upgrade.
 #
-# Costs API calls (one login pre-flight, then nineteen short sessions, twenty for a worker, where
-# case 18 runs, two more in a fenced repo, two more when case 2 fails; two
-# fewer outside tmux, where the second half of case 16 and case 20 are
-# skipped, and one fewer in a repo that keeps its own .envrc, where case 19
-# is skipped). Run it
-# from your own terminal, never from inside a session: the nested-session
-# rule would deny some of the commands it runs. Transcripts stay in a temp
-# directory, printed at the end, so the exact refusal text can be read.
-# --dry-run lists the cases and sends nothing; --verbose prints each
-# session's prompt; --yes is accepted for symmetry (nothing here asks).
+# Costs API calls: about twenty sessions, after one login pre-flight. Run it
+# as a worker, from a terminal, never from inside a session. Run as the
+# owner, the sandbox and rule cases fail by design: the owner is bound by the
+# law alone. A skip (outside tmux, a caller who is no worker, a repo that
+# keeps its own .envrc) is neither a pass nor a failure.
 #
-# Every case runs on every host, as a worker: the law comes from the host's
-# managed settings (/etc/claude-code) and the jail from the worker's own
-# user settings, whatever the repo file says; a repo file
-# that turns the sandbox off only draws a warning (the hook then refuses a
-# worker's every tool, which the cases show). Run as the owner the sandbox
-# and rule cases fail by design: the owner is bound by the law alone. A
-# skip (case 16's second half, case 18 for a caller outside the `agents`
-# group, case 19 in a repo with its own .envrc) is neither a pass nor a
-# failure; the summary counts it apart.
+# The sessions run the claude a terminal in the repo would get: the repo
+# shell's (ai-jail.claudeCode.enable), else the host's. The `claude:` line of
+# the output says which. Exit 69 when there is none.
 #
-# The sessions run the claude a terminal in the repo gets, by absolute path,
-# so `aj check <repo>` works from any terminal, also on a host whose
-# only Claude Code is the VS Code extension's: from the repo's own shell,
-# its PATH's; else `direnv exec <repo>`'s, the repo shell's
-# (ai-jail.claudeCode.enable) or else the host's beneath it, never one
-# another shell put on this PATH; without direnv, or
-# when the repo's shell does not load, a host claude on PATH, outside the
-# Nix store, where shells keep theirs. None: exit 69, naming
-# ai-jail.claudeCode.enable. The header says which; --dry-run too.
+#   --dry-run   list the cases, send nothing
+#   --verbose   print each session's prompt
+#   --parse     print what a verdict sees in a saved transcript
+#   --yes       accepted for symmetry; nothing here asks
+#
+# Transcripts stay in a temp directory, named in the output, for the exact
+# refusal text. docs/runbook.md section 5 has the steps around this one.
 # shellcheck disable=SC2016  # single quotes are deliberate: the agent's shell expands these, not ours
 set -uo pipefail
 DRY_RUN=0; VERBOSE=0; PARSE=""; target=.
+# --help prints the header above, up to the shellcheck line.
 usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -85,7 +70,10 @@ fi
 in_repo_shell() { [ -n "${DEVENV_ROOT:-}" ] && [ "$(cd "$DEVENV_ROOT" 2>/dev/null && pwd -P)" = "$repo" ]; }
 
 # Sets claude and via, else why; noload when the repo's shell does not load
-# from here. The order of preference is the header's.
+# from here. The claude a terminal in the repo gets, by absolute path: in the
+# repo's own shell, its PATH's; else `direnv exec <repo>`'s (the repo shell's,
+# or the host's beneath it); else a host claude on PATH outside the Nix
+# store, never one another shell put on this PATH.
 claude=""; via=""; why=""; noload=0
 resolve_claude() {
   local d rc=0 path_dirs

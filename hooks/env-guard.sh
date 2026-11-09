@@ -141,18 +141,16 @@ case "$event" in
       fi
     fi
     # Claude Code runs this preamble before every Bash command, in that
-    # command's cwd, which follows EnterWorktree and devenv.nix edits; the
-    # find line cleans the .devenv/shell-*.sh files that every `devenv
-    # direnv-export` leaves behind (RAU-35).
-    # direnv and devenv by store path, resolved here outside the sandbox (the
-    # user's devenv, the hook's direnv): with the read fence on,
-    # `~/.nix-profile` (a symlink) is not mounted back into the sandbox, so
-    # the profile's bin directory is off PATH there (RAU-35).
-    # devenv creates `$XDG_RUNTIME_DIR/devenv-<hash>` before it evaluates and
-    # the sandbox mounts /run/user/<uid> read-only, so the export runs with
-    # the sandbox's TMPDIR as its runtime directory (devenv ignores
-    # DEVENV_RUNTIME). The command's own XDG_RUNTIME_DIR is untouched: direnv
-    # exports only what the devenv shell changed (RAU-35).
+    # command's cwd, which follows EnterWorktree and devenv.nix edits. Three
+    # workarounds in it (RAU-35):
+    # - direnv (the hook's) and devenv (the user's) go on PATH by store path,
+    #   resolved here outside the sandbox: with the read fence on,
+    #   ~/.nix-profile is not mounted there.
+    # - The export runs with the sandbox's TMPDIR as XDG_RUNTIME_DIR: devenv
+    #   creates a directory in it, and /run/user/<uid> is read-only in the
+    #   sandbox. The command's own XDG_RUNTIME_DIR is untouched.
+    # - The find line removes the shell-*.sh files every `devenv
+    #   direnv-export` leaves in .devenv.
     tool_path=""
     for t in direnv devenv; do
       if p=$(command -v "$t"); then tool_path="$tool_path${tool_path:+:}$(dirname "$(readlink -f "$p")")"; fi
@@ -253,9 +251,9 @@ ENV
         [[ "$n" =~ $re ]] && deny "git commit/push blocked: the human commits and pushes"
         # L2. credential reads. cred_files: in-repo secrets, the user's own
         # Claude credentials, and the home-directory credential stores the
-        # law's Read rules name (ssh, the GitHub tokens on disk, Azure's
-        # token cache), which an unsandboxed jailer session has no sandbox
-        # to hide. A path matching cred_files anywhere blocks, unless the
+        # law's Read rules name (ssh, the GitHub tokens on disk, the az, aws
+        # and gcloud logins), which an unsandboxed jailer session has no
+        # sandbox to hide. A path matching cred_files anywhere blocks, unless the
         # whole command is one simple command whose verb cannot show
         # content: one line (the normaliser folds newlines, so the raw
         # command is checked), no pipe, no `$(`, backtick or `>(`
@@ -264,7 +262,7 @@ ENV
         # -f`, `--files0-from`, `--pathspec-from-file`). A reader list
         # cannot be completed (dd, tr, perl, `git show <ref>:.env`, a bare
         # `< .env`).
-        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json|\.ssh/|\.git-credentials|\.config/gh/|\.azure/)'
+        cred_files='(\.env([^a-z0-9]|$)|\.tfvars|\.tfstate|\.claude/\.credentials\.json|\.claude\.json|\.credentials\.json|\.ssh/|\.git-credentials|\.config/gh/|\.azure/|\.aws/|\.config/gcloud/)'
         # `ssh -i ~/.ssh/<key> host` uses a key without showing it (scp and
         # rsync would copy it, so they are not here).
         harmless='^(ls|stat|file|du|wc|rm|git rm|test|\[|echo|printf|touch|ssh)( [^;&|<$`(]*)?$'
@@ -305,8 +303,22 @@ ENV
         re='(^|[^a-z])(func +azure +functionapp +publish|pulumi +(up|destroy)|bicep +publish)'
         [[ "$n" =~ $re ]] && deny "deploy blocked"
 
-        # 3. credential operations (the credential files are the law's, L2)
-        re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +sp +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
+        # 3. credential operations (the credential files are the law's, L2):
+        # logins and account switches, commands that print a token, commands
+        # that print a stored secret. The well-known ones per CLI, the same
+        # as `credentials` in lib/deny-rules.nix (change both); a login whose
+        # role cannot read secrets is what holds for the rest.
+        re='(^|[^a-z])az +(login|logout|account +(set|clear|get-access-token)|ad +(sp|app) +credential|keyvault +(secret|key|certificate) +(show|download|list|backup))'
+        [[ "$n" =~ $re ]] && deny "credential operation blocked"
+        # az spells its command in bare words before the first option, so
+        # only those are read: `--role "Key Vault Secrets User"` is no match.
+        re="(^|[^a-z])az( +[a-z][a-z0-9-]*)* +(key|keys|list-keys|admin-key|query-key|credential|secret|secrets|show-secret|appsettings|connection-string|show-connection-string|list-connection-strings|list-publishing-profiles|list-publishing-credentials|get-credentials|generate-sas)$e"
+        [[ "$n" =~ $re ]] && deny "secret read blocked: az keys, connection strings, app settings and credentials are the human's to read"
+        # aws and gcloud take global options before the command.
+        opts='( +-[-a-z]+(=[^ ;&|]*| +[^- ;&|][^ ;&|]*)?)*'
+        re="(^|[^a-z])aws$opts +(configure|login|logout|sso +(login|logout|get-role-credentials)|sts +(assume-[a-z-]+|get-session-token|get-federation-token)|secretsmanager +(batch-)?get-secret-value|ssm +get-parameter[^;&|]* --with-decryption|kms +decrypt|(ecr|codeartifact) +get-(login-password|authorization-token)|eks +get-token|iam +create-access-key)$e"
+        [[ "$n" =~ $re ]] && deny "credential operation blocked"
+        re="(^|[^a-z])gcloud$opts +((alpha|beta) +)?(init|auth +(login|revoke|activate-service-account|application-default|print-[a-z-]+|describe|configure-docker)|config +(set|unset|config-helper|configurations +(activate|create|delete))|secrets +versions +access|kms +(asymmetric-)?decrypt|iam +service-accounts +(keys +create|sign-blob|sign-jwt)|container +clusters +get-credentials)$e"
         [[ "$n" =~ $re ]] && deny "credential operation blocked"
 
         # 4. system and config

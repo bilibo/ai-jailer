@@ -131,6 +131,7 @@
             allowLocalCommits = true;
             allowMemoryEdits = true;
             allowConnectors = true;
+            allowCloudCli = true;
             extraDeny = [ "Bash(x)" ];
             extraAllowedDomains = [ "example.com" ];
             extraKnownMarketplaces = [ "example-market" ];
@@ -249,6 +250,13 @@
             jq -e 'has("sandbox") | not' "$h"
             jq -e '.disableClaudeAiConnectors == false' "$hj"
             jq -e '.disableClaudeAiConnectors == true' "$dj"
+            # allowCloudCli: off, the sandbox hides the three logins; on, it
+            # opens them to commands, and the law's Read rules stay either way.
+            jq -e '.sandbox.filesystem | (.denyRead | index("~/.azure") and index("~/.aws") and index("~/.config/gcloud")) and (.denyWrite | index("~/.azure") and index("~/.aws")) and (has("allowRead") | not) and (.allowWrite | index("~/.azure") == null and index("~/.aws") == null)' "$dj"
+            jq -e '.sandbox.filesystem | (.denyRead | index("~/.azure") == null and index("~/.aws") == null and index("~/.config/gcloud") == null) and (.denyWrite | index("~/.azure") == null and index("~/.aws") == null and index("~/.config")) and .allowRead == ["~/.azure", "~/.aws", "~/.config/gcloud"] and (.allowWrite | index("~/.azure") and index("~/.aws") and index("~/.config/gcloud") == null)' "$hj"
+            jq -e '.sandbox.filesystem.denyRead | index("~/.ssh") and index("~/.config/gh") and index("~/.claude/.credentials.json")' "$hj"
+            jq -e '.permissions.deny | index("Read(~/.azure/**)") and index("Read(~/.aws/**)") and index("Read(~/.config/gcloud/**)")' "$h"
+            jq -e '.permissions.deny | index("Bash(az account get-access-token)") and index("Bash(aws sts assume-role)") and index("Bash(gcloud auth print-*)")' "$hj"
             jq -e '(has("allowManagedHooksOnly") | not) and .strictKnownMarketplaces == ["example-market"]' "$h"
             jq -e '.allowManagedHooksOnly == true and .strictKnownMarketplaces == []' "$d"
             grep -q 'ALLOW_MEMORY_EDITS="1"' ${hostTree}/hooks/env-guard.sh

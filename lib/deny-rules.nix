@@ -32,7 +32,9 @@ let
     ]) cmds;
 
   # The law's half: what reads a credential. In-repo secrets, the user's
-  # own Claude login, the GitHub tokens on disk, Azure's token cache, ssh.
+  # own Claude login, the GitHub tokens on disk, the logins az, aws and
+  # gcloud keep (the same three directories as `cloudStores` in
+  # lib/settings.nix and cred_files in the hook; change all three), ssh.
   credentialReads = [
     "Read(**/.env)"
     "Read(**/.env.*)"
@@ -42,6 +44,8 @@ let
     "Read(**/*.tfstate.backup)"
     "Read(**/.git/devenv-base/**)"
     "Read(~/.azure/**)"
+    "Read(~/.aws/**)"
+    "Read(~/.config/gcloud/**)"
     "Read(~/.ssh/**)"
     "Read(~/.config/gh/**)"
     "Read(~/.git-credentials)"
@@ -56,6 +60,11 @@ let
   # `.terraform` would mask a cell's providers, and the state file inside it
   # is covered by `**/*.tfstate` above (the hook refuses state writes) (RAU-36).
 
+  # Logins and account switches, commands that print a token, and commands
+  # that print a stored secret: the well-known ones per CLI. The hook's rule
+  # 3 names the same commands and also catches them behind a global option
+  # (`aws --profile x sts assume-role`); change both. Not every command that
+  # can show a secret: the role the worker's login holds is the limit.
   credentials =
     credentialReads
     ++ bash [
@@ -65,9 +74,69 @@ let
       "az account clear"
       "az account get-access-token"
       "az ad sp credential"
+      "az ad app credential"
       "az keyvault secret"
       "az keyvault key"
       "az keyvault certificate"
+      "aws configure"
+      "aws login"
+      "aws logout"
+      "aws sso login"
+      "aws sso logout"
+      "aws sso get-role-credentials"
+      "aws sts assume-role"
+      "aws sts assume-role-with-saml"
+      "aws sts assume-role-with-web-identity"
+      "aws sts get-session-token"
+      "aws sts get-federation-token"
+      "aws secretsmanager get-secret-value"
+      "aws secretsmanager batch-get-secret-value"
+      "aws kms decrypt"
+      "aws ecr get-login-password"
+      "aws ecr get-authorization-token"
+      "aws codeartifact get-authorization-token"
+      "aws eks get-token"
+      "aws iam create-access-key"
+      "gcloud init"
+      "gcloud auth login"
+      "gcloud auth revoke"
+      "gcloud auth activate-service-account"
+      "gcloud auth application-default"
+      "gcloud auth describe"
+      "gcloud auth configure-docker"
+      "gcloud config set"
+      "gcloud config unset"
+      "gcloud config config-helper"
+      "gcloud config configurations activate"
+      "gcloud config configurations create"
+      "gcloud config configurations delete"
+      "gcloud secrets versions access"
+      "gcloud kms decrypt"
+      "gcloud kms asymmetric-decrypt"
+      "gcloud iam service-accounts keys create"
+      "gcloud iam service-accounts sign-blob"
+      "gcloud iam service-accounts sign-jwt"
+      "gcloud container clusters get-credentials"
+    ]
+    ++ [
+      # Keys, connection strings and app settings, wherever the az command
+      # group puts them (`az storage account keys list`, `az webapp config
+      # appsettings list`). A glob cannot tell a command word from an option
+      # value, so the bare `key` the hook refuses is not here.
+      "Bash(az * keys *)"
+      "Bash(az * list-keys *)"
+      "Bash(az * credential *)"
+      "Bash(az * secret *)"
+      "Bash(az * secrets *)"
+      "Bash(az * appsettings *)"
+      "Bash(az * connection-string *)"
+      "Bash(az * show-connection-string *)"
+      "Bash(az * list-publishing-profiles *)"
+      "Bash(az * list-publishing-credentials *)"
+      "Bash(az * get-credentials *)"
+      "Bash(az * generate-sas *)"
+      "Bash(aws ssm get-parameter* --with-decryption*)"
+      "Bash(gcloud auth print-*)"
     ];
 
   system =

@@ -171,10 +171,12 @@ descriptions.
 | `extraDeny`, `extraAllowedDomains`, `settings` | add deny rules, sandbox hosts and allow rules (above) |
 | `managedSettingsPath` | where the host keeps the managed settings (`/etc/claude-code/managed-settings.json`); every shell entry warns when it cannot be read |
 
-Whether agents may commit locally, whether Claude keeps its auto-memory
-and the account's connectors by default are host decisions now
-(`allowLocalCommits`, `allowMemoryEdits` and `allowConnectors` in the
-checkout's `host.nix`); a repo no longer sets the first two.
+Whether agents may commit locally, whether Claude keeps its auto-memory,
+whether `az`, `aws` and `gcloud` find a login in a session and whether the
+account's connectors load by default are host decisions
+(`allowLocalCommits`, `allowMemoryEdits`, `allowCloudCli` and
+`allowConnectors` in the checkout's `host.nix`); of the four, a repo can
+set only `allowConnectors`.
 
 ## Turning the guard rails off (and on)
 

@@ -140,7 +140,7 @@ in
       ++ lib.optionals cfg.claudeCode.enable [
         claudeCode
         pkgs.tmux
-        pkgs.jq # reason not recorded; aj init gets its own jq (pkgs/aj.nix)
+        pkgs.jq # reason not recorded (RAU-40); aj init gets its own jq (pkgs/aj.nix)
       ];
     }
 

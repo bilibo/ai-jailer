@@ -2,48 +2,38 @@
 #   aj init <org>/<repo> | <path> [--jailer <flakeref>] [--force] [--no-shell]
 #                [--dry-run] [--yes] [--verbose]
 #
-# Section 3 of the runbook as a subcommand. Renders the files a repo needs to
-# import the jail module (devenv.yaml, devenv.nix, .envrc,
-# .gitignore, .ignore, .worktreeinclude, CLAUDE.md), then does the first shell entry
-# (direnv allow, approval of the files require_allowed names, which makes
-# devenv write .claude/settings.json) and runs the repo's static checks on
-# the result: project-settings-test.sh on the generated file, hook-test.sh on
-# the hook in the host's managed settings (the repo file registers none;
-# $AI_JAILER_MANAGED_SETTINGS overrides /etc/claude-code/managed-settings.json),
-# ajmux's resolution. No readable managed file is reported MISSING and init
-# exits 1 after the settings test: the host enforces nothing. A repo whose
-# devenv.nix sets ai-jail.enable = false loads with no settings file: init
-# says so and stops there, exit 0. A new directory under
-# $AI_JAILER_CODE_ROOT/<org>/<repo> (default ~/code/git), or an existing
-# repo given by path. Files that exist are left alone and reported; --force
-# overwrites the jailer-owned ones (devenv.yaml, .envrc). .gitignore, .ignore and
-# .worktreeinclude only gain the lines they lack; CLAUDE.md gains the
-# contract block if it has none. --dry-run prints the files it would write
-# and creates nothing; --verbose traces the shell step. devenv.yaml,
-# devenv.nix or .envrc that this run did not write are the repo's own code,
-# which the shell step approves and runs as you: they are printed and need a
-# y, or --yes. So does a devenv.lock that is there before the first load,
-# shown as the inputs it pins (a re-run on a repo init set up earlier asks
-# about its own lock too). The template's .envrc fails the load while a
-# devenv.local.nix or devenv.local.yaml exists, so one stops the shell step
-# (exit 1) unless the repo keeps its own .envrc, where it is approved too.
+# Makes a repo a jail: a new directory under the code root
+# ($AI_JAILER_CODE_ROOT, default ~/code/git), or an existing repo by path.
+# Writes devenv.yaml, devenv.nix, .envrc, .gitignore, .ignore,
+# .worktreeinclude and CLAUDE.md. A file that exists is left alone and
+# reported; the ignore files only gain the lines they lack, and CLAUDE.md
+# gains the contract block when it has none.
 #
-# The ai-jailer input is the same ref bootstrap installs from: --jailer, else
-# AI_JAILER_REF, else the receipt's. A `path:` checkout is the form for
-# developing ai-jailer; a repo meant to outlive the checkout pins a git URL
-# instead: --jailer github:bilibo/ai-jailer, which is also the
-# default when none of them is set. A `path:/nix/store/...` ref makes init warn: garbage
-# collection removes it.
-# devenv.lock records the revision either way; `devenv update ai-jailer` moves
-# it. On a WSL host (binfmt WSLInterop, or WSL_DISTRO_NAME) the devenv.nix
-# gets ai-jail.platform = "wsl", which hides /mnt/c and /run/WSL from the
-# sandbox. On a host with no claude on PATH (the plain WSL host, whose
-# Claude Code is the VS Code extension's bundled binary) it gets
-# ai-jail.claudeCode.enable = true, the CLI for tmux and ajmux sessions, and
-# devenv.yaml gets allow_unfree: true (claude-code is unfree); a claude on
-# PATH leaves both commented out. A PATH directory in the Nix store is a
-# shell's, not the host's (init run from inside a repo shell), and one under
-# ~/.vscode-server is the extension's own: neither counts.
+# Then the first shell entry: `direnv allow`, which makes devenv write
+# .claude/settings.json, and the checks on the result: the settings test on
+# the generated file, the hook test on the host's managed hook, ajmux's
+# resolution. A file this run did not write is the repo's own code, which
+# the shell entry runs as you, outside any sandbox: it is printed first and
+# needs a y, or --yes. A devenv.lock already there is shown as the inputs it
+# pins. A devenv.local.nix or devenv.local.yaml stops the shell step, unless
+# the repo keeps its own .envrc.
+#
+# Exit 1 when the host has no managed settings: it enforces nothing. A repo
+# with ai-jail.enable = false loads without a settings file: init says so
+# and exits 0.
+#
+#   --jailer <flakeref>  the ai-jailer input for devenv.yaml; else
+#                        AI_JAILER_REF, the receipt's, github:bilibo/ai-jailer.
+#                        A path: ref is for developing ai-jailer itself
+#   --force              overwrite devenv.yaml and .envrc
+#   --no-shell           write the files; skip the shell entry and the checks
+#   --dry-run            print the files it would write, create nothing
+#   --yes                approve the repo's own files without asking
+#   --verbose            trace the shell step
+#
+# On WSL, devenv.nix gets ai-jail.platform = "wsl". On a host with no claude
+# on PATH it gets ai-jail.claudeCode.enable = true, and devenv.yaml gets
+# allow_unfree: true. docs/runbook.md section 3 has the steps by hand.
 # shellcheck disable=SC2016  # single quotes are deliberate where direnv or bash must see the `$`
 set -euo pipefail
 
@@ -54,6 +44,7 @@ AI_JAILER_REF_FROM="${AI_JAILER_REF_FROM:-checkout}"
 AI_JAILER_TESTS="${AI_JAILER_TESTS:-$AI_JAILER_DIR/tests}"
 WSL_MARKER="${AI_JAILER_WSL_MARKER:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 FORCE=0; DRY=0; NO_SHELL=0; VERBOSE=0; YES=0; target=""
+# --help prints the header above, up to the shellcheck line.
 usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -127,8 +118,9 @@ if [ -e "$WSL_MARKER" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; then
   platform_line='    platform = "wsl";                  # this host is WSL: /mnt/c and /run/WSL hidden from the sandbox'
   note platform 'wsl (ai-jail.platform in devenv.nix)'
 fi
-# The host's claude, if any (header): the first on PATH outside the store
-# (NIX_STORE_DIR when Nix is relocated) and outside VS Code's server.
+# The host's claude, if any: the first on PATH outside the store (a store
+# directory is a repo shell's, not the host's; NIX_STORE_DIR when Nix is
+# relocated) and outside ~/.vscode-server (the extension's own).
 host_claude=""
 IFS=: read -r -a path_dirs <<<"$PATH"
 for d in "${path_dirs[@]}"; do
@@ -176,7 +168,7 @@ put devenv.nix "# Project tools and ai-jail options. Allow rules for this projec
   # languages.rust.enable = true;      # a toolchain; cargo's hosts go in extraAllowedDomains
   # env.ARM_TENANT_ID = \"...\";         # identifiers only; secrets stay in .env
   ai-jail = {
-    # enable = false;                  # guard rails off for this repo: no rules file, hook or sandbox
+    # enable = false;                  # guard rails off for this repo: no project layer; the host's rules stay
     # readFence = true;                # hide the rest of \$HOME from sandboxed commands
     # extraAllowRead = [ \"~/.cargo\" ]; # with readFence: what the project reads under \$HOME
     # allowConnectors = true;          # claude.ai connectors, MCP servers outside the sandbox

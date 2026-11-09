@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
 #   aj-init-test.sh <path-to-aj> [<settings.json>]
 #
-# `aj init --dry-run` under a temp HOME and code root: it prints every
-# file a new repo gets and creates nothing, not even the repo directory. On
-# an existing repo with its own devenv.nix, the shell step stops for approval;
-# with --yes it reaches the checks, where the stub direnv has linked
-# <settings.json> (a store path; default: aj itself) as the repo's
-# .claude/settings.json, and the settings test must get the repo's own path.
-# A repo's own devenv.lock is shown as the inputs it pins and stops the same.
-# A repo with the guard rails off (ai-jail.enable = false) gets no settings
-# file; init reports it and exits 0 without the checks. The hook test runs on
-# the hook in the managed settings (AI_JAILER_MANAGED_SETTINGS, a fixture
-# here); with no such file init prints MISSING, runs the settings test and
-# exits 1. The generated devenv.nix carries no role, memory or local-commit
-# text; CLAUDE.md carries the contract's action rules (proposals path, revert
-# line). .gitignore gains proposals/ and .ignore devenv.lock (Grep skips it).
-# With no claude on the host PATH (the default here: PATH is empty) the
-# template turns ai-jail.claudeCode.enable on and devenv.yaml gets
-# allow_unfree: true; with one, both stay commented out. A claude in a store
-# directory (a shell's) or under ~/.vscode-server (the extension's) is not
-# the host's. The template's .envrc fails while a devenv.local.* exists, and
-# init stops on one unless the repo keeps its own .envrc.
+# `aj init` under a temp HOME and code root, with direnv, devenv and bash
+# stubbed. First the dry run: every file a new repo gets is printed and
+# nothing is created, not even the repo directory. Then the shell step on
+# existing repos, where the stub direnv links <settings.json> (a store path;
+# default: aj itself) as the repo's .claude/settings.json, and the hook test
+# runs on the hook a fixture names (AI_JAILER_MANAGED_SETTINGS). Then what
+# the templates carry. Each case below says what it pins.
 set -uo pipefail
 aj="${1:?usage: aj-init-test.sh <aj> [<settings.json>]}"
 settings="${2:-$aj}"

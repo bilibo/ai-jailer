@@ -14,6 +14,7 @@
   allowLocalCommits ? false,
   allowMemoryEdits ? false,
   allowConnectors ? false,
+  allowCloudCli ? false,
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
   allowManagedHooksOnly ? true,
@@ -57,6 +58,7 @@ let
       allowLocalCommits
       allowMemoryEdits
       allowConnectors
+      allowCloudCli
       extraDeny
       extraAllowedDomains
       ;

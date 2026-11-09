@@ -256,3 +256,14 @@ all expected: an `env-guard: ... blocked` line from the hook, a permission
 denial naming a rule like `Bash(git push *)`, or a bubblewrap sandbox error
 (`Operation not permitted` or a refused host). `docs/runbook.md` has the
 rest.
+
+## Contact
+
+If you want your developers using coding agents without handing over the
+keys to production, or need a hand with AI governance and cloud security in
+general, you can find me on
+[LinkedIn](https://www.linkedin.com/in/raul-korhonen).
+
+## License
+
+Apache-2.0. See `LICENSE`.

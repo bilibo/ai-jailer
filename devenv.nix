@@ -11,13 +11,14 @@
   packages = [ (import ./pkgs/aj.nix { inherit pkgs; }) ];
   env.AI_JAILER_REF = "path:${config.devenv.root}";
   ai-jail = {
+    # enable = false;                  # guard rails off for this repo: no project layer; the host's rules stay
     claudeCode.enable = true;
     # readFence = true;                # hide the rest of $HOME from sandboxed commands
     # extraAllowRead = [ "~/.cargo" ]; # with readFence: what the project reads under $HOME
     # allowConnectors = true;          # claude.ai connectors, MCP servers outside the sandbox
     # platform = "wsl";                # hides /mnt/c and /run/WSL from the sandbox
     # extraDeny = [ "Bash(az devops *)" ];
-    # extraAllowedDomains = [ "dev.azure.com" ];              # sandbox allowlist, unmanaged host only
+    # extraAllowedDomains = [ "dev.azure.com" ];              # project hosts, merged into the sandbox allowlist
     # settings.permissions.allow = [ "Bash(terraform plan *)" ];
   };
 }

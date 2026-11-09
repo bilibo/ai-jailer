@@ -1,158 +1,56 @@
 #!/usr/bin/env bash
 #   aj bootstrap [--no-root] [--no-profile] [--trusted-user]
-#                     [--workers <a,b,...>] [--worker <name>] [--owner <login>]
-#                     [--owner-sudo nopasswd|password|none]
-#                     [--code-root <dir>] [--jailer <flakeref>]
+#                [--workers <a,b,...>] [--worker <name>] [--owner <login>]
+#                [--owner-sudo nopasswd|password|none]
+#                [--code-root <dir>] [--jailer <flakeref>]
 #   aj upgrade   [the bootstrap flags]
 #   aj doctor    [--code-root <dir>]
 #   aj reset     [--no-root]
 #   each also takes --dry-run, --yes, --verbose
 #
-# Takes a Linux host that has Nix (scripts/install.sh puts it there: on
-# Fedora 44 or newer from Fedora's own packages, on any other distro with the
-# nix-installer; NixOS has its own) and Claude Code to the shape of the
-# README: the host-wide managed rules at /etc/claude-code (the flake's
-# `managed` package, linked there), optionally one Linux user per org,
-# direnv >= 2.38, devenv, ajmux and aj from this flake (`nix profile
-# add`, pinned by flake.lock), and the user-side configuration: direnv.toml,
-# the tmux rules, the direnv hook for bash and zsh, AI_JAILER_CODE_ROOT, the
-# session PATH for GUI-launched VS Code, mkhl.direnv. One route on every
-# Linux, run from the ai-jailer checkout's devenv shell (AI_JAILER_REF is the
-# checkout there, so the rules and this CLI come from one revision).
-# scripts/install.sh does the root steps `nix run` needs, then runs `aj
-# bootstrap`, which finds them done and does the rest.
+# bootstrap sets up a Linux host that has Nix (scripts/install.sh installs
+# it). Every step checks before it writes, so run it again after a change.
+# The root steps go through sudo and say what they do first:
+#   - the devenv cache, and flakes where they are off, in /etc/nix/nix.conf
+#   - the user-namespace setting the sandbox needs, asked for on its own
+#   - /etc/claude-code linked to the managed rules of the ai-jailer ref
+#   - with --workers: the group `agents`, a user w-<org> per org (home 0750,
+#     the owner in its group, linger on), and one sudo rule from the owner
+#     to the workers
+# Then for each worker, and for you: direnv, devenv, ajmux and aj in the nix
+# profile, direnv.toml, the tmux rules, the shell hook and the code root. A
+# worker also gets the jail in ~/.claude/settings.json and a git identity.
+# On NixOS, what the system configuration owns is printed, not written, and
+# a file home-manager owns is left alone.
 #
-# NixOS (/etc/NIXOS, or ID=nixos in os-release: the marker is not visible
-# from inside a sandboxed session) runs the same root steps through the
-# owner's own sudo, with four differences. /etc/nix/nix.conf is never
-# written (a store symlink the system configuration owns): the nix.settings
-# block is printed where flakes or the devenv cache are missing. The
-# user-namespace sysctl is printed as a boot.kernel.sysctl option, not
-# written. No sudoers rule: /etc/sudoers has no @includedir there, so ajmux
-# hands over with whatever sudo the owner has (--owner-sudo is ignored with a
-# note). The worker users come from useradd, which holds only while
-# users.mutableUsers is true (the default; nothing here can read it): a
-# rebuild with it false removes them, and `aj doctor` reports a worker
-# the receipt names but the host lacks. A user file that is a symlink into
-# the Nix store is home-manager's: it is skipped and the option that sets it
-# is printed. What the system configuration already provides is skipped too
-# (NixOS with programs.direnv): a direnv.toml under
-# DIRENV_CONFIG makes ~/.config/direnv/direnv.toml unread; the hook in
-# /etc/bashrc makes ~/.bashrc.d pointless while the code root is the default
-# (Nix-built tools find NixOS's CA bundle by themselves); environment.d is
-# never needed, NixOS puts the profiles on every session's PATH; and under
-# WSL the Linux-side VS Code user settings are read by nothing. The rest is
-# written as on any host. Independently of
-# detection, root_write refuses any target that resolves into the store. WSL
-# (binfmt WSLInterop, or WSL_DISTRO_NAME) links the `managed-wsl` tree (the
-# Windows side hidden from the sandbox) and is reported in the host line;
-# `aj init` sets ai-jail.platform = "wsl" there.
+# upgrade is bootstrap that also moves the profile packages to the ref's
+# current lock. Without --workers it takes the workers the receipt lists and
+# leaves the sudo rule as it is.
 #
-# Idempotent: every step checks before it writes, so re-run it after a
-# change. `upgrade` is bootstrap that also moves the profile packages to the
-# ai-jailer ref's current flake.lock (and relinks /etc/claude-code when the
-# ref's rules changed); without --workers it takes the receipt's workers,
-# and leaves their sudo rule as it is unless --owner-sudo is given.
-# scripts/install.sh owns the root steps that come
-# before Nix (dnf on Fedora, the SELinux label, the nix-daemon socket); root
-# is needed here for the steps below. All go through sudo and say what they
-# do first; --no-root skips them (and with them --workers); --no-profile
-# skips the `nix profile` step for a host that gets direnv, devenv and ajmux
-# some other way (the README's "your own configuration"). `doctor` changes
-# nothing and reports every prerequisite, `claude doctor`, the managed rules,
-# the worker accounts and, run in a jail, the repo's settings symlink
-# and direnv approval; exit 1 when one ai-jailer needs is missing. claude
-# and tmux are not among them: no host claude is an info line (the VS Code
-# extension brings its own, a repo's ai-jail.claudeCode.enable the CLI), no
-# tmux a warning (ajmux brings its own; attaching by hand needs one). That is
-# the host half of the runbook's verification section. --dry-run prints every
-# step and the command it would run, runs none of them and never calls sudo;
-# --verbose prints each command first.
+# doctor changes nothing. It reports every prerequisite, the managed rules,
+# the worker accounts and, inside a jail, the repo. Exit 1 when something
+# ai-jailer needs is missing.
 #
-# Root steps, in this order:
-#  - /etc/nix/nix.conf: the devenv cache (also flakes where the installer
-#    left them off). DEVENV_CACHE and DEVENV_KEY come from
-#    pkgs/devenv-cache.nix through pkgs/aj.nix.
-#  - The user-namespace setting the Claude Code sandbox cannot run without,
-#    where the kernel confines unprivileged user namespaces. Ubuntu 23.10 and
-#    later do it through AppArmor (kernel.apparmor_restrict_unprivileged_userns
-#    = 1): the fix is the profile from the Claude Code sandboxing docs,
-#    /etc/apparmor.d/bwrap, an unconfined profile for /usr/bin/bwrap with
-#    `userns`, then an AppArmor reload; the machine-wide sysctl stays as it
-#    is. Older Debian kernels gate them with kernel.unprivileged_userns_clone:
-#    a sysctl plus a drop-in under /etc/sysctl.d. Either is asked for on its
-#    own (--yes answers it); declined, the command is printed for later and
-#    doctor keeps reporting it.
-#  - `managed`: /etc/claude-code is linked to the managed tree (`sudo nix
-#    build <ref>#managed --out-link /etc/claude-code`, `#managed-wsl` under
-#    WSL; the out-link is an indirect GC root). A `path:<checkout>` ref
-#    carries the checkout's host.nix (the host-wide options: extra deny
-#    rules, domains, memory and commit switches); a `github:` ref builds
-#    the defaults, which bootstrap says when a host.nix sits in the cwd.
-#    Claude Code reads /etc/claude-code/managed-settings.json for every user
-#    of the host, the owner's sessions included. A path that exists and is
-#    not a store symlink is never replaced; a link via /etc/static is the
-#    old NixOS module's. On NixOS the link survives rebuilds (setup-etc only
-#    removes links into /etc/static).
-#  - With --workers (or --worker, repeatable): the group `agents`, and per
-#    org c the user w-c (primary group w-c, member of agents, home 0750,
-#    shell bash), the owner added to group w-c so that the owner can read the
-#    worker's home, and `loginctl enable-linger w-c` so the worker's tmux
-#    survives logout. A user that exists is not recreated. Each command is
-#    guarded, so a second run runs none of them. The orgs are recorded in
-#    the receipt (root.workers).
-#  - With --workers, unless --owner-sudo none, and never on NixOS:
-#    /etc/sudoers.d/ai-jailer holding `<owner> ALL=(%agents)
-#    NOPASSWD: ALL` (`password` drops NOPASSWD:), checked with `visudo -cf`;
-#    a file that fails the check is removed and the run stops. --owner is the
-#    login (default $USER). This is the rule ajmux needs to hand a session to
-#    a worker.
-# Then, per worker, `sudo -u w-c -i nix run <ref>#aj -- bootstrap
-# --no-root --yes --jailer <ref>`: the profile packages and the user steps
-# below, as that user, plus a git identity default (user.name "Claude (c)",
-# user.email claude-c@<host>.invalid) where none is set. --jailer is passed
-# because `sudo -i` drops AI_JAILER_REF. A `path:` ref under the owner's home
-# is unreadable to a worker (0700 homes), so it is prefetched into the store
-# once (`nix flake prefetch`) and the worker gets that store path, the same
-# revision. A failure there is a warning: the root steps are already done.
-# Home Manager standalone per worker is the alternative to this step (the
-# runbook describes it); bootstrap does not use Home Manager.
+# reset reverses what the receipt lists (~/.local/state/ai-jailer/
+# receipt.json) and asks first. The /etc/claude-code link goes, so the host
+# enforces nothing afterwards; Nix goes too when scripts/install.sh
+# installed it. The worker users, their homes and the code root stay.
 #
-# --account-sync and --no-account-sync are gone: the claude.ai sync keys live
-# in the managed settings and bootstrap writes no user-scope settings block.
-# An old command line fails with "unknown argument".
+#   --workers <a,b>     one worker user per org; --worker <name> adds one
+#   --owner <login>     the login that drives the workers (default: you)
+#   --owner-sudo <how>  the sudo rule: nopasswd (default), password, none
+#   --no-root           skip the root steps, and with them --workers
+#   --no-profile        skip `nix profile`: the tools come some other way
+#   --trusted-user      add yourself to Nix's trusted-users. Not needed, and
+#                       a trusted user can hand the daemon any option
+#   --code-root <dir>   where the repos live (default ~/code/git)
+#   --jailer <flakeref> the ai-jailer ref; else AI_JAILER_REF, the
+#                       receipt's, github:bilibo/ai-jailer
+#   --dry-run           print every step, run none, never call sudo
+#   --yes               no confirmation prompts
+#   --verbose           print each command before it runs
 #
-# The ai-jailer ref (what `nix profile add` installs from): --jailer, else
-# AI_JAILER_REF, else the receipt's, else github:bilibo/ai-jailer. A `path:/nix/store/...` ref warns: an
-# upgrade this user runs cannot move it; the owner's `aj upgrade --workers`
-# does, with a fresh snapshot.
-#
-# --trusted-user adds the owner (you) to Nix's trusted-users. Not needed: the
-# devenv cache goes into the root-owned nix.conf as a substituter, which is
-# what devenv checks for. A trusted user can pass any option to the daemon
-# (unsigned paths, other caches, sandbox off), and agents run as you, so the
-# default keeps that door shut. Workers are never trusted users.
-#
-# Never env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB in ~/.claude/settings.json: in
-# user scope it turns the sandbox's Bash auto-allow off, so every command
-# prompts; a copy an earlier bootstrap wrote is removed.
-#
-# The receipt, ~/.local/state/ai-jailer/receipt.json, lists what
-# bootstrap put on the host: profile packages, files (whole files, marker
-# blocks, merged keys), dnf packages, root steps and worker orgs, the
-# VS Code extension, the ai-jailer ref and revision. Each bootstrap and upgrade
-# adds to it. Receipts written before 2026-10-27 may list the strictAllowlist
-# and sync keys of ~/.claude/settings.json; reset still strips them.
-#
-# `reset` reverses what the receipt lists and removes the receipt last;
-# without a receipt nothing is recorded and it does nothing. It removes the
-# sudoers file, /etc/claude-code (only a symlink into the store) and each
-# recorded worker's linger. It does not delete the worker users, whose homes
-# hold repos and a login: it prints `sudo userdel -r w-<c>` for each. When
-# the receipt says scripts/install.sh ran the nix-installer, Nix goes too
-# (/nix/nix-installer uninstall); the dnf packages likewise. It asks before
-# it starts unless --yes; it never touches the code root, so delete a test
-# repo by hand.
+# docs/runbook.md section 4 has the host table and the NixOS differences.
 # shellcheck disable=SC1091,SC2015,SC2016,SC2088  # system files are not inputs; `x && ok || miss` reports, ok never fails; jq filters go through jq_edit; ~ in messages is text
 set -euo pipefail
 
@@ -166,6 +64,7 @@ CODE_ROOT="${AI_JAILER_CODE_ROOT:-$HOME/code/git}"
 AI_JAILER_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 AI_JAILER_REF="${AI_JAILER_REF:-path:$AI_JAILER_DIR}"
 AI_JAILER_REF_FROM="${AI_JAILER_REF_FROM:-checkout}"
+# --help prints the header above, up to the shellcheck line.
 usage() { sed -n '/^#   aj /,/^# shellcheck/{/^# shellcheck/q;s/^# \{0,1\}//;p;}' "$0"; }
 ORIG_ARGS=("$@")   # upgrade hands them to the upgraded aj (handover_steps)
 add_workers() { # add_workers <comma list>: orgs, in order, no repeats
@@ -308,7 +207,9 @@ jq_edit() { # jq_edit <file> <jq args...>: rewrite a JSON file, the rest of it k
   jq "$@" "$f" >"$tmp" && mv "$tmp" "$f"
 }
 
-root_write() { # root_write <path> <content> [<NixOS option> [<mode>]]: a root-owned file (0644 unless <mode>), through sudo
+# root_write <path> <content> [<NixOS option> [<mode>]]: a root-owned file
+# (0644 unless <mode>), through sudo.
+root_write() {
   local tmp real mode="${4:-0644}"
   # A store symlink is the NixOS configuration's: `install` would replace it
   # with a plain file that the next rebuild silently restores.
@@ -319,10 +220,11 @@ root_write() { # root_write <path> <content> [<NixOS option> [<mode>]]: a root-o
   run sudo install -m "$mode" -o root -g root "$tmp" "$1"; rm -f "$tmp"
 }
 
-# root_link <path> <flakeref#attr>: <path> becomes an out-link of the build,
-# through sudo. A path that is not a symlink into the store is someone else's
-# and is never replaced. nix goes in by full path: sudo's secure_path may not
-# list the profile (suspected, not confirmed) (RAU-40).
+# root_link <path> <flakeref#attr>: <path> becomes an out-link of the build
+# (an indirect GC root), through sudo. A path that is not a symlink into the
+# store is someone else's and is never replaced. nix goes in by full path:
+# sudo's secure_path may not list the profile (suspected, not confirmed;
+# RAU-40).
 root_link() {
   local path="$1" ref="$2" want nixbin
   if [ -e "$path" ] || [ -L "$path" ]; then
@@ -383,7 +285,9 @@ selinux_on() { command -v getenforce >/dev/null 2>&1 && command -v matchpathcon 
 # ---------------------------------------------------------------- receipt
 # What this run put on the host, or found there in ai-jailer's shape;
 # write_receipt adds it to the receipt. scripts/install.sh hands over its own
-# root steps in AI_JAILER_ROOT_PACKAGES and AI_JAILER_ROOT_STEPS.
+# root steps in AI_JAILER_ROOT_PACKAGES and AI_JAILER_ROOT_STEPS. reset
+# removes what the receipt lists, not what this version would write, so a
+# receipt from an older version stays reversible (RAU-38).
 R_PROFILE=(); R_FILES=(); R_EXT=(); R_WORKERS=()
 read -r -a R_ROOT_PKGS <<<"${AI_JAILER_ROOT_PACKAGES:-}"
 read -r -a R_ROOT_STEPS <<<"${AI_JAILER_ROOT_STEPS:-}"
@@ -433,6 +337,7 @@ rq() { jq -r "$1" <<<"$RECEIPT_JSON"; }  # rq <filter>: from the receipt, one va
 # nix-installer (scripts/install.sh). From here on the steps are the same.
 HOST=generic; WSL=0
 [ "${ID:-}" = fedora ] && [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null && HOST=fedora
+# os-release as well: /etc/NIXOS is not visible from inside a sandboxed session.
 { [ -e "$NIXOS_MARKER" ] || [ "${ID:-}" = nixos ]; } && HOST=nixos
 { [ -e "$WSL_MARKER" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; } && WSL=1
 MANAGED_ATTR=managed; [ "$WSL" = 0 ] || MANAGED_ATTR=managed-wsl
@@ -443,7 +348,8 @@ root_steps() {
   local conf="$NIX_CONF" want flakes=""
   if [ "$HOST" = nixos ]; then nixos_nix_conf; userns_steps; managed_step; worker_steps; sudoers_step; return 0; fi
   # Flakes only when nothing else turns them on (Fedora's package does, the
-  # nix-installer leaves them off); trusted-users only on request (header).
+  # nix-installer leaves them off). trusted-users only on request: a trusted
+  # user can hand the daemon any option, and agents run as that user.
   want=$(without_block "$conf")
   grep -q -E '^experimental-features' <<<"$want" || flakes="
 experimental-features = nix-command flakes"
@@ -811,7 +717,8 @@ NIX_SSL_CERT_FILE=${CA_BUNDLE:-/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
       record_file keys "$cs" "${jk[@]}"
     fi
   fi
-  # An earlier bootstrap wrote this key, so it is removed for everyone (header).
+  # Earlier bootstraps wrote this key. In user scope it turns the sandbox's
+  # Bash auto-allow off, so it is removed from every user's file (RAU-36).
   if ! hm_owned "$cs" && jq -e '.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' "$cs" >/dev/null 2>&1; then
     step "remove env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB from $cs (it turns the sandbox's Bash auto-allow off)"
     jq_edit "$cs" 'del(.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB) | if .env == {} then del(.env) else . end'
@@ -1052,8 +959,8 @@ report() {
   [ "$WSL" = 0 ] || host="WSL2 ($host)"
   echo "host: $host ($(uname -m))$(selinux_on && echo ", SELinux $(getenforce)")${route:+, $route}"
   echo "aj: ${AI_JAILER_REV:-unknown}, ref $AI_JAILER_REF ($AI_JAILER_REF_FROM)"
-  # The repo shell's direnv exports the project (pkgs/ajmux.nix), so it is a
-  # fact about this cwd, never MISSING.
+  # The repo shell exports the project (devenv/devenv.nix), so it is a fact
+  # about this cwd, never MISSING.
   info "AI_JAILER_CODE_ROOT ${AI_JAILER_CODE_ROOT:-$CODE_ROOT (default)}"
   no_project="unset: not inside a jail's shell"
   info "AI_JAIL_PROJECT ${AI_JAIL_PROJECT:-$no_project}"

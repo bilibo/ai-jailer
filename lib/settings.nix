@@ -44,6 +44,14 @@
   # with them can move data out of the repo without a command the hook sees.
   # Jail and repo; the law leaves the jailer's account alone.
   allowConnectors ? false,
+  # Jail only: whether az, aws and gcloud find the worker's login in a
+  # session. Off, the sandbox hides `cloudStores` and the CLIs have none.
+  # On, sandboxed commands read the three directories and write the two
+  # outside ~/.config; the law's Read rules still refuse the Read tool, and
+  # the hook still refuses the logins, token exports and secret reads of its
+  # rule 3. What a session can then do in the cloud is what the login's
+  # role allows.
+  allowCloudCli ? false,
   extraDeny ? [ ],
   extraAllowedDomains ? [ ],
   # Law only.
@@ -86,6 +94,13 @@ let
     inherit allowLocalCommits allowMemoryEdits;
   };
   sshSandbox = import ./ssh-sandbox.nix;
+  # Where az, aws and gcloud keep a login. The law's Read rules
+  # (lib/deny-rules.nix) and the hook's cred_files name the same three.
+  cloudStores = [
+    "~/.azure"
+    "~/.aws"
+    "~/.config/gcloud"
+  ];
   envGuard = "${hookDir}/env-guard.sh";
   tmuxNotify = "${hookDir}/tmux-notify.sh";
   tmuxWaiting = {
@@ -115,7 +130,7 @@ let
     filesystem
     // lib.optionalAttrs readFence {
       denyRead = (filesystem.denyRead or [ ]) ++ [ "~/" ];
-      allowRead = fenceAllowRead ++ extraAllowRead;
+      allowRead = (filesystem.allowRead or [ ]) ++ fenceAllowRead ++ extraAllowRead;
     };
   # Paths under a checkout that no shell command may write: the agent's own
   # rules, its hooks and skills, git's exec vectors, and devenv's
@@ -265,8 +280,12 @@ let
       }
       // sandboxScalars
       // {
-        # The GitHub tokens: no push or `gh` write credential inside the
-        # sandbox, the layer the hook's text rules lean on.
+        # Secrets the launching shell may carry, stripped whatever
+        # allowCloudCli says: a variable has no text rule to guard it. The
+        # AWS key id goes with its secret, since aws stops on half a pair
+        # instead of falling back to the login. The GitHub tokens: no push
+        # or `gh` write credential inside the sandbox, the layer the hook's
+        # text rules lean on.
         credentials.envVars =
           map
             (name: {
@@ -276,6 +295,12 @@ let
             [
               "ARM_CLIENT_SECRET"
               "AZURE_CLIENT_SECRET"
+              "AWS_ACCESS_KEY_ID"
+              "AWS_SECRET_ACCESS_KEY"
+              "AWS_SESSION_TOKEN"
+              "GOOGLE_CREDENTIALS"
+              "GOOGLE_OAUTH_ACCESS_TOKEN"
+              "CLOUDSDK_AUTH_ACCESS_TOKEN"
               "GITHUB_TOKEN"
               "GH_TOKEN"
               "GH_ENTERPRISE_TOKEN"
@@ -288,44 +313,62 @@ let
               mode = "deny";
             }
           ];
-        filesystem = withFence {
-          # devenv re-fetches the `path:` ai-jailer input on every `direnv export`;
-          # Nix needs a writable cache for the fetcher lock, else devenv never
-          # loads inside the sandbox and every Claude command runs without it.
-          allowWrite = [
-            "~/.cache/nix"
-            "~/.cache/devenv"
-          ];
-          # The repo's .claude/worktrees must stay writable, so repoProtected
-          # names the settings files one by one. On Linux and WSL2 a leading
-          # `**/` covers nothing (only a trailing `/**` works); the entries
-          # stay for macOS, the repo file lists the same paths literally, and
-          # the hook refuses shell writes to them (RAU-36).
-          denyWrite = [
-            "~/.claude"
-            "~/.config"
-            "~/.azure"
-            "~/.ssh"
-          ]
-          ++ map (p: "**/${p}") repoProtected;
-          # The worker's own login and tokens. The owner's files are out of
-          # reach through the 0750 homes, not through this list.
-          denyRead = [
-            "~/.claude/.credentials.json"
-            "~/.claude.json"
-            "~/.azure"
-            # GitHub tokens on disk: gh without a keyring, git's store helper.
-            "~/.config/gh"
-            "~/.git-credentials"
-          ]
-          ++ sshSandbox.filesystem.denyRead
-          # WSL interop: a denied directory becomes an empty tmpfs, so the
-          # interop socket and the Windows drives disappear for sandboxed commands.
-          ++ lib.optionals (platform == "wsl") [
-            "/run/WSL"
-            "/mnt/c"
-          ];
-        };
+        filesystem = withFence (
+          {
+            # devenv re-fetches the `path:` ai-jailer input on every `direnv export`;
+            # Nix needs a writable cache for the fetcher lock, else devenv never
+            # loads inside the sandbox and every Claude command runs without it.
+            allowWrite = [
+              "~/.cache/nix"
+              "~/.cache/devenv"
+            ]
+            # az and aws rewrite their token caches when a token is renewed.
+            # gcloud's directory cannot be opened for writing: `allowWrite`
+            # loses to a `denyWrite` parent, here ~/.config (Claude Code
+            # 2.1.308, RAU-36).
+            ++ lib.optionals allowCloudCli [
+              "~/.azure"
+              "~/.aws"
+            ];
+            # The repo's .claude/worktrees must stay writable, so repoProtected
+            # names the settings files one by one. On Linux and WSL2 a leading
+            # `**/` covers nothing (only a trailing `/**` works); the entries
+            # stay for macOS, the repo file lists the same paths literally, and
+            # the hook refuses shell writes to them (RAU-36).
+            denyWrite = [
+              "~/.claude"
+              "~/.config"
+              "~/.ssh"
+            ]
+            ++ lib.optionals (!allowCloudCli) [
+              "~/.azure"
+              "~/.aws"
+            ]
+            ++ map (p: "**/${p}") repoProtected;
+            # The worker's own login and tokens. The owner's files are out of
+            # reach through the 0750 homes, not through this list.
+            denyRead = [
+              "~/.claude/.credentials.json"
+              "~/.claude.json"
+              # GitHub tokens on disk: gh without a keyring, git's store helper.
+              "~/.config/gh"
+              "~/.git-credentials"
+            ]
+            ++ lib.optionals (!allowCloudCli) cloudStores
+            ++ sshSandbox.filesystem.denyRead
+            # WSL interop: a denied directory becomes an empty tmpfs, so the
+            # interop socket and the Windows drives disappear for sandboxed commands.
+            ++ lib.optionals (platform == "wsl") [
+              "/run/WSL"
+              "/mnt/c"
+            ];
+          }
+          # The law's `Read(~/.azure/**)` rules reach a worker's sandbox as
+          # denyRead whatever this file lists; `allowRead` on the same
+          # directory opens it to sandboxed commands again and leaves the
+          # Read tool refused (Claude Code 2.1.308, RAU-36).
+          // lib.optionalAttrs allowCloudCli { allowRead = cloudStores; }
+        );
         network = {
           # go-plugin (terraform, tflint) and the Nix daemon need AF_UNIX, so the
           # seccomp socket filter cannot be used with this stack.
@@ -369,7 +412,8 @@ let
         # Not devenv.local.*: a literal denyWrite entry is masked as an
         # unreadable device node whether or not the file exists, and devenv
         # reads both files when present, so listing them broke every shell
-        # evaluation inside the sandbox. The hook refuses writes to them by name (RAU-36).
+        # evaluation inside the sandbox. The hook refuses writes to them by
+        # name (RAU-36).
         denyWrite = map (p: "${repoRoot}/${p}") (
           lib.filter (p: !lib.hasPrefix "devenv.local." p) repoProtected
         );

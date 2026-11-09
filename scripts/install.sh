@@ -4,32 +4,24 @@
 #                      [other aj bootstrap flags]
 #   curl -fsSL https://raw.githubusercontent.com/bilibo/ai-jailer/main/scripts/install.sh | bash -s -- [flags]
 #
-# The one install route, run once on a plain Linux host: what has to happen
-# before `nix run` works, then `aj bootstrap` for the rest, then, from a
-# checkout, `aj init` on the checkout itself.
+# Run once on a Linux host: what has to happen before `nix run` works, then
+# `aj bootstrap` for the rest, then, from a checkout, `aj init` on the
+# checkout itself.
+#   - Fedora 44 or newer (the first release that packages nix): `dnf
+#     install`, the SELinux label for the daemon socket, and the socket,
+#     which the package leaves disabled.
+#   - Any other Linux: the nix-installer, downloaded to a file first so a
+#     failed download runs nothing. It confirms on the terminal; --yes passes
+#     --no-confirm and is required when piped into bash.
+#   - NixOS: Nix is the system's, nothing is installed.
 #
-# Fedora 44 or newer (the first release that packages nix and nix-daemon):
-# `dnf install`, the SELinux label systemd needs to create the daemon socket
-# in /nix, and the socket itself, which the nix-daemon package leaves
-# disabled. Any other Linux: the nix-installer from artifacts.nixos.org
-# (multi-user daemon; its uninstaller at /nix/nix-installer is what `aj
-# reset` runs), downloaded to a file first so a failed download runs
-# nothing. It asks for sudo itself and confirms on the terminal; --yes
-# passes --no-confirm and is required when piped into bash. It leaves flakes
-# off, so the script turns them on for its own nix calls and bootstrap
-# writes them into nix.conf. NixOS (/etc/NIXOS, or ID=nixos in os-release):
-# Nix is the system's, nothing is downloaded.
-#
-# The ai-jailer ref: AI_JAILER_REF, else this checkout when the script runs
-# from one (path:<checkout>), else the published repo. The root steps done
-# here reach bootstrap's receipt through AI_JAILER_ROOT_PACKAGES and
-# AI_JAILER_ROOT_STEPS, so `aj reset` reverses them. --check reports the
-# root steps and changes nothing; --dry-run does the same, then hands over
-# to bootstrap's --dry-run when Nix can already run. --no-init skips the
-# checkout's shell. Every other flag goes to bootstrap (--dry-run, --yes and
-# --verbose to init as well). The worker users, the managed link and the
-# sudo rule are bootstrap's, which needs the ai-jailer ref built; --check
-# prints them as bootstrap would run them.
+# --check prints the root steps, bootstrap's included, and changes nothing;
+# --dry-run does the same and, when Nix already runs, hands over to
+# bootstrap's --dry-run. --no-init skips the checkout's shell. Every other
+# flag goes to bootstrap; --dry-run, --yes and --verbose go to init as well.
+# The root steps done here reach bootstrap's receipt through
+# AI_JAILER_ROOT_PACKAGES and AI_JAILER_ROOT_STEPS, so `aj reset` reverses
+# them.
 set -euo pipefail
 
 INSTALLER_URL=https://artifacts.nixos.org/nix-installer
@@ -104,7 +96,7 @@ installer_steps() {
 
 # worker_plan <ref>: the root commands `aj bootstrap` would run for the
 # worker flags in $pass. Printed, never run: bootstrap owns them
-# (pkgs/aj/bootstrap.sh, "Root steps").
+# (root_steps in pkgs/aj/bootstrap.sh).
 worker_plan() {
   local ref="$1" i c w owner="${USER:-$(id -un)}" mode=nopasswd tag="NOPASSWD: " prefix="${AI_JAILER_WORKER_PREFIX:-w-}"
   local -a workers=() names

@@ -9,11 +9,8 @@
 # pattern must match. The pattern is check.sh's `blocked` plus the hook's
 # own message, as the credential case expects it.
 #
-# Then `aj check --dry-run` on fake repos, one per sandbox state. Every
-# case is listed in each, none skipped, including sudo-text and home-fence; a
-# repo file that turns the sandbox off draws one warning and changes nothing else; a
-# masked settings file (/dev/null) draws none. Last, which claude the
-# sessions would run (stub direnv), and the exit 69 when there is none.
+# Then `aj check --dry-run` on fake repos, one per sandbox state, which
+# claude the sessions would run (stub direnv), and the login pre-flight.
 set -uo pipefail
 aj="${1:?usage: check-parser-test.sh <aj> <fixtures-dir>}"
 fixtures="${2:?usage: check-parser-test.sh <aj> <fixtures-dir>}"
